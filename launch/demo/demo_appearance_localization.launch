@@ -20,6 +20,8 @@
 		<param name="Mem/STMSize" type="string" value="1"/>               <!-- 1 location in short-term memory -->
 		<param name="Mem/IncrementalMemory" type="string" value="false"/>  <!-- false = Localization mode-->
 		<param name="Mem/BadSignaturesIgnored" type="string" value="true"/>
+		<param name="Kp/DetectorStrategy" type="string" value="0"/>   <!-- use SURF -->
+		<param name="Kp/NNStrategy" type="string" value="1"/>         <!-- kdTree -->
 	</node>
 	
 	<!-- visualization of the "infoEx" topic sent by rtabmap node -->
@@ -36,7 +38,7 @@
 	<node name="camera" pkg="rtabmap_ros" type="camera" output="screen">
 		<remap from="image" to="image"/>
 		<param name="device_id" value="0" type="int"/>
-		<param name="video_or_images_path" value="$(find rtabmap_ros)/data" type="string"/>
+		<param name="video_or_images_path" value="$(find rtabmap_ros)/launch/data/demo_appearance" type="string"/>
 		<param name="frame_rate" value="2.0" type="double"/>
 		<param name="width" value="0" type="int"/>
 		<param name="height" value="0" type="int"/>
