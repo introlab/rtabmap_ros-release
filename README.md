@@ -1,7 +1,7 @@
 rtabmap_ros
 ===========
 
-RTAB-Map ROS package.
+RTAB-Map's ROS package.
 
 For more information, demos and tutorials about this package, visit the [rtabmap_ros](http://wiki.ros.org/rtabmap_ros) page on the ROS wiki.
 
@@ -26,7 +26,7 @@ source /opt/ros/hydro/setup.bash
 source ~/catkin_ws/devel/setup.bash
 ```
 
- 1. First, you need to install the RTAB-Map standalone libraries.
+ 1. First, you need to install the RTAB-Map standalone libraries (**don't checkout in the Catkin workspace**).
  
  ```
 $ git clone https://github.com/introlab/rtabmap.git rtabmap
@@ -53,7 +53,7 @@ $ cd build
 $ make
 $ make install
 
-$ cd ~/catkin_ws/src/rtabmap
+$ roscd rtabmap_ros
 $ git pull origin master
 $ cd ~/catkin_ws
 $ catkin_make
