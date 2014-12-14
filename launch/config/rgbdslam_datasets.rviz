@@ -5,9 +5,10 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Global Options1
-        - /TF1/Frames1
         - /Info1
-      Splitter Ratio: 0.411058
+        - /PointCloud23
+        - /PointCloud23/Status1
+      Splitter Ratio: 0.529595
     Tree Height: 422
   - Class: rviz/Selection
     Name: Selection
@@ -82,38 +83,45 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
-        base_link:
+        kinect:
           Value: true
-        camera_depth_frame:
-          Value: true
-        camera_depth_optical_frame:
-          Value: true
-        camera_link:
-          Value: true
-        camera_rgb_frame:
-          Value: true
-        camera_rgb_optical_frame:
+        kinect_est:
           Value: true
         map:
           Value: true
         odom:
           Value: true
+        openni_camera:
+          Value: true
+        openni_depth_frame:
+          Value: true
+        openni_depth_optical_frame:
+          Value: true
+        openni_rgb_frame:
+          Value: true
+        openni_rgb_optical_frame:
+          Value: true
+        world:
+          Value: true
       Marker Scale: 1
       Name: TF
       Show Arrows: true
       Show Axes: true
-      Show Names: true
+      Show Names: false
       Tree:
-        map:
-          odom:
-            base_link:
-              camera_link:
-                camera_depth_frame:
-                  camera_depth_optical_frame:
-                    {}
-                camera_rgb_frame:
-                  camera_rgb_optical_frame:
-                    {}
+        world:
+          kinect:
+            openni_camera:
+              openni_depth_frame:
+                openni_depth_optical_frame:
+                  {}
+              openni_rgb_frame:
+                openni_rgb_optical_frame:
+                  {}
+          map:
+            odom:
+              kinect_est:
+                {}
       Update Interval: 0
       Value: true
     - Class: rviz/Image
@@ -151,7 +159,7 @@ Visualization Manager:
       Min Color: 0; 0; 0
       Min Intensity: 0
       Name: MapCloud
-      Node filtering angle (degrees): 30
+      Node filtering angle (degrees): 15
       Node filtering radius (m): 0.1
       Position Transformer: XYZ
       Size (Pixels): 3
@@ -166,10 +174,68 @@ Visualization Manager:
       Name: Info
       Topic: /rtabmap/info
       Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: Intensity
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: PointCloud2
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.01
+      Style: Points
+      Topic: /rtabmap/odom_last_frame
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 1.17984
+        Min Value: 0.0147058
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 85; 255; 127
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: PointCloud2
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.01
+      Style: Points
+      Topic: /rtabmap/odom_local_map
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: map
+    Fixed Frame: world
     Frame Rate: 30
   Name: root
   Tools:
@@ -186,22 +252,22 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 6.35253
+      Distance: 3.32013
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.06
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 1.14572
-        Y: 0.168097
-        Z: -1.13136
+        X: -0.216951
+        Y: 0.819032
+        Z: 1.30659
       Name: Current View
       Near Clip Distance: 0.01
-      Pitch: 0.879797
+      Pitch: 0.554801
       Target Frame: base_link
       Value: Orbit (rviz)
-      Yaw: 3.73418
+      Yaw: 4.9892
     Saved: ~
 Window Geometry:
   Displays:
@@ -221,5 +287,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1273
-  X: 86
-  Y: 115
+  X: 316
+  Y: 95
