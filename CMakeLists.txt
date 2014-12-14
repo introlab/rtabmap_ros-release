@@ -13,7 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(RTABMap 0.7 REQUIRED)
+find_package(RTABMap 0.8 REQUIRED)
 
 #Qt stuff
 FIND_PACKAGE(Qt4 COMPONENTS QtCore QtGui REQUIRED)
@@ -38,11 +38,12 @@ link_directories( ${OGRE_LIBRARY_DIRS} )
 add_message_files(
    FILES
    Info.msg
-   InfoEx.msg
    KeyPoint.msg
    MapData.msg
+   Graph.msg
    NodeData.msg
-   Bytes.msg
+   Link.msg
+   OdomInfo.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -80,7 +81,6 @@ catkin_package(
                  image_transport tf tf_conversions laser_geometry pcl_conversions 
                  pcl_ros nodelet dynamic_reconfigure rviz message_filters class_loader
                  stereo_msgs
-  DEPENDS RTABMap
 )
 
 ###########
@@ -147,10 +147,6 @@ target_link_libraries(rtabmap rtabmap_ros ${Libraries})
 add_executable(rgbd_odometry src/RGBDOdometryNode.cpp)
 target_link_libraries(rgbd_odometry rtabmap_ros ${Libraries})
 
-#deprecated node
-add_executable(visual_odometry src/VisualOdometryDEPRECATED.cpp)
-target_link_libraries(visual_odometry ${Libraries})
-
 add_executable(stereo_odometry src/StereoOdometryNode.cpp)
 target_link_libraries(stereo_odometry rtabmap_ros ${Libraries})
 
@@ -175,6 +171,9 @@ target_link_libraries(data_recorder rtabmap_ros ${QT_LIBRARIES} ${Libraries})
 
 add_executable(data_player src/DbPlayerNode.cpp)
 target_link_libraries(data_player rtabmap_ros ${QT_LIBRARIES} ${Libraries})
+
+add_executable(odom_msg_to_tf src/OdomMsgToTFNode.cpp)
+target_link_libraries(odom_msg_to_tf rtabmap_ros ${Libraries})
 
 #############
 ## Install ##
@@ -229,6 +228,13 @@ install(DIRECTORY
    launch/data
    launch/demo
    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
+)
+
+## install plugins/nodelets xml
+install(FILES
+   nodelet_plugins.xml
+   plugin_description.xml
+   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
 #############
