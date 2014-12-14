@@ -57,7 +57,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "rtabmap/core/util3d.h"
 
-namespace rtabmap
+namespace rtabmap_ros
 {
 
 class ObstaclesDetection : public nodelet::Nodelet
@@ -68,7 +68,8 @@ public:
 		normalEstimationRadius_(0.05),
 		groundNormalAngle_(M_PI_4),
 		minClusterSize_(20),
-		maxObstaclesHeight_(0)
+		maxObstaclesHeight_(0),
+		waitForTransform_(false)
 	{}
 
 	virtual ~ObstaclesDetection()
@@ -87,6 +88,7 @@ private:
 		pnh.param("ground_normal_angle", groundNormalAngle_, groundNormalAngle_);
 		pnh.param("min_cluster_size", minClusterSize_, minClusterSize_);
 		pnh.param("max_obstacles_height", maxObstaclesHeight_, maxObstaclesHeight_);
+		pnh.param("wait_for_transform", waitForTransform_, waitForTransform_);
 
 		cloudSub_ = nh.subscribe("cloud", 1, &ObstaclesDetection::callback, this);
 
@@ -100,17 +102,20 @@ private:
 	{
 		if(groundPub_.getNumSubscribers() || obstaclesPub_.getNumSubscribers())
 		{
-			Transform localTransform;
+			rtabmap::Transform localTransform;
 			try
 			{
-				tf::StampedTransform tmp;
-				if(!tfListener_.waitForTransform(frameId_, cloudMsg->header.frame_id, cloudMsg->header.stamp, ros::Duration(1)))
+				if(waitForTransform_)
 				{
-					ROS_WARN("Could not get transform from %s to %s after 1 second!", frameId_.c_str(), cloudMsg->header.frame_id.c_str());
-					return;
+					if(!tfListener_.waitForTransform(frameId_, cloudMsg->header.frame_id, cloudMsg->header.stamp, ros::Duration(1)))
+					{
+						ROS_WARN("Could not get transform from %s to %s after 1 second!", frameId_.c_str(), cloudMsg->header.frame_id.c_str());
+						return;
+					}
 				}
+				tf::StampedTransform tmp;
 				tfListener_.lookupTransform(frameId_, cloudMsg->header.frame_id, cloudMsg->header.stamp, tmp);
-				localTransform = transformFromTF(tmp);
+				localTransform = rtabmap_ros::transformFromTF(tmp);
 			}
 			catch(tf::TransformException & ex)
 			{
@@ -123,13 +128,13 @@ private:
 			pcl::IndicesPtr ground, obstacles;
 			if(cloud->size())
 			{
-				cloud = util3d::transformPointCloud<pcl::PointXYZ>(cloud, localTransform);
+				cloud = rtabmap::util3d::transformPointCloud<pcl::PointXYZ>(cloud, localTransform);
 
 				if(maxObstaclesHeight_ > 0)
 				{
-					cloud = util3d::passThrough<pcl::PointXYZ>(cloud, "z", std::numeric_limits<int>::min(), maxObstaclesHeight_);
+					cloud = rtabmap::util3d::passThrough<pcl::PointXYZ>(cloud, "z", std::numeric_limits<int>::min(), maxObstaclesHeight_);
 				}
-				util3d::segmentObstaclesFromGround<pcl::PointXYZ>(cloud,
+				rtabmap::util3d::segmentObstaclesFromGround<pcl::PointXYZ>(cloud,
 						ground, obstacles, normalEstimationRadius_, groundNormalAngle_, minClusterSize_);
 			}
 
@@ -174,6 +179,7 @@ private:
 	double groundNormalAngle_;
 	int minClusterSize_;
 	double maxObstaclesHeight_;
+	bool waitForTransform_;
 
 	tf::TransformListener tfListener_;
 
@@ -183,6 +189,6 @@ private:
 	ros::Subscriber cloudSub_;
 };
 
-PLUGINLIB_EXPORT_CLASS(rtabmap::ObstaclesDetection, nodelet::Nodelet);
+PLUGINLIB_EXPORT_CLASS(rtabmap_ros::ObstaclesDetection, nodelet::Nodelet);
 }
 
