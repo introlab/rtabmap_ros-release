@@ -1,3 +1,24 @@
+## rtabmap_ros (indigo) - 0.8.0-0
+
+The packages in the `rtabmap_ros` repository were released into the `indigo` distro by running `/usr/bin/bloom-release rtabmap_ros --track indigo --rosdistro indigo` on `Sun, 14 Dec 2014 22:32:05 -0000`
+
+The `rtabmap_ros` package was released.
+
+Version of package(s) in repository `rtabmap_ros`:
+- upstream repository: https://github.com/introlab/rtabmap_ros.git
+- release repository: https://github.com/introlab/rtabmap_ros-release.git
+- rosdistro version: `0.7.3-0`
+- old version: `0.7.3-0`
+- new version: `0.8.0-0`
+
+Versions of tools used:
+- bloom version: `0.5.15`
+- catkin_pkg version: `0.2.6`
+- rosdep version: `0.11.0`
+- rosdistro version: `0.4.0`
+- vcstools version: `0.1.36`
+
+
 ## rtabmap_ros (hydro) - 0.8.0-0
 
 The packages in the `rtabmap_ros` repository were released into the `hydro` distro by running `/usr/bin/bloom-release rtabmap_ros --track hydro --rosdistro hydro` on `Sun, 14 Dec 2014 22:28:09 -0000`
