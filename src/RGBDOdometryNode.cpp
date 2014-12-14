@@ -46,11 +46,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 using namespace rtabmap;
 
-class RGBDOdometry : public OdometryROS
+class RGBDOdometry : public rtabmap_ros::OdometryROS
 {
 public:
 	RGBDOdometry(int argc, char * argv[]) :
-		OdometryROS(argc, argv),
+		rtabmap_ros::OdometryROS(argc, argv),
 		sync_(0)
 	{
 		ros::NodeHandle nh;
@@ -111,6 +111,14 @@ public:
 			tf::StampedTransform localTransform;
 			try
 			{
+				if(this->waitForTransform())
+				{
+					if(!this->tfListener().waitForTransform(this->frameId(), image->header.frame_id, image->header.stamp, ros::Duration(1)))
+					{
+						ROS_WARN("Could not get transform from %s to %s after 1 second!", this->frameId().c_str(), image->header.frame_id.c_str());
+						return;
+					}
+				}
 				this->tfListener().lookupTransform(this->frameId(), image->header.frame_id, image->header.stamp, localTransform);
 			}
 			catch(tf::TransformException & ex)
@@ -119,9 +127,6 @@ public:
 				return;
 			}
 
-			ros::WallTime time = ros::WallTime::now();
-
-			int quality = -1;
 			if(image->data.size() && depth->data.size() && cameraInfo->K[4] != 0)
 			{
 				image_geometry::PinholeCameraModel model;
@@ -133,19 +138,19 @@ public:
 				cv_bridge::CvImageConstPtr ptrImage = cv_bridge::toCvShare(image, "mono8");
 				cv_bridge::CvImageConstPtr ptrDepth = cv_bridge::toCvShare(depth);
 
-				rtabmap::SensorData data(ptrImage->image,
+				rtabmap::SensorData data(
+						ptrImage->image,
 						ptrDepth->image,
 						fx,
 						fy,
 						cx,
 						cy,
+						rtabmap_ros::transformFromTF(localTransform),
 						rtabmap::Transform(),
-						rtabmap::transformFromTF(localTransform));
-				quality=0;
+						1.0f);
 
-				this->processData(data, image->header, quality);
+				this->processData(data, image->header);
 			}
-			ROS_INFO("Odom: quality=%d, update time=%fs", quality, (ros::WallTime::now()-time).toSec());
 		}
 	}
 
