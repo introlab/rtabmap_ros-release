@@ -70,9 +70,9 @@ public:
 	DataRecorderWrapper() :
 		fileName_("output.db"),
 		frameId_("base_link"),
+		waitForTransform_(false),
 		depthScanSync_(0),
 		depthSync_(0),
-		scanSync_(0),
 		depthImageSync_(0)
 	{
 		ros::NodeHandle pnh("~");
@@ -90,6 +90,7 @@ public:
 		pnh.param("queue_size", queueSize, queueSize);
 		pnh.param("output_file_name", fileName_, fileName_);
 		pnh.param("frame_id", frameId_, frameId_);
+		pnh.param("wait_for_transform", waitForTransform_, waitForTransform_);
 
 		setupCallbacks(subscribeOdometry, subscribeDepth, subscribeStereo, subscribeLaserScan, queueSize);
 	}
@@ -104,8 +105,6 @@ public:
 			delete depthScanSync_;
 		if(depthSync_)
 			delete depthSync_;
-		if(scanSync_)
-			delete scanSync_;
 		if(depthImageSync_)
 			delete depthImageSync_;
 	}
@@ -183,15 +182,6 @@ private:
 				depthSync_ = new message_filters::Synchronizer<MyDepthSyncPolicy>(MyDepthSyncPolicy(queueSize), imageSub_, odomSub_, imageDepthSub_, cameraInfoSub_);
 				depthSync_->registerCallback(boost::bind(&DataRecorderWrapper::depthCallback, this, _1, _2, _3, _4));
 			}
-			else if(subscribeOdom && !subscribeDepth && subscribeLaserScan)
-			{
-				ROS_INFO("Registering LaserScan callback...");
-				imageSub_.subscribe(rgb_it, rgb_nh.resolveName("image"), 1, hintsRgb);
-				odomSub_.subscribe(nh, "odom", 1);
-				scanSub_.subscribe(nh, "scan", 1);
-				scanSync_ = new message_filters::Synchronizer<MyScanSyncPolicy>(MyScanSyncPolicy(queueSize), imageSub_, odomSub_, scanSub_);
-				scanSync_->registerCallback(boost::bind(&DataRecorderWrapper::scanCallback, this, _1, _2, _3));
-			}
 			else if(!subscribeOdom && subscribeDepth)
 			{
 				ROS_INFO("Registering to depth without odometry callback...");
@@ -203,7 +193,11 @@ private:
 			}
 			else
 			{
-				ROS_INFO("Registering default callback...");
+				if(subscribeOdom && !subscribeDepth && subscribeLaserScan)
+				{
+					ROS_WARN("Cannot record only laser scan without depth images...");
+				}
+				ROS_INFO("Registering default callback (\"image\" only)...");
 				defaultSub_ = rgb_it.subscribe("image", 1, &DataRecorderWrapper::defaultCallback, this);
 			}
 		}
@@ -212,16 +206,7 @@ private:
 	void defaultCallback(const sensor_msgs::ImageConstPtr & imageMsg)
 	{
 		cv_bridge::CvImageConstPtr ptrImage = cv_bridge::toCvShare(imageMsg, "bgr8");
-		rtabmap::SensorData data(
-			ptrImage->image.clone(),
-			cv::Mat(),
-			cv::Mat(),
-			0.0f,
-			0.0f,
-			0.0f,
-			0.0f,
-			Transform(),
-			Transform());
+		rtabmap::SensorData data(ptrImage->image.clone());
 		recorder_.addData(data);
 	}
 
@@ -234,9 +219,18 @@ private:
 		Transform localTransform;
 		try
 		{
+			if(waitForTransform_)
+			{
+				if(!tfListener_.waitForTransform(frameId_, depthMsg->header.frame_id, depthMsg->header.stamp, ros::Duration(1)))
+				{
+					ROS_WARN("Could not get transform from %s to %s after 1 second!", frameId_.c_str(), depthMsg->header.frame_id.c_str());
+					return;
+				}
+			}
+
 			tf::StampedTransform tmp;
 			tfListener_.lookupTransform(frameId_, depthMsg->header.frame_id, depthMsg->header.stamp, tmp);
-			localTransform = transformFromTF(tmp);
+			localTransform = rtabmap_ros::transformFromTF(tmp);
 		}
 		catch(tf::TransformException & ex)
 		{
@@ -283,13 +277,13 @@ private:
 		rtabmap::SensorData data(
 			ptrImage->image.clone(),
 			depth16,
-			cv::Mat(),
 			fx,
 			fy,
 			cx,
 			cy,
+			localTransform,
 			Transform(),
-			localTransform);
+			1.0f);
 		recorder_.addData(data);
 	}
 
@@ -303,17 +297,24 @@ private:
 		Transform localTransform;
 		try
 		{
+			if(waitForTransform_)
+			{
+				if(!tfListener_.waitForTransform(frameId_, depthMsg->header.frame_id, depthMsg->header.stamp, ros::Duration(1)))
+				{
+					ROS_WARN("Could not get transform from %s to %s after 1 second!", frameId_.c_str(), depthMsg->header.frame_id.c_str());
+					return;
+				}
+			}
+
 			tf::StampedTransform tmp;
 			tfListener_.lookupTransform(frameId_, depthMsg->header.frame_id, depthMsg->header.stamp, tmp);
-			localTransform = transformFromTF(tmp);
+			localTransform = rtabmap_ros::transformFromTF(tmp);
 		}
 		catch(tf::TransformException & ex)
 		{
 			ROS_WARN("%s",ex.what());
 			return;
 		}
-
-		Transform odom = transformFromPoseMsg(odomMsg->pose.pose);
 
 		cv_bridge::CvImageConstPtr ptrImage = cv_bridge::toCvShare(imageMsg, "bgr8");
 		cv_bridge::CvImageConstPtr ptrDepth = cv_bridge::toCvShare(depthMsg);
@@ -354,57 +355,14 @@ private:
 		rtabmap::SensorData data(
 			ptrImage->image.clone(),
 			depth16,
-			cv::Mat(),
 			fx,
 			fy,
 			cx,
 			cy,
-			odom,
-			localTransform);
+			localTransform,
+			rtabmap_ros::transformFromPoseMsg(odomMsg->pose.pose),
+			odomMsg->pose.covariance[0]>0?odomMsg->pose.covariance[0]:1.0f);
 		recorder_.addData(data);
-	}
-
-	void scanCallback(
-			const sensor_msgs::ImageConstPtr& imageMsg,
-			const nav_msgs::OdometryConstPtr & odomMsg,
-			const sensor_msgs::LaserScanConstPtr& scanMsg)
-	{
-		// TF ready?
-		try
-		{
-			tf::StampedTransform tmp;
-			tfListener_.lookupTransform(frameId_, scanMsg->header.frame_id, scanMsg->header.stamp, tmp);
-		}
-		catch(tf::TransformException & ex)
-		{
-			ROS_WARN("%s",ex.what());
-			return;
-		}
-
-		//transform in frameId_ frame
-		sensor_msgs::PointCloud2 scanOut;
-		laser_geometry::LaserProjection projection;
-		projection.transformLaserScanToPointCloud(frameId_, *scanMsg, scanOut, tfListener_);
-		pcl::PointCloud<pcl::PointXYZ> pclScan;
-		pcl::fromROSMsg(scanOut, pclScan);
-		cv::Mat scan = util3d::depth2DFromPointCloud(pclScan);
-
-		Transform odom = transformFromPoseMsg(odomMsg->pose.pose);
-
-		cv_bridge::CvImageConstPtr ptrImage = cv_bridge::toCvShare(imageMsg, "bgr8");
-
-		rtabmap::SensorData data(
-			ptrImage->image.clone(),
-			cv::Mat(),
-			scan,
-			0.0f,
-			0.0f,
-			0.0f,
-			0.0f,
-			odom,
-			Transform());
-		recorder_.addData(data);
-
 	}
 
 	void depthScanCallback(
@@ -418,10 +376,24 @@ private:
 		Transform localTransform;
 		try
 		{
+			if(waitForTransform_)
+			{
+				if(!tfListener_.waitForTransform(frameId_, scanMsg->header.frame_id, scanMsg->header.stamp, ros::Duration(1)))
+				{
+					ROS_WARN("Could not get transform from %s to %s after 1 second!", frameId_.c_str(), scanMsg->header.frame_id.c_str());
+					return;
+				}
+				if(!tfListener_.waitForTransform(frameId_, depthMsg->header.frame_id, depthMsg->header.stamp, ros::Duration(1)))
+				{
+					ROS_WARN("Could not get transform from %s to %s after 1 second!", frameId_.c_str(), depthMsg->header.frame_id.c_str());
+					return;
+				}
+			}
+
 			tf::StampedTransform tmp;
 			tfListener_.lookupTransform(frameId_, scanMsg->header.frame_id, scanMsg->header.stamp, tmp);
 			tfListener_.lookupTransform(frameId_, depthMsg->header.frame_id, depthMsg->header.stamp, tmp);
-			localTransform = transformFromTF(tmp);
+			localTransform = rtabmap_ros::transformFromTF(tmp);
 		}
 		catch(tf::TransformException & ex)
 		{
@@ -435,9 +407,7 @@ private:
 		projection.transformLaserScanToPointCloud(frameId_, *scanMsg, scanOut, tfListener_);
 		pcl::PointCloud<pcl::PointXYZ> pclScan;
 		pcl::fromROSMsg(scanOut, pclScan);
-		cv::Mat scan = util3d::depth2DFromPointCloud(pclScan);
-
-		Transform odom = transformFromPoseMsg(odomMsg->pose.pose);
+		cv::Mat scan = util3d::laserScanFromPointCloud(pclScan);
 
 		cv_bridge::CvImageConstPtr ptrImage = cv_bridge::toCvShare(imageMsg, "bgr8");
 		cv_bridge::CvImageConstPtr ptrDepth = cv_bridge::toCvShare(depthMsg);
@@ -476,15 +446,16 @@ private:
 		}
 
 		rtabmap::SensorData data(
+			scan,
 			ptrImage->image.clone(),
 			depth16,
-			scan,
 			fx,
 			fy,
 			cx,
 			cy,
-			odom,
-			localTransform);
+			localTransform,
+			rtabmap_ros::transformFromPoseMsg(odomMsg->pose.pose),
+			odomMsg->pose.covariance[0]>0?odomMsg->pose.covariance[0]:1.0f);
 		recorder_.addData(data);
 	}
 
@@ -499,17 +470,24 @@ private:
 		Transform localTransform;
 		try
 		{
+			if(waitForTransform_)
+			{
+				if(!tfListener_.waitForTransform(frameId_, leftImageMsg->header.frame_id, leftImageMsg->header.stamp, ros::Duration(1)))
+				{
+					ROS_WARN("Could not get transform from %s to %s after 1 second!", frameId_.c_str(), leftImageMsg->header.frame_id.c_str());
+					return;
+				}
+			}
+
 			tf::StampedTransform tmp;
 			tfListener_.lookupTransform(frameId_, leftImageMsg->header.frame_id, leftImageMsg->header.stamp, tmp);
-			localTransform = transformFromTF(tmp);
+			localTransform = rtabmap_ros::transformFromTF(tmp);
 		}
 		catch(tf::TransformException & ex)
 		{
 			ROS_WARN("%s",ex.what());
 			return;
 		}
-
-		Transform odom = transformFromPoseMsg(odomMsg->pose.pose);
 
 		cv_bridge::CvImageConstPtr ptrLeftImage = cv_bridge::toCvShare(leftImageMsg, "bgr8");
 		cv_bridge::CvImageConstPtr ptrRightImage = cv_bridge::toCvShare(rightImageMsg, "mono8");
@@ -524,13 +502,13 @@ private:
 		rtabmap::SensorData data(
 				ptrLeftImage->image.clone(),
 				ptrRightImage->image.clone(),
-				cv::Mat(),
 				fx,
 				baseline,
 				cx,
 				cy,
-				odom,
-				localTransform);
+				localTransform,
+				rtabmap_ros::transformFromPoseMsg(odomMsg->pose.pose),
+				odomMsg->pose.covariance[0]>0?odomMsg->pose.covariance[0]:1.0f);
 		recorder_.addData(data);
 	}
 
@@ -544,9 +522,18 @@ private:
 		Transform localTransform;
 		try
 		{
+			if(waitForTransform_)
+			{
+				if(!tfListener_.waitForTransform(frameId_, leftImageMsg->header.frame_id, leftImageMsg->header.stamp, ros::Duration(1)))
+				{
+					ROS_WARN("Could not get transform from %s to %s after 1 second!", frameId_.c_str(), leftImageMsg->header.frame_id.c_str());
+					return;
+				}
+			}
+
 			tf::StampedTransform tmp;
 			tfListener_.lookupTransform(frameId_, leftImageMsg->header.frame_id, leftImageMsg->header.stamp, tmp);
-			localTransform = transformFromTF(tmp);
+			localTransform = rtabmap_ros::transformFromTF(tmp);
 		}
 		catch(tf::TransformException & ex)
 		{
@@ -567,13 +554,13 @@ private:
 		rtabmap::SensorData data(
 				ptrLeftImage->image.clone(),
 				ptrRightImage->image.clone(),
-				cv::Mat(),
 				fx,
 				baseline,
 				cx,
 				cy,
+				localTransform,
 				Transform(),
-				localTransform);
+				1.0f);
 		recorder_.addData(data);
 	}
 
@@ -581,6 +568,7 @@ private:
 	DataRecorder recorder_;
 	std::string fileName_;
 	std::string frameId_;
+	bool waitForTransform_;
 
 	image_transport::Subscriber defaultSub_;
 	image_transport::SubscriberFilter imageSub_;
@@ -605,12 +593,6 @@ private:
 			sensor_msgs::Image,
 			sensor_msgs::CameraInfo> MyDepthSyncPolicy;
 	message_filters::Synchronizer<MyDepthSyncPolicy> * depthSync_;
-
-	typedef message_filters::sync_policies::ApproximateTime<
-			sensor_msgs::Image,
-			nav_msgs::Odometry,
-			sensor_msgs::LaserScan> MyScanSyncPolicy;
-	message_filters::Synchronizer<MyScanSyncPolicy> * scanSync_;
 
 	//without odom
 	typedef message_filters::sync_policies::ApproximateTime<
