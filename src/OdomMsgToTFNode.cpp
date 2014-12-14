@@ -25,13 +25,66 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <rtabmap/utilite/ULogger.h>
+#include <ros/ros.h>
+#include <nav_msgs/Odometry.h>
+#include <tf/tf.h>
+#include <tf/transform_broadcaster.h>
+#include <rtabmap_ros/MsgConversion.h>
 
-int main(int argc, char *argv[])
+class OdomMsgToTF
 {
-	ULogger::setType(ULogger::kTypeConsole);
-	UFATAL("visual_odometry node is deprecated, use rgbd_odometry instead!");
+
+public:
+	OdomMsgToTF() :
+		frameId_(""),
+		odomFrameId_("")
+	{
+		ros::NodeHandle pnh("~");
+		pnh.param("frame_id", frameId_, frameId_);
+		pnh.param("odom_frame_id", odomFrameId_, odomFrameId_);
+
+		ros::NodeHandle nh;
+		odomTopic_ = nh.subscribe("odom", 1, &OdomMsgToTF::odomReceivedCallback, this);
+	}
+
+	virtual ~OdomMsgToTF(){}
+
+	void odomReceivedCallback(const nav_msgs::OdometryConstPtr & msg)
+	{
+		if(frameId_.empty())
+		{
+			frameId_ = msg->child_frame_id;
+		}
+		if(odomFrameId_.empty())
+		{
+			odomFrameId_ = msg->header.frame_id;
+		}
+		tf::StampedTransform t;
+		rtabmap::Transform pose = rtabmap_ros::transformFromPoseMsg(msg->pose.pose);
+		if(pose.isNull())
+		{
+			ROS_WARN("Odometry received is null! Cannot send tf...");
+		}
+		else
+		{
+			rtabmap_ros::transformToTF(pose, t);
+			tfBroadcaster_.sendTransform(tf::StampedTransform (t, msg->header.stamp, odomFrameId_, frameId_));
+		}
+	}
+
+private:
+	std::string frameId_;
+	std::string odomFrameId_;
+
+	ros::Subscriber odomTopic_;
+	tf::TransformBroadcaster tfBroadcaster_;
+};
+
+
+int main(int argc, char** argv)
+{
+	ros::init(argc, argv, "odom_msg_to_tf");
+	OdomMsgToTF odomToTf;
+	ros::spin();
 	return 0;
 }
-
-
