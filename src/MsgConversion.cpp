@@ -41,7 +41,7 @@ void transformToTF(const rtabmap::Transform & transform, tf::Transform & tfTrans
 {
 	if(!transform.isNull())
 	{
-		tf::transformEigenToTF(rtabmap::util3d::transformToEigen3d(transform), tfTransform);
+		tf::transformEigenToTF(transform.toEigen3d(), tfTransform);
 	}
 	else
 	{
@@ -53,7 +53,7 @@ rtabmap::Transform transformFromTF(const tf::Transform & transform)
 {
 	Eigen::Affine3d eigenTf;
 	tf::transformTFToEigen(transform, eigenTf);
-	return rtabmap::util3d::transformFromEigen3d(eigenTf);
+	return rtabmap::Transform::fromEigen3d(eigenTf);
 }
 
 void transformToGeometryMsg(const rtabmap::Transform & transform, geometry_msgs::Transform & msg)
@@ -124,6 +124,80 @@ cv::Mat compressedMatFromBytes(const std::vector<unsigned char> & bytes, bool co
 	return out;
 }
 
+void infoFromROS(const rtabmap_ros::Info & info, rtabmap::Statistics & stat)
+{
+	stat.setExtended(true); // Extended
+
+	// rtabmap_ros::Info
+	stat.setRefImageId(info.refId);
+	stat.setLoopClosureId(info.loopClosureId);
+	stat.setLocalLoopClosureId(info.localLoopClosureId);
+
+	stat.setLoopClosureTransform(rtabmap_ros::transformFromGeometryMsg(info.loopClosureTransform));
+
+	//Posterior, likelihood, childCount
+	std::map<int, float> mapIntFloat;
+	for(unsigned int i=0; i<info.posteriorKeys.size() && i<info.posteriorValues.size(); ++i)
+	{
+		mapIntFloat.insert(std::pair<int, float>(info.posteriorKeys.at(i), info.posteriorValues.at(i)));
+	}
+	stat.setPosterior(mapIntFloat);
+	mapIntFloat.clear();
+	for(unsigned int i=0; i<info.likelihoodKeys.size() && i<info.likelihoodValues.size(); ++i)
+	{
+		mapIntFloat.insert(std::pair<int, float>(info.likelihoodKeys.at(i), info.likelihoodValues.at(i)));
+	}
+	stat.setLikelihood(mapIntFloat);
+	mapIntFloat.clear();
+	for(unsigned int i=0; i<info.rawLikelihoodKeys.size() && i<info.rawLikelihoodValues.size(); ++i)
+	{
+		mapIntFloat.insert(std::pair<int, float>(info.rawLikelihoodKeys.at(i), info.rawLikelihoodValues.at(i)));
+	}
+	stat.setRawLikelihood(mapIntFloat);
+	std::map<int, int> mapIntInt;
+	for(unsigned int i=0; i<info.weightsKeys.size() && i<info.weightsValues.size(); ++i)
+	{
+		mapIntInt.insert(std::pair<int, int>(info.weightsKeys.at(i), info.weightsValues.at(i)));
+	}
+	stat.setWeights(mapIntInt);
+
+	stat.setLocalPath(info.localPath);
+
+	// Statistics data
+	for(unsigned int i=0; i<info.statsKeys.size() && i<info.statsValues.size(); i++)
+	{
+		stat.addStatistic(info.statsKeys.at(i), info.statsValues.at(i));
+	}
+}
+
+void infoToROS(const rtabmap::Statistics & stats, rtabmap_ros::Info & info)
+{
+	info.refId = stats.refImageId();
+	info.loopClosureId = stats.loopClosureId();
+	info.localLoopClosureId = stats.localLoopClosureId();
+
+	rtabmap_ros::transformToGeometryMsg(stats.loopClosureTransform(), info.loopClosureTransform);
+
+	// Detailed info
+	if(stats.extended())
+	{
+		//Posterior, likelihood, childCount
+		info.posteriorKeys = uKeys(stats.posterior());
+		info.posteriorValues = uValues(stats.posterior());
+		info.likelihoodKeys = uKeys(stats.likelihood());
+		info.likelihoodValues = uValues(stats.likelihood());
+		info.rawLikelihoodKeys = uKeys(stats.rawLikelihood());
+		info.rawLikelihoodValues = uValues(stats.rawLikelihood());
+		info.weightsKeys = uKeys(stats.weights());
+		info.weightsValues = uValues(stats.weights());
+		info.localPath = stats.localPath();
+
+		// Statistics data
+		info.statsKeys = uKeys(stats.data());
+		info.statsValues = uValues(stats.data());
+	}
+}
+
 rtabmap::Link linkFromROS(const rtabmap_ros::Link & msg)
 {
 	return rtabmap::Link(msg.fromId, msg.toId, (rtabmap::Link::Type)msg.type, transformFromGeometryMsg(msg.transform), msg.variance);
@@ -152,6 +226,25 @@ void keypointToROS(const cv::KeyPoint & kpt, rtabmap_ros::KeyPoint & msg)
 	msg.pty = kpt.pt.y;
 	msg.response = kpt.response;
 	msg.size = kpt.size;
+}
+
+std::vector<cv::KeyPoint> keypointsFromROS(const std::vector<rtabmap_ros::KeyPoint> & msg)
+{
+	std::vector<cv::KeyPoint> v(msg.size());
+	for(unsigned int i=0; i<msg.size(); ++i)
+	{
+		v[i] = keypointFromROS(msg[i]);
+	}
+	return v;
+}
+
+void keypointsToROS(const std::vector<cv::KeyPoint> & kpts, std::vector<rtabmap_ros::KeyPoint> & msg)
+{
+	msg.resize(kpts.size());
+	for(unsigned int i=0; i<msg.size(); ++i)
+	{
+		keypointToROS(kpts[i], msg[i]);
+	}
 }
 
 void mapGraphFromROS(
@@ -314,6 +407,22 @@ rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg)
 	info.localMapSize = msg.localMapSize;
 	info.time = msg.time;
 	info.variance = msg.variance;
+
+	info.type = msg.type;
+
+	UASSERT(msg.wordsKeys.size() == msg.wordsValues.size());
+	for(unsigned int i=0; i<msg.wordsKeys.size(); ++i)
+	{
+		info.words.insert(std::make_pair(msg.wordsKeys[i], keypointFromROS(msg.wordsValues[i])));
+	}
+
+	info.wordMatches = msg.wordMatches;
+	info.wordInliers = msg.wordInliers;
+
+	info.refCorners = keypointsFromROS(msg.refCorners);
+	info.newCorners = keypointsFromROS(msg.newCorners);
+	info.cornerInliers = msg.cornerInliers;
+
 	return info;
 }
 
@@ -326,6 +435,19 @@ void odomInfoToROS(const rtabmap::OdometryInfo & info, rtabmap_ros::OdomInfo & m
 	msg.localMapSize = info.localMapSize;
 	msg.time = info.time;
 	msg.variance = info.variance;
+
+	msg.type = info.type;
+
+	msg.wordsKeys = uKeys(info.words);
+	keypointsToROS(uValues(info.words), msg.wordsValues);
+
+	msg.wordMatches = info.wordMatches;
+	msg.wordInliers = info.wordInliers;
+
+	keypointsToROS(info.refCorners, msg.refCorners);
+	keypointsToROS(info.newCorners, msg.newCorners);
+	msg.cornerInliers = info.cornerInliers;
+
 }
 
 }
