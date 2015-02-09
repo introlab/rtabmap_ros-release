@@ -40,6 +40,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cv_bridge/cv_bridge.h>
 
 #include <std_msgs/Empty.h>
+#include <std_msgs/Int32.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/CameraInfo.h>
@@ -52,6 +53,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "rtabmap_ros/GetMap.h"
 #include "rtabmap_ros/PublishMap.h"
+#include "rtabmap_ros/SetGoal.h"
 
 #include <message_filters/subscriber.h>
 #include <message_filters/synchronizer.h>
@@ -60,6 +62,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <image_transport/image_transport.h>
 #include <image_transport/subscriber_filter.h>
+
+#include <actionlib/client/simple_action_client.h>
+#include <move_base_msgs/MoveBaseAction.h>
+#include <move_base_msgs/MoveBaseActionGoal.h>
+#include <move_base_msgs/MoveBaseActionResult.h>
+#include <move_base_msgs/MoveBaseActionFeedback.h>
+#include <actionlib_msgs/GoalStatusArray.h>
+typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> MoveBaseClient;
 
 class CoreWrapper
 {
@@ -93,6 +103,11 @@ private:
 						   const sensor_msgs::LaserScanConstPtr& scanMsg,
 						   const nav_msgs::OdometryConstPtr & odomMsg);
 
+	void goalCommonCallback(const std::list<std::pair<int, rtabmap::Transform> > & poses);
+	void goalCallback(const geometry_msgs::PoseStampedConstPtr & msg);
+	void goalGlobalCallback(const geometry_msgs::PoseStampedConstPtr & msg);
+	void updateGoal(const ros::Time & stamp);
+
 	void process(
 			int id,
 			const cv::Mat & image,
@@ -116,19 +131,26 @@ private:
 	bool setModeMappingCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
 	bool getMapCallback(rtabmap_ros::GetMap::Request& req, rtabmap_ros::GetMap::Response& rep);
 	bool publishMapCallback(rtabmap_ros::PublishMap::Request&, rtabmap_ros::PublishMap::Response&);
+	bool setGoalCallback(rtabmap_ros::SetGoal::Request& req, rtabmap_ros::SetGoal::Response& res);
 
 	rtabmap::ParametersMap loadParameters(const std::string & configFile);
 	void saveParameters(const std::string & configFile);
 
 	void publishLoop(double tfDelay);
 
-	void publishStats(const rtabmap::Statistics & stats);
+	void publishStats(const rtabmap::Statistics & stats, const ros::Time & stamp);
+	void publishCurrentGoal(const ros::Time & stamp);
+	void goalDoneCb(const actionlib::SimpleClientGoalState& state, const move_base_msgs::MoveBaseResultConstPtr& result);
+	void goalActiveCb();
+	void goalFeedbackCb(const move_base_msgs::MoveBaseFeedbackConstPtr& feedback);
+	void publishLocalPath(const ros::Time & stamp);
 
 private:
 	rtabmap::Rtabmap rtabmap_;
 	bool paused_;
 	rtabmap::Transform lastPose_;
 	float _variance;
+	rtabmap::Transform currentMetricGoal_;
 
 	std::string frameId_;
 	std::string mapFrameId_;
@@ -136,6 +158,7 @@ private:
 	std::string configPath_;
 	std::string databasePath_;
 	bool waitForTransform_;
+	bool useActionForGoal_;
 
 	tf::Transform mapToOdom_;
 	boost::mutex mapToOdomMutex_;
@@ -143,6 +166,14 @@ private:
 	ros::Publisher infoPub_;
 	ros::Publisher mapData_;
 	ros::Publisher mapGraph_;
+
+	//Planning stuff
+	ros::Subscriber goalSub_;
+	ros::Subscriber goalGlobalSub_;
+	ros::Publisher nextMetricGoalPub_;
+	ros::Publisher goalReachedPub_;
+	ros::Publisher globalPathPub_;
+	ros::Publisher localPathPub_;
 
 	// for loop closure detection only
 	image_transport::Subscriber defaultSub_;
@@ -213,6 +244,9 @@ private:
 	ros::ServiceServer setModeMappingSrv_;
 	ros::ServiceServer getMapDataSrv_;
 	ros::ServiceServer publishMapDataSrv_;
+	ros::ServiceServer setGoalSrv_;
+
+	MoveBaseClient mbClient_;
 
 	boost::thread* transformThread_;
 
