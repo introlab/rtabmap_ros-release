@@ -84,8 +84,8 @@ OdometryROS::OdometryROS(int argc, char * argv[]) :
 		if(values.size() == 6)
 		{
 			initialPose = Transform(
-					atof(values[0].c_str()), atof(values[1].c_str()), atof(values[2].c_str()),
-					atof(values[3].c_str()), atof(values[4].c_str()), atof(values[5].c_str()));
+					uStr2Float(values[0]), uStr2Float(values[1]), uStr2Float(values[2]),
+					uStr2Float(values[3]), uStr2Float(values[4]), uStr2Float(values[5]));
 		}
 		else
 		{
@@ -131,21 +131,21 @@ OdometryROS::OdometryROS(int argc, char * argv[]) :
 			ROS_INFO("Setting odometry parameter \"%s\"=\"%s\"", iter->first.c_str(), uBool2Str(vBool).c_str());
 			iter->second = uBool2Str(vBool);
 		}
-		else if(pnh.getParam(iter->first, vInt))
-		{
-			ROS_INFO("Setting odometry parameter \"%s\"=\"%s\"", iter->first.c_str(), uNumber2Str(vInt).c_str());
-			iter->second = uNumber2Str(vInt);
-
-			if(iter->first.compare(Parameters::kOdomMinInliers()) == 0 && vInt < 8)
-			{
-				ROS_WARN("Parameter min_inliers must be >= 8, setting to 8...");
-				iter->second = uNumber2Str(8);
-			}
-		}
 		else if(pnh.getParam(iter->first, vDouble))
 		{
 			ROS_INFO("Setting odometry parameter \"%s\"=\"%s\"", iter->first.c_str(), uNumber2Str(vDouble).c_str());
 			iter->second = uNumber2Str(vDouble);
+		}
+		else if(pnh.getParam(iter->first, vInt))
+		{
+			ROS_INFO("Setting odometry parameter \"%s\"=\"%s\"", iter->first.c_str(), uNumber2Str(vInt).c_str());
+			iter->second = uNumber2Str(vInt);
+		}
+
+		if(iter->first.compare(Parameters::kOdomMinInliers()) == 0 && atoi(iter->second.c_str()) < 8)
+		{
+			ROS_WARN("Parameter min_inliers must be >= 8, setting to 8...");
+			iter->second = uNumber2Str(8);
 		}
 	}
 
