@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package>
   <name>rtabmap_ros</name>
-  <version>0.8.3</version>
-  <description>RTAB-Map's ros-pkg. RTAB-Map is an RGB-D SLAM approach with real-time constraints.</description>
+  <version>0.8.12</version>
+  <description>RTAB-Map's ros-pkg. RTAB-Map is a RGB-D SLAM approach with real-time constraints.</description>
   <maintainer email="matlabbe@gmail.com">Mathieu Labbe</maintainer>
   <author>Mathieu Labbe</author>
   <license>BSD</license>
@@ -21,6 +21,7 @@
   <build_depend>nav_msgs</build_depend>
   <build_depend>stereo_msgs</build_depend>
   <build_depend>geometry_msgs</build_depend>
+  <build_depend>visualization_msgs</build_depend>
   <build_depend>image_transport</build_depend>
   <build_depend>tf</build_depend>
   <build_depend>tf_conversions</build_depend>
@@ -34,6 +35,9 @@
   <build_depend>class_loader</build_depend>
   <build_depend>rtabmap</build_depend>
   <build_depend>move_base_msgs</build_depend>
+  <build_depend>costmap_2d</build_depend>
+  <build_depend>octomap_ros</build_depend>
+  <build_depend>octomap</build_depend>
   
   <run_depend>cv_bridge</run_depend>
   <run_depend>roscpp</run_depend>
@@ -44,6 +48,7 @@
   <run_depend>nav_msgs</run_depend>
   <run_depend>stereo_msgs</run_depend>
   <run_depend>geometry_msgs</run_depend>
+  <run_depend>visualization_msgs</run_depend>
   <run_depend>image_transport</run_depend>
   <run_depend>image_transport_plugins</run_depend>
   <run_depend>tf</run_depend>
@@ -58,11 +63,15 @@
   <run_depend>class_loader</run_depend>
   <run_depend>rtabmap</run_depend>
   <run_depend>move_base_msgs</run_depend>
+  <run_depend>costmap_2d</run_depend>
+  <run_depend>octomap_ros</run_depend>
+  <run_depend>octomap</run_depend>
 
   <build_depend>libpcl-all-dev</build_depend>
 
   <export>
 	<nodelet plugin="${prefix}/nodelet_plugins.xml" />
 	<rviz plugin="${prefix}/plugin_description.xml"/>
+    <costmap_2d plugin="${prefix}/costmap_plugins.xml"/>
   </export>
 </package>
