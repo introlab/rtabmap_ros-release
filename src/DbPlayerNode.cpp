@@ -94,7 +94,7 @@ int main(int argc, char** argv)
 	pnh.param("frame_id", frameId, frameId);
 	pnh.param("odom_frame_id", odomFrameId, odomFrameId);
 	pnh.param("camera_frame_id", cameraFrameId, cameraFrameId);
-	pnh.param("rate", rate, rate);
+	pnh.param("rate", rate, rate); // Set -1 to use database stamps
 	pnh.param("database", databasePath, databasePath);
 	pnh.param("publish_tf", publishTf, publishTf);
 	pnh.param("start_id", startId, startId);
@@ -252,12 +252,12 @@ int main(int argc, char** argv)
 				odom.header.frame_id = odomFrameId;
 				odom.header.stamp = time;
 				rtabmap_ros::transformToPoseMsg(data.pose(), odom.pose.pose);
-				odom.pose.covariance[0] = data.poseVariance();
-				odom.pose.covariance[7] = data.poseVariance();
-				odom.pose.covariance[14] = data.poseVariance();
-				odom.pose.covariance[21] = data.poseVariance();
-				odom.pose.covariance[28] = data.poseVariance();
-				odom.pose.covariance[35] = data.poseVariance();
+				odom.pose.covariance[0] = data.poseTransVariance();
+				odom.pose.covariance[7] = data.poseTransVariance();
+				odom.pose.covariance[14] = data.poseTransVariance();
+				odom.pose.covariance[21] = data.poseRotVariance();
+				odom.pose.covariance[28] = data.poseRotVariance();
+				odom.pose.covariance[35] = data.poseRotVariance();
 				odometryPub.publish(odom);
 			}
 		}
