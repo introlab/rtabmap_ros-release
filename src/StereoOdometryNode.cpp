@@ -80,6 +80,13 @@ public:
 		cameraInfoLeft_.subscribe(left_nh, "camera_info", 1);
 		cameraInfoRight_.subscribe(right_nh, "camera_info", 1);
 
+		ROS_INFO("\n%s subscribed to:\n   %s,\n   %s,\n   %s,\n   %s",
+				ros::this_node::getName().c_str(),
+				imageRectLeft_.getTopic().c_str(),
+				imageRectRight_.getTopic().c_str(),
+				cameraInfoLeft_.getTopic().c_str(),
+				cameraInfoRight_.getTopic().c_str());
+
 		if(approxSync)
 		{
 			approxSync_ = new message_filters::Synchronizer<MyApproxSyncPolicy>(MyApproxSyncPolicy(queueSize), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_);
@@ -160,6 +167,13 @@ public:
 				cv_bridge::CvImageConstPtr ptrImageLeft = cv_bridge::toCvShare(imageRectLeft, "mono8");
 				cv_bridge::CvImageConstPtr ptrImageRight = cv_bridge::toCvShare(imageRectRight, "mono8");
 
+				if(baseline <= 0)
+				{
+					ROS_FATAL("The stereo baseline (%f) should be positive (baseline=-Tx/fx). We assume a horizontal left/right stereo "
+							  "setup where the Tx (or P(0,3)) is negative in the right camera info msg.", baseline);
+					return;
+				}
+
 				UTimer stepTimer;
 				//
 				UDEBUG("localTransform = %s", rtabmap_ros::transformFromTF(localTransform).prettyPrint().c_str());
@@ -171,7 +185,10 @@ public:
 						cy,
 						rtabmap_ros::transformFromTF(localTransform),
 						rtabmap::Transform(),
-						1.0f);
+						1.0f,
+						1.0f,
+						0,
+						rtabmap_ros::timestampFromROS(imageRectLeft->header.stamp));
 
 				this->processData(data, imageRectLeft->header);
 			}
