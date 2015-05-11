@@ -44,6 +44,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <rtabmap_ros/Link.h>
 #include <rtabmap_ros/KeyPoint.h>
+#include <rtabmap_ros/Point2f.h>
 #include <rtabmap_ros/MapData.h>
 #include <rtabmap_ros/Graph.h>
 #include <rtabmap_ros/NodeData.h>
@@ -77,15 +78,27 @@ void keypointToROS(const cv::KeyPoint & kpt, rtabmap_ros::KeyPoint & msg);
 std::vector<cv::KeyPoint> keypointsFromROS(const std::vector<rtabmap_ros::KeyPoint> & msg);
 void keypointsToROS(const std::vector<cv::KeyPoint> & kpts, std::vector<rtabmap_ros::KeyPoint> & msg);
 
+cv::Point2f point2fFromROS(const rtabmap_ros::Point2f & msg);
+void point2fToROS(const cv::Point2f & kpt, rtabmap_ros::Point2f & msg);
+
+std::vector<cv::Point2f> points2fFromROS(const std::vector<rtabmap_ros::Point2f> & msg);
+void points2fToROS(const std::vector<cv::Point2f> & kpts, std::vector<rtabmap_ros::Point2f> & msg);
+
 void mapGraphFromROS(
 		const rtabmap_ros::Graph & msg,
 		std::map<int, rtabmap::Transform> & poses,
 		std::map<int, int> & mapIds,
+		std::map<int, double> & stamps,
+		std::map<int, std::string> & labels,
+		std::map<int, std::vector<unsigned char> > & userDatas,
 		std::multimap<int, rtabmap::Link> & links,
 		rtabmap::Transform & mapToOdom);
 void mapGraphToROS(
 		const std::map<int, rtabmap::Transform> & poses,
 		const std::map<int, int> & mapIds,
+		const std::map<int, double> & stamps,
+		const std::map<int, std::string> & labels,
+		const std::map<int, std::vector<unsigned char> > & userDatas,
 		const std::multimap<int, rtabmap::Link> & links,
 		const rtabmap::Transform & mapToOdom,
 		rtabmap_ros::Graph & msg);
@@ -95,6 +108,8 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 
 rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg);
 void odomInfoToROS(const rtabmap::OdometryInfo & info, rtabmap_ros::OdomInfo & msg);
+
+inline double timestampFromROS(const ros::Time & stamp) {return double(stamp.sec) + double(stamp.nsec)/1000000000.0;}
 
 }
 
