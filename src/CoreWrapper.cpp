@@ -26,17 +26,21 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include "CoreWrapper.h"
+#include <stdio.h>
 #include <ros/ros.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
 #include <cv_bridge/cv_bridge.h>
 #include <nav_msgs/Path.h>
+#include <nav_msgs/OccupancyGrid.h>
 #include <std_msgs/Int32MultiArray.h>
 #include <std_msgs/Bool.h>
+#include <visualization_msgs/MarkerArray.h>
 #include <rtabmap/core/RtabmapEvent.h>
 #include <rtabmap/core/Camera.h>
 #include <rtabmap/core/Parameters.h>
 #include <rtabmap/core/util3d.h>
+#include <rtabmap/core/Graph.h>
 #include <rtabmap/core/Memory.h>
 #include <rtabmap/core/VWDictionary.h>
 #include <rtabmap/utilite/UEventsManager.h>
@@ -45,12 +49,21 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/utilite/UStl.h>
 #include <rtabmap/utilite/UTimer.h>
 #include <rtabmap/utilite/UConversion.h>
+#include <rtabmap/utilite/UMath.h>
 #include <opencv2/highgui/highgui.hpp>
 
 #include <pcl_ros/transforms.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <laser_geometry/laser_geometry.h>
 #include <image_geometry/stereo_camera_model.h>
+
+#ifdef WITH_OCTOMAP
+#include <octomap/octomap.h>
+#include <octomap_ros/conversions.h>
+#include <octomap_msgs/Octomap.h>
+#include <octomap_msgs/conversions.h>
+#endif
+
 
 //msgs
 #include "rtabmap_ros/Info.h"
@@ -62,10 +75,18 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 using namespace rtabmap;
 
+float max3( const float& a, const float& b, const float& c)
+{
+	float m=a>b?a:b;
+	return m>c?m:c;
+}
+
 CoreWrapper::CoreWrapper(bool deleteDbOnStart) :
 		paused_(false),
 		lastPose_(Transform::getIdentity()),
-		_variance(0),
+		rotVariance_(0),
+		transVariance_(0),
+		latestNodeWasReached_(false),
 		frameId_("base_link"),
 		mapFrameId_("map"),
 		odomFrameId_(""),
@@ -73,12 +94,30 @@ CoreWrapper::CoreWrapper(bool deleteDbOnStart) :
 		databasePath_(UDirectory::homeDir()+"/.ros/"+rtabmap::Parameters::getDefaultDatabaseName()),
 		waitForTransform_(false),
 		useActionForGoal_(false),
+		cloudDecimation_(4),
+		cloudMaxDepth_(4.0), // meters
+		cloudVoxelSize_(0.05), // meters
+		cloudOutputVoxelized_(false),
+		projMaxGroundAngle_(45.0), // degrees
+		projMinClusterSize_(20),
+		projMaxHeight_(2.0), // meters
+		gridCellSize_(0.05), // meters
+		gridSize_(0), // meters
+		gridEroded_(false),
+		mapFilterRadius_(0.5),
+		mapFilterAngle_(30.0), // degrees
+		mapCacheCleanup_(true),
 		mapToOdom_(tf::Transform::getIdentity()),
 		depthSync_(0),
 		depthScanSync_(0),
 		stereoScanSync_(0),
 		stereoApproxSync_(0),
 		stereoExactSync_(0),
+		depthTFSync_(0),
+		depthScanTFSync_(0),
+		stereoScanTFSync_(0),
+		stereoApproxTFSync_(0),
+		stereoExactTFSync_(0),
 		transformThread_(0),
 		rate_(Parameters::defaultRtabmapDetectionRate()),
 		time_(ros::Time::now()),
@@ -118,6 +157,7 @@ CoreWrapper::CoreWrapper(bool deleteDbOnStart) :
 
 	pnh.param("frame_id", frameId_, frameId_);
 	pnh.param("map_frame_id", mapFrameId_, mapFrameId_);
+	pnh.param("odom_frame_id", odomFrameId_, odomFrameId_); // set to use odom from TF
 	pnh.param("queue_size", queueSize, queueSize);
 	pnh.param("stereo_approx_sync", stereoApproxSync, stereoApproxSync);
 
@@ -126,14 +166,45 @@ CoreWrapper::CoreWrapper(bool deleteDbOnStart) :
 	pnh.param("wait_for_transform", waitForTransform_, waitForTransform_);
 	pnh.param("use_action_for_goal", useActionForGoal_, useActionForGoal_);
 
+	// cloud map stuff
+	pnh.param("cloud_decimation", cloudDecimation_, cloudDecimation_);
+	pnh.param("cloud_max_depth", cloudMaxDepth_, cloudMaxDepth_);
+	pnh.param("cloud_voxel_size", cloudVoxelSize_, cloudVoxelSize_);
+	pnh.param("cloud_output_voxelized", cloudOutputVoxelized_, cloudOutputVoxelized_);
+
+	//projection map stuff
+	pnh.param("proj_max_ground_angle", projMaxGroundAngle_, projMaxGroundAngle_);
+	pnh.param("proj_min_cluster_size", projMinClusterSize_, projMinClusterSize_);
+	pnh.param("proj_max_height", projMaxHeight_, projMaxHeight_);
+
+	// common grid map stuff
+	pnh.param("grid_cell_size", gridCellSize_, gridCellSize_); // m
+	pnh.param("grid_size", gridSize_, gridSize_); // m
+	pnh.param("grid_eroded", gridEroded_, gridEroded_);
+
+	// common map stuff
+	pnh.param("map_filter_radius", mapFilterRadius_, mapFilterRadius_);
+	pnh.param("map_filter_angle", mapFilterAngle_, mapFilterAngle_);
+	pnh.param("map_cache_cleanup", mapCacheCleanup_, mapCacheCleanup_);
+
 	ROS_INFO("rtabmap: frame_id = %s", frameId_.c_str());
+	if(!odomFrameId_.empty())
+	{
+		ROS_INFO("rtabmap: odom_frame_id = %s", odomFrameId_.c_str());
+	}
 	ROS_INFO("rtabmap: map_frame_id = %s", mapFrameId_.c_str());
 	ROS_INFO("rtabmap: queue_size = %d", queueSize);
 	ROS_INFO("rtabmap: tf_delay = %f", tfDelay);
 
 	infoPub_ = nh.advertise<rtabmap_ros::Info>("info", 1);
-	mapData_ = nh.advertise<rtabmap_ros::MapData>("mapData", 1);
-	mapGraph_ = nh.advertise<rtabmap_ros::Graph>("graph", 1);
+	mapDataPub_ = nh.advertise<rtabmap_ros::MapData>("mapData", 1);
+	mapGraphPub_ = nh.advertise<rtabmap_ros::Graph>("graph", 1);
+	labelsPub_ = nh.advertise<visualization_msgs::MarkerArray>("labels", 1);
+
+	// mapping topics
+	cloudMapPub_ = nh.advertise<sensor_msgs::PointCloud2>("cloud_map", 1);
+	projMapPub_ = nh.advertise<nav_msgs::OccupancyGrid>("proj_map", 1);
+	gridMapPub_ = nh.advertise<nav_msgs::OccupancyGrid>("grid_map", 1);
 
 	// planning topics
 	goalSub_ = nh.subscribe("goal", 1, &CoreWrapper::goalCallback, this);
@@ -151,11 +222,11 @@ CoreWrapper::CoreWrapper(bool deleteDbOnStart) :
 	databasePath_ = uReplaceChar(databasePath_, '~', UDirectory::homeDir());
 
 	// load parameters
-	ParametersMap parameters = loadParameters(configPath_);
+	parameters_ = loadParameters(configPath_);
 
 	// update parameters with user input parameters (private)
-	uInsert(parameters, std::make_pair(Parameters::kRtabmapWorkingDirectory(), UDirectory::homeDir()+"/.ros")); // change default to ~/.ros
-	for(ParametersMap::iterator iter=parameters.begin(); iter!=parameters.end(); ++iter)
+	uInsert(parameters_, std::make_pair(Parameters::kRtabmapWorkingDirectory(), UDirectory::homeDir()+"/.ros")); // change default to ~/.ros
+	for(ParametersMap::iterator iter=parameters_.begin(); iter!=parameters_.end(); ++iter)
 	{
 		std::string vStr;
 		bool vBool;
@@ -197,6 +268,9 @@ CoreWrapper::CoreWrapper(bool deleteDbOnStart) :
 	oldParameterNames.push_back("LccReextract/LoopClosureFeatures");
 	oldParameterNames.push_back("Rtabmap/DetectorStrategy");
 	oldParameterNames.push_back("RGBD/ScanMatchingSize");
+	oldParameterNames.push_back("RGBD/LocalLoopDetectionRadius");
+	oldParameterNames.push_back("RGBD/ToroIterations");
+	oldParameterNames.push_back("Mem/RehearsedNodesKept");
 	for(std::list<std::string>::iterator iter=oldParameterNames.begin(); iter!=oldParameterNames.end(); ++iter)
 	{
 		std::string vStr;
@@ -206,35 +280,63 @@ CoreWrapper::CoreWrapper(bool deleteDbOnStart) :
 			{
 				ROS_WARN("Parameter name changed: LccReextract/LoopClosureFeatures -> %s. Please update your launch file accordingly.",
 						Parameters::kLccReextractActivated().c_str());
-				parameters.at(Parameters::kLccReextractActivated())= vStr;
+				parameters_.at(Parameters::kLccReextractActivated())= vStr;
 			}
 			else if(iter->compare("Rtabmap/DetectorStrategy") == 0)
 			{
 				ROS_WARN("Parameter name changed: Rtabmap/DetectorStrategy -> %s. Please update your launch file accordingly.",
 						Parameters::kKpDetectorStrategy().c_str());
-				parameters.at(Parameters::kKpDetectorStrategy())= vStr;
+				parameters_.at(Parameters::kKpDetectorStrategy())= vStr;
 			}
 			else if(iter->compare("RGBD/ScanMatchingSize") == 0)
 			{
 				ROS_WARN("Parameter name changed: RGBD/ScanMatchingSize -> %s. Please update your launch file accordingly.",
 						Parameters::kRGBDPoseScanMatching().c_str());
-				parameters.at(Parameters::kRGBDPoseScanMatching())= std::atoi(vStr.c_str()) > 0?"true":"false";
+				parameters_.at(Parameters::kRGBDPoseScanMatching())= std::atoi(vStr.c_str()) > 0?"true":"false";
+			}
+			else if(iter->compare("RGBD/LocalLoopDetectionRadius") == 0)
+			{
+				ROS_WARN("Parameter name changed: RGBD/LocalLoopDetectionRadius -> %s. Please update your launch file accordingly.",
+						Parameters::kRGBDLocalRadius().c_str());
+				parameters_.at(Parameters::kRGBDLocalRadius())= vStr;
+			}
+			else if(iter->compare("RGBD/ToroIterations") == 0)
+			{
+				ROS_WARN("Parameter name changed: RGBD/ToroIterations -> %s. Please update your launch file accordingly.",
+						Parameters::kRGBDOptimizeIterations().c_str());
+				parameters_.at(Parameters::kRGBDOptimizeIterations())= vStr;
+			}
+			else if(iter->compare("Mem/RehearsedNodesKept") == 0)
+			{
+				ROS_WARN("Parameter name changed: Mem/RehearsedNodesKept -> %s. Please update your launch file accordingly.",
+						Parameters::kMemNotLinkedNodesKept().c_str());
+				parameters_.at(Parameters::kMemNotLinkedNodesKept())= vStr;
+			}
+			else if(iter->compare("RGBD/LocalLoopDetectionMaxDiffID") == 0)
+			{
+				ROS_WARN("Parameter name changed: RGBD/LocalLoopDetectionMaxDiffID -> %s. Please update your launch file accordingly.",
+						Parameters::kRGBDLocalLoopDetectionMaxGraphDepth().c_str());
+				parameters_.at(Parameters::kRGBDLocalLoopDetectionMaxGraphDepth())= vStr;
+			}
+			else if(iter->compare("RGBD/PlanVirtualLinksMaxDiffID") == 0)
+			{
+				ROS_WARN("Parameter \"RGBD/PlanVirtualLinksMaxDiffID\" doesn't exist anymore.");
 			}
 		}
 	}
 
 	// set public parameters
 	nh.setParam("is_rtabmap_paused", paused_);
-	for(ParametersMap::iterator iter=parameters.begin(); iter!=parameters.end(); ++iter)
+	for(ParametersMap::iterator iter=parameters_.begin(); iter!=parameters_.end(); ++iter)
 	{
 		nh.setParam(iter->first, iter->second);
 	}
-	if(parameters.find(Parameters::kRtabmapDetectionRate()) != parameters.end())
+	if(parameters_.find(Parameters::kRtabmapDetectionRate()) != parameters_.end())
 	{
-		rate_ = uStr2Float(parameters.at(Parameters::kRtabmapDetectionRate()));
+		rate_ = uStr2Float(parameters_.at(Parameters::kRtabmapDetectionRate()));
 		ROS_INFO("RTAB-Map rate detection = %f Hz", rate_);
 	}
-	bool isRGBD = uStr2Bool(parameters.at(Parameters::kRGBDEnabled()).c_str());
+	bool isRGBD = uStr2Bool(parameters_.at(Parameters::kRGBDEnabled()).c_str());
 	if(isRGBD)
 	{
 		// RGBD SLAM
@@ -246,17 +348,7 @@ CoreWrapper::CoreWrapper(bool deleteDbOnStart) :
 					  "detection on images-only.");
 		}
 	}
-	else
-	{
-		// loop closure detection (images-only)
-		if(subscribeDepth || subscribeLaserScan || subscribeStereo)
-		{
-			ROS_WARN("ROS param subscribe_depth, subscribe_laserScan or subscribe_stereo is true, but RTAB-Map "
-					  "parameter \"RGBD/Enabled\" is false! Please set subscribe_depth, subscribe_laserScan and subscribe_stereo "
-					  "to false to use rtabmap node for loop closure detection on images-only, or set \"RGBD/Enabled\" to true "
-					  "for RGB-D SLAM.");
-		}
-	}
+
 	if(paused_)
 	{
 		ROS_WARN("Node paused... don't forget to call service \"resume\" to start rtabmap.");
@@ -273,7 +365,7 @@ CoreWrapper::CoreWrapper(bool deleteDbOnStart) :
 	ROS_INFO("rtabmap: Using database from \"%s\".", databasePath_.c_str());
 
 	// Init RTAB-Map
-	rtabmap_.init(parameters, databasePath_);
+	rtabmap_.init(parameters_, databasePath_);
 
 	// setup services
 	updateSrv_ = nh.advertiseService("update_parameters", &CoreWrapper::updateRtabmapCallback, this);
@@ -281,24 +373,33 @@ CoreWrapper::CoreWrapper(bool deleteDbOnStart) :
 	pauseSrv_ = nh.advertiseService("pause", &CoreWrapper::pauseRtabmapCallback, this);
 	resumeSrv_ = nh.advertiseService("resume", &CoreWrapper::resumeRtabmapCallback, this);
 	triggerNewMapSrv_ = nh.advertiseService("trigger_new_map", &CoreWrapper::triggerNewMapCallback, this);
+	backupDatabase_ = nh.advertiseService("backup", &CoreWrapper::backupDatabaseCallback, this);
 	setModeLocalizationSrv_ = nh.advertiseService("set_mode_localization", &CoreWrapper::setModeLocalizationCallback, this);
 	setModeMappingSrv_ = nh.advertiseService("set_mode_mapping", &CoreWrapper::setModeMappingCallback, this);
 	getMapDataSrv_ = nh.advertiseService("get_map", &CoreWrapper::getMapCallback, this);
+	getGridMapSrv_ = nh.advertiseService("get_grid_map", &CoreWrapper::getGridMapCallback, this);
+	getProjMapSrv_ = nh.advertiseService("get_proj_map", &CoreWrapper::getProjMapCallback, this);
 	publishMapDataSrv_ = nh.advertiseService("publish_map", &CoreWrapper::publishMapCallback, this);
 	setGoalSrv_ = nh.advertiseService("set_goal", &CoreWrapper::setGoalCallback, this);
+	setLabelSrv_ = nh.advertiseService("set_label", &CoreWrapper::setLabelCallback, this);
+	listLabelsSrv_ = nh.advertiseService("list_labels", &CoreWrapper::listLabelsCallback, this);
+#ifdef WITH_OCTOMAP
+	octomapBinarySrv_ = nh.advertiseService("octomap_binary", &CoreWrapper::octomapBinaryCallback, this);
+	octomapFullSrv_ = nh.advertiseService("octomap_full", &CoreWrapper::octomapFullCallback, this);
+#endif
 
 	setupCallbacks(subscribeDepth, subscribeLaserScan, subscribeStereo, queueSize, stereoApproxSync);
 
-	int toroIterations = 0;
-	Parameters::parse(parameters, Parameters::kRGBDToroIterations(), toroIterations);
-	if(publishTf && toroIterations != 0)
+	int optimizeIterations = 0;
+	Parameters::parse(parameters_, Parameters::kRGBDOptimizeIterations(), optimizeIterations);
+	if(publishTf && optimizeIterations != 0)
 	{
 		transformThread_ = new boost::thread(boost::bind(&CoreWrapper::publishLoop, this, tfDelay));
 	}
 	else if(publishTf)
 	{
 		UWARN("Graph optimization is disabled (%s=0), the tf between frame \"%s\" and odometry frame will not be published. You can safely ignore this warning if you are using map_optimizer node.",
-				Parameters::kRGBDToroIterations().c_str(), mapFrameId_.c_str());
+				Parameters::kRGBDOptimizeIterations().c_str(), mapFrameId_.c_str());
 	}
 }
 
@@ -320,6 +421,16 @@ CoreWrapper::~CoreWrapper()
 		delete stereoApproxSync_;
 	if(stereoExactSync_)
 		delete stereoExactSync_;
+	if(depthTFSync_)
+		delete depthTFSync_;
+	if(depthScanTFSync_)
+		delete depthScanTFSync_;
+	if(stereoScanTFSync_)
+		delete stereoScanTFSync_;
+	if(stereoApproxTFSync_)
+		delete stereoApproxTFSync_;
+	if(stereoExactTFSync_)
+		delete stereoExactTFSync_;
 
 	this->saveParameters(configPath_);
 
@@ -442,8 +553,7 @@ void CoreWrapper::defaultCallback(const sensor_msgs::ImageConstPtr & imageMsg)
 			}
 			else
 			{
-				const Statistics & stats = rtabmap_.getStatistics();
-				this->publishStats(stats, ros::Time::now());
+				this->publishStats(ros::Time::now());
 			}
 		}
 		else if(!rtabmap_.isIDsGenerated())
@@ -462,32 +572,360 @@ void CoreWrapper::defaultCallback(const sensor_msgs::ImageConstPtr & imageMsg)
 	}
 }
 
-bool CoreWrapper::commonMetricCallbackBegin(const nav_msgs::OdometryConstPtr & odomMsg)
+bool CoreWrapper::commonOdomUpdate(const nav_msgs::OdometryConstPtr & odomMsg)
 {
-	Transform odom = rtabmap_ros::transformFromPoseMsg(odomMsg->pose.pose);
-	if(!lastPose_.isIdentity() && odom.isIdentity())
+	if(!paused_)
 	{
-		UWARN("Odometry is reset (identity pose detected). Increment map id!");
-		rtabmap_.triggerNewMap();
-		_variance = 0;
-	}
-
-	lastPose_ = odom;
-	if(odomMsg->pose.covariance[0] > _variance)
-	{
-		_variance = odomMsg->pose.covariance[0];
-	}
-
-	// Throttle
-	if(rate_>0.0f)
-	{
-		if(ros::Time::now() - time_ < ros::Duration(1.0f/rate_))
+		Transform odom = rtabmap_ros::transformFromPoseMsg(odomMsg->pose.pose);
+		if(!lastPose_.isIdentity() && odom.isIdentity())
 		{
+			UWARN("Odometry is reset (identity pose detected). Increment map id!");
+			rtabmap_.triggerNewMap();
+			rotVariance_ = 0;
+			transVariance_ = 0;
+		}
+
+		lastPose_ = odom;
+		lastPoseStamp_ = odomMsg->header.stamp;
+		float transVariance = max3(odomMsg->pose.covariance[0], odomMsg->pose.covariance[7], odomMsg->pose.covariance[14]);
+		float rotVariance = max3(odomMsg->pose.covariance[21], odomMsg->pose.covariance[28], odomMsg->pose.covariance[35]);
+		if(uIsFinite(rotVariance) && rotVariance > rotVariance_)
+		{
+			rotVariance_ = rotVariance;
+		}
+		if(uIsFinite(transVariance) && transVariance > transVariance_)
+		{
+			transVariance_ = transVariance;
+		}
+
+		// Throttle
+		if(rate_>0.0f)
+		{
+			if(ros::Time::now() - time_ < ros::Duration(1.0f/rate_))
+			{
+				return false;
+			}
+		}
+		time_ = ros::Time::now();
+		return true;
+	}
+	return false;
+}
+
+bool CoreWrapper::commonOdomTFUpdate(const ros::Time & stamp)
+{
+	if(!paused_)
+	{
+		// Odom TF ready?
+		Transform odom;
+		try
+		{
+			if(waitForTransform_)
+			{
+				if(!tfListener_.waitForTransform(odomFrameId_, frameId_, stamp, ros::Duration(1)))
+				{
+					ROS_WARN("Could not get transform from %s to %s after 1 second!", odomFrameId_.c_str(), frameId_.c_str());
+					return false;
+				}
+			}
+
+			tf::StampedTransform tmp;
+			tfListener_.lookupTransform(odomFrameId_, frameId_, stamp, tmp);
+			odom = rtabmap_ros::transformFromTF(tmp);
+		}
+		catch(tf::TransformException & ex)
+		{
+			ROS_WARN("%s",ex.what());
 			return false;
 		}
+
+		if(!lastPose_.isIdentity() && odom.isIdentity())
+		{
+			UWARN("Odometry is reset (identity pose detected). Increment map id!");
+			rtabmap_.triggerNewMap();
+			rotVariance_ = 0;
+			transVariance_ = 0;
+		}
+
+		lastPose_ = odom;
+		lastPoseStamp_ = stamp;
+		// Throttle
+		if(rate_>0.0f)
+		{
+			if(ros::Time::now() - time_ < ros::Duration(1.0f/rate_))
+			{
+				return false;
+			}
+		}
+		time_ = ros::Time::now();
+		return true;
 	}
-	time_ = ros::Time::now();
-	return true;
+	return false;
+}
+
+Transform CoreWrapper::getTransform(const std::string & fromFrameId, const std::string & toFrameId, const ros::Time & stamp) const
+{
+	// TF ready?
+	Transform localTransform;
+	try
+	{
+		if(waitForTransform_)
+		{
+			if(!tfListener_.waitForTransform(fromFrameId, toFrameId, stamp, ros::Duration(1)))
+			{
+				ROS_WARN("Could not get transform from %s to %s after 1 second!", fromFrameId.c_str(), toFrameId.c_str());
+				return localTransform;
+			}
+		}
+
+		tf::StampedTransform tmp;
+		tfListener_.lookupTransform(fromFrameId, toFrameId, stamp, tmp);
+		localTransform = rtabmap_ros::transformFromTF(tmp);
+	}
+	catch(tf::TransformException & ex)
+	{
+		ROS_WARN("%s",ex.what());
+	}
+	return localTransform;
+}
+
+void CoreWrapper::commonDepthCallback(
+		const std::string & odomFrameId,
+		const sensor_msgs::ImageConstPtr& imageMsg,
+		const sensor_msgs::ImageConstPtr& depthMsg,
+		const sensor_msgs::CameraInfoConstPtr& cameraInfoMsg,
+		const sensor_msgs::LaserScanConstPtr& scanMsg)
+{
+	if(!(imageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) ==0 ||
+			imageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) ==0 ||
+			imageMsg->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
+			imageMsg->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0) ||
+		!(depthMsg->encoding.compare(sensor_msgs::image_encodings::TYPE_16UC1) == 0 ||
+		 depthMsg->encoding.compare(sensor_msgs::image_encodings::TYPE_32FC1) == 0 ||
+		 depthMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0))
+	{
+		ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8 and image_depth=32FC1,16UC1,mono16");
+		return;
+	}
+
+	//for sync transform
+	Transform odomT = getTransform(odomFrameId, frameId_, lastPoseStamp_);
+	if(odomT.isNull() && !odomFrameId_.empty())
+	{
+		ROS_WARN("Could not get TF transform from %s to %s, sensors will not be synchronized with odometry pose.",
+				odomFrameId.c_str(), frameId_.c_str());
+	}
+
+	Transform localTransform = getTransform(frameId_, depthMsg->header.frame_id, depthMsg->header.stamp);
+	if(localTransform.isNull())
+	{
+		return;
+	}
+	// sync with odometry stamp
+	if(lastPoseStamp_ != depthMsg->header.stamp)
+	{
+		if(!odomT.isNull())
+		{
+			Transform sensorT = getTransform(odomFrameId, frameId_, depthMsg->header.stamp);
+			if(sensorT.isNull())
+			{
+				return;
+			}
+			localTransform = odomT.inverse() * sensorT * localTransform;
+		}
+	}
+
+	cv::Mat scan;
+	if(scanMsg.get() != 0)
+	{
+		// make sure the frame of the laser is updated too
+		if(getTransform(frameId_, scanMsg->header.frame_id, scanMsg->header.stamp).isNull())
+		{
+			return;
+		}
+
+		//transform in frameId_ frame
+		sensor_msgs::PointCloud2 scanOut;
+		laser_geometry::LaserProjection projection;
+		projection.transformLaserScanToPointCloud(frameId_, *scanMsg, scanOut, tfListener_);
+		pcl::PointCloud<pcl::PointXYZ>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZ>);
+		pcl::fromROSMsg(scanOut, *pclScan);
+
+		// sync with odometry stamp
+		if(lastPoseStamp_ != scanMsg->header.stamp)
+		{
+			if(!odomT.isNull())
+			{
+				Transform sensorT = getTransform(odomFrameId, frameId_, scanMsg->header.stamp);
+				if(sensorT.isNull())
+				{
+					return;
+				}
+				Transform t = odomT.inverse() * sensorT;
+				pclScan = util3d::transformPointCloud<pcl::PointXYZ>(pclScan, t);
+
+			}
+		}
+		scan = util3d::laserScanFromPointCloud(*pclScan);
+	}
+
+	cv_bridge::CvImageConstPtr ptrImage;
+	if(imageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
+	   imageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0)
+	{
+		ptrImage = cv_bridge::toCvShare(imageMsg, "mono8");
+	}
+	else
+	{
+		ptrImage = cv_bridge::toCvShare(imageMsg, "bgr8");
+	}
+	cv_bridge::CvImageConstPtr ptrDepth = cv_bridge::toCvShare(depthMsg);
+
+	image_geometry::PinholeCameraModel model;
+	model.fromCameraInfo(*cameraInfoMsg);
+	float fx = model.fx();
+	float fy = model.fy();
+	float cx = model.cx();
+	float cy = model.cy();
+
+	process(ptrImage->header.seq,
+			scanMsg.get() != 0?scanMsg->header.stamp:ptrDepth->header.stamp,
+			ptrImage->image,
+			lastPose_,
+			odomFrameId,
+			rotVariance_>0?rotVariance_:1.0f,
+			transVariance_>0?transVariance_:1.0f,
+			ptrDepth->image,
+			fx,
+			fy,
+			cx,
+			cy,
+			localTransform,
+			scan,
+			scanMsg.get() != 0?(int)scanMsg->ranges.size():0);
+	rotVariance_ = 0;
+	transVariance_ = 0;
+}
+
+void CoreWrapper::commonStereoCallback(
+		const std::string & odomFrameId,
+		const sensor_msgs::ImageConstPtr& leftImageMsg,
+		const sensor_msgs::ImageConstPtr& rightImageMsg,
+		const sensor_msgs::CameraInfoConstPtr& leftCamInfoMsg,
+		const sensor_msgs::CameraInfoConstPtr& rightCamInfoMsg,
+		const sensor_msgs::LaserScanConstPtr& scanMsg)
+{
+	if(!(leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
+		leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0 ||
+		leftImageMsg->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
+		leftImageMsg->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0) ||
+		!(rightImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
+		rightImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0 ||
+		rightImageMsg->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
+		rightImageMsg->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0))
+	{
+		ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8");
+		return;
+	}
+
+	//for sync transform
+	Transform odomT = getTransform(odomFrameId, frameId_, lastPoseStamp_);
+	if(odomT.isNull() && !odomFrameId_.empty())
+	{
+		ROS_WARN("Could not get TF transform from %s to %s, sensors will not be synchronized with odometry pose.",
+				odomFrameId.c_str(), frameId_.c_str());
+	}
+
+	Transform localTransform = getTransform(frameId_, leftImageMsg->header.frame_id, leftImageMsg->header.stamp);
+	if(localTransform.isNull())
+	{
+		return;
+	}
+
+	// sync with odometry stamp
+	if(lastPoseStamp_ != leftImageMsg->header.stamp)
+	{
+		if(!odomT.isNull())
+		{
+			Transform sensorT = getTransform(odomFrameId, frameId_, leftImageMsg->header.stamp);
+			if(sensorT.isNull())
+			{
+				return;
+			}
+			localTransform = odomT.inverse() * sensorT * localTransform;
+		}
+	}
+
+	cv::Mat scan;
+	if(scanMsg.get() != 0)
+	{
+		// make sure the frame of the laser is updated too
+		if(getTransform(frameId_, scanMsg->header.frame_id, scanMsg->header.stamp).isNull())
+		{
+			return;
+		}
+		//transform in frameId_ frame
+		sensor_msgs::PointCloud2 scanOut;
+		laser_geometry::LaserProjection projection;
+		projection.transformLaserScanToPointCloud(frameId_, *scanMsg, scanOut, tfListener_);
+		pcl::PointCloud<pcl::PointXYZ>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZ>);
+		pcl::fromROSMsg(scanOut, *pclScan);
+
+		// sync with odometry stamp
+		if(lastPoseStamp_ != scanMsg->header.stamp)
+		{
+			if(!odomT.isNull())
+			{
+				Transform sensorT = getTransform(odomFrameId, frameId_, scanMsg->header.stamp);
+				if(sensorT.isNull())
+				{
+					return;
+				}
+				Transform t = odomT.inverse() * sensorT;
+				pclScan = util3d::transformPointCloud<pcl::PointXYZ>(pclScan, t);
+
+			}
+		}
+		scan = util3d::laserScanFromPointCloud(*pclScan);
+	}
+
+	cv_bridge::CvImageConstPtr ptrLeftImage, ptrRightImage;
+	if(leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
+	   leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0)
+	{
+		ptrLeftImage = cv_bridge::toCvShare(leftImageMsg, "mono8");
+	}
+	else
+	{
+		ptrLeftImage = cv_bridge::toCvShare(leftImageMsg, "bgr8");
+	}
+	ptrRightImage = cv_bridge::toCvShare(rightImageMsg, "mono8");
+
+	image_geometry::StereoCameraModel model;
+	model.fromCameraInfo(*leftCamInfoMsg, *rightCamInfoMsg);
+
+	float fx = model.left().fx();
+	float cx = model.left().cx();
+	float cy = model.left().cy();
+	float baseline = model.baseline();
+
+	process(leftImageMsg->header.seq,
+			scanMsg.get() != 0?scanMsg->header.stamp:leftImageMsg->header.stamp,
+			ptrLeftImage->image,
+			lastPose_,
+			odomFrameId,
+			rotVariance_>0?rotVariance_:1.0f,
+			transVariance_>0?transVariance_:1.0f,
+			ptrRightImage->image,
+			fx,
+			baseline,
+			cx,
+			cy,
+			localTransform,
+			scan,
+			scanMsg.get() != 0?(int)scanMsg->ranges.size():0);
+	rotVariance_ = 0;
+	transVariance_ = 0;
 }
 
 void CoreWrapper::depthCallback(
@@ -496,83 +934,14 @@ void CoreWrapper::depthCallback(
 		const sensor_msgs::ImageConstPtr& depthMsg,
 		const sensor_msgs::CameraInfoConstPtr& cameraInfoMsg)
 {
-	if(!paused_)
+	if(!commonOdomUpdate(odomMsg))
 	{
-		if(!commonMetricCallbackBegin(odomMsg))
-		{
-			return;
-		}
-
-		if(!(imageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) ==0 ||
-			 imageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) ==0 ||
-			 imageMsg->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
-			 imageMsg->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0) ||
-			!(depthMsg->encoding.compare(sensor_msgs::image_encodings::TYPE_16UC1) == 0 ||
-			 depthMsg->encoding.compare(sensor_msgs::image_encodings::TYPE_32FC1) == 0))
-		{
-			ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8 and image_depth=32FC1,16UC1");
-			return;
-		}
-
-		// TF ready?
-		Transform localTransform;
-		try
-		{
-			if(waitForTransform_)
-			{
-				if(!tfListener_.waitForTransform(frameId_, depthMsg->header.frame_id, depthMsg->header.stamp, ros::Duration(1)))
-				{
-					ROS_WARN("Could not get transform from %s to %s after 1 second!", frameId_.c_str(), depthMsg->header.frame_id.c_str());
-					return;
-				}
-			}
-
-			tf::StampedTransform tmp;
-			tfListener_.lookupTransform(frameId_, depthMsg->header.frame_id, depthMsg->header.stamp, tmp);
-			localTransform = rtabmap_ros::transformFromTF(tmp);
-		}
-		catch(tf::TransformException & ex)
-		{
-			ROS_WARN("%s",ex.what());
-			return;
-		}
-
-
-		cv_bridge::CvImageConstPtr ptrImage;
-		if(imageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
-		   imageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0)
-		{
-			ptrImage = cv_bridge::toCvShare(imageMsg, "mono8");
-		}
-		else
-		{
-			ptrImage = cv_bridge::toCvShare(imageMsg, "bgr8");
-		}
-		cv_bridge::CvImageConstPtr ptrDepth = cv_bridge::toCvShare(depthMsg);
-
-		image_geometry::PinholeCameraModel model;
-		model.fromCameraInfo(*cameraInfoMsg);
-		float fx = model.fx();
-		float fy = model.fy();
-		float cx = model.cx();
-		float cy = model.cy();
-
-		process(ptrImage->header.seq,
-				ptrImage->image,
-				lastPose_,
-				odomMsg->header.frame_id,
-				_variance>0?_variance:1.0f,
-				ptrDepth->image,
-				fx,
-				fy,
-				cx,
-				cy,
-				localTransform,
-				cv::Mat());
-		_variance = 0;
+		return;
 	}
-}
 
+	sensor_msgs::LaserScanConstPtr scanMsg; // Null
+	commonDepthCallback(odomMsg->header.frame_id, imageMsg, depthMsg, cameraInfoMsg, scanMsg);
+}
 void CoreWrapper::depthScanCallback(
 		const sensor_msgs::ImageConstPtr& imageMsg,
 		const nav_msgs::OdometryConstPtr & odomMsg,
@@ -580,96 +949,12 @@ void CoreWrapper::depthScanCallback(
 		const sensor_msgs::CameraInfoConstPtr& cameraInfoMsg,
 		const sensor_msgs::LaserScanConstPtr& scanMsg)
 {
-	if(!paused_)
+	if(!commonOdomUpdate(odomMsg))
 	{
-		if(!commonMetricCallbackBegin(odomMsg))
-		{
-			return;
-		}
-
-		if(!(imageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) ==0 ||
-				imageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) ==0 ||
-				imageMsg->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
-				imageMsg->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0) ||
-			!(depthMsg->encoding.compare(sensor_msgs::image_encodings::TYPE_16UC1) == 0 ||
-			 depthMsg->encoding.compare(sensor_msgs::image_encodings::TYPE_32FC1) == 0))
-		{
-			ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8 and image_depth=32FC1,16UC1");
-			return;
-		}
-
-		// TF ready?
-		Transform localTransform;
-		try
-		{
-			if(waitForTransform_)
-			{
-				if(!tfListener_.waitForTransform(frameId_, scanMsg->header.frame_id, scanMsg->header.stamp, ros::Duration(1)))
-				{
-					ROS_WARN("Could not get transform from %s to %s after 1 second!", frameId_.c_str(), scanMsg->header.frame_id.c_str());
-					return;
-				}
-				if(!tfListener_.waitForTransform(frameId_, depthMsg->header.frame_id, depthMsg->header.stamp, ros::Duration(1)))
-				{
-					ROS_WARN("Could not get transform from %s to %s after 1 second!", frameId_.c_str(), depthMsg->header.frame_id.c_str());
-					return;
-				}
-			}
-
-			tf::StampedTransform tmp;
-			tfListener_.lookupTransform(frameId_, scanMsg->header.frame_id, scanMsg->header.stamp, tmp);
-			tfListener_.lookupTransform(frameId_, depthMsg->header.frame_id, depthMsg->header.stamp, tmp);
-			localTransform = rtabmap_ros::transformFromTF(tmp);
-		}
-		catch(tf::TransformException & ex)
-		{
-			ROS_WARN("%s",ex.what());
-			return;
-		}
-
-		//transform in frameId_ frame
-		sensor_msgs::PointCloud2 scanOut;
-		laser_geometry::LaserProjection projection;
-		projection.transformLaserScanToPointCloud(frameId_, *scanMsg, scanOut, tfListener_);
-		pcl::PointCloud<pcl::PointXYZ> pclScan;
-		pcl::fromROSMsg(scanOut, pclScan);
-		cv::Mat scan = util3d::laserScanFromPointCloud(pclScan);
-
-		cv_bridge::CvImageConstPtr ptrImage;
-		if(imageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
-		   imageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0)
-		{
-			ptrImage = cv_bridge::toCvShare(imageMsg, "mono8");
-		}
-		else
-		{
-			ptrImage = cv_bridge::toCvShare(imageMsg, "bgr8");
-		}
-		cv_bridge::CvImageConstPtr ptrDepth = cv_bridge::toCvShare(depthMsg);
-
-		image_geometry::PinholeCameraModel model;
-		model.fromCameraInfo(*cameraInfoMsg);
-		float fx = model.fx();
-		float fy = model.fy();
-		float cx = model.cx();
-		float cy = model.cy();
-
-		process(ptrImage->header.seq,
-				ptrImage->image,
-				lastPose_,
-				odomMsg->header.frame_id,
-				_variance>0?_variance:1.0f,
-				ptrDepth->image,
-				fx,
-				fy,
-				cx,
-				cy,
-				localTransform,
-				scan);
-		_variance = 0;
+		return;
 	}
+	commonDepthCallback(odomMsg->header.frame_id, imageMsg, depthMsg, cameraInfoMsg, scanMsg);
 }
-
 void CoreWrapper::stereoCallback(
 		const sensor_msgs::ImageConstPtr& leftImageMsg,
 	   const sensor_msgs::ImageConstPtr& rightImageMsg,
@@ -677,85 +962,14 @@ void CoreWrapper::stereoCallback(
 	   const sensor_msgs::CameraInfoConstPtr& rightCamInfoMsg,
 	   const nav_msgs::OdometryConstPtr & odomMsg)
 {
-	if(!paused_)
+	if(!commonOdomUpdate(odomMsg))
 	{
-		if(!commonMetricCallbackBegin(odomMsg))
-		{
-			return;
-		}
-
-		if(!(leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
-			leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0 ||
-			leftImageMsg->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
-			leftImageMsg->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0) ||
-			!(rightImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
-			rightImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0 ||
-			rightImageMsg->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
-			rightImageMsg->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0))
-		{
-			ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8");
-			return;
-		}
-
-		// TF ready?
-		Transform localTransform;
-		try
-		{
-			if(waitForTransform_)
-			{
-				if(!tfListener_.waitForTransform(frameId_, leftImageMsg->header.frame_id, leftImageMsg->header.stamp, ros::Duration(1)))
-				{
-					ROS_WARN("Could not get transform from %s to %s after 1 second!", frameId_.c_str(), leftImageMsg->header.frame_id.c_str());
-					return;
-				}
-			}
-
-			tf::StampedTransform tmp;
-			tfListener_.lookupTransform(frameId_, leftImageMsg->header.frame_id, leftImageMsg->header.stamp, tmp);
-			localTransform = rtabmap_ros::transformFromTF(tmp);
-		}
-		catch(tf::TransformException & ex)
-		{
-			ROS_WARN("%s",ex.what());
-			return;
-		}
-
-		cv_bridge::CvImageConstPtr ptrLeftImage, ptrRightImage;
-		if(leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
-		   leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0)
-		{
-			ptrLeftImage = cv_bridge::toCvShare(leftImageMsg, "mono8");
-		}
-		else
-		{
-			ptrLeftImage = cv_bridge::toCvShare(leftImageMsg, "bgr8");
-		}
-		ptrRightImage = cv_bridge::toCvShare(rightImageMsg, "mono8");
-
-		image_geometry::StereoCameraModel model;
-		model.fromCameraInfo(*leftCamInfoMsg, *rightCamInfoMsg);
-
-		float fx = model.left().fx();
-		float cx = model.left().cx();
-		float cy = model.left().cy();
-		float baseline = model.baseline();
-
-		process(leftImageMsg->header.seq,
-				ptrLeftImage->image,
-				lastPose_,
-				odomMsg->header.frame_id,
-				_variance>0?_variance:1.0f,
-				ptrRightImage->image,
-				fx,
-				baseline,
-				cx,
-				cy,
-				localTransform,
-				cv::Mat());
-		_variance = 0;
+		return;
 	}
-}
 
+	sensor_msgs::LaserScanConstPtr scanMsg; // Null
+	commonStereoCallback(odomMsg->header.frame_id, leftImageMsg, rightImageMsg, leftCamInfoMsg, rightCamInfoMsg, scanMsg);
+}
 void CoreWrapper::stereoScanCallback(
 		const sensor_msgs::ImageConstPtr& leftImageMsg,
 	   const sensor_msgs::ImageConstPtr& rightImageMsg,
@@ -764,116 +978,87 @@ void CoreWrapper::stereoScanCallback(
 	   const sensor_msgs::LaserScanConstPtr& scanMsg,
 	   const nav_msgs::OdometryConstPtr & odomMsg)
 {
-	if(!paused_)
+	if(!commonOdomUpdate(odomMsg))
 	{
-		if(!commonMetricCallbackBegin(odomMsg))
-		{
-			return;
-		}
-
-		if(!(leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
-			leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0 ||
-			leftImageMsg->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
-			leftImageMsg->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0) ||
-			!(rightImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
-			rightImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0 ||
-			rightImageMsg->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
-			rightImageMsg->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0))
-		{
-			ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8");
-			return;
-		}
-
-		// TF ready?
-		Transform localTransform;
-		try
-		{
-			if(waitForTransform_)
-			{
-				if(!tfListener_.waitForTransform(frameId_, scanMsg->header.frame_id, scanMsg->header.stamp, ros::Duration(1)))
-				{
-					ROS_WARN("Could not get transform from %s to %s after 1 second!", frameId_.c_str(), scanMsg->header.frame_id.c_str());
-					return;
-				}
-				if(!tfListener_.waitForTransform(frameId_, leftImageMsg->header.frame_id, leftImageMsg->header.stamp, ros::Duration(1)))
-				{
-					ROS_WARN("Could not get transform from %s to %s after 1 second!", frameId_.c_str(), leftImageMsg->header.frame_id.c_str());
-					return;
-				}
-			}
-
-			tf::StampedTransform tmp;
-			tfListener_.lookupTransform(frameId_, scanMsg->header.frame_id, scanMsg->header.stamp, tmp);
-			tfListener_.lookupTransform(frameId_, leftImageMsg->header.frame_id, leftImageMsg->header.stamp, tmp);
-			localTransform = rtabmap_ros::transformFromTF(tmp);
-		}
-		catch(tf::TransformException & ex)
-		{
-			ROS_WARN("%s",ex.what());
-			return;
-		}
-
-		//transform in frameId_ frame
-		sensor_msgs::PointCloud2 scanOut;
-		laser_geometry::LaserProjection projection;
-		projection.transformLaserScanToPointCloud(frameId_, *scanMsg, scanOut, tfListener_);
-		pcl::PointCloud<pcl::PointXYZ> pclScan;
-		pcl::fromROSMsg(scanOut, pclScan);
-		cv::Mat scan = util3d::laserScanFromPointCloud(pclScan);
-
-		cv_bridge::CvImageConstPtr ptrLeftImage, ptrRightImage;
-		if(leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
-		   leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0)
-		{
-			ptrLeftImage = cv_bridge::toCvShare(leftImageMsg, "mono8");
-		}
-		else
-		{
-			ptrLeftImage = cv_bridge::toCvShare(leftImageMsg, "bgr8");
-		}
-		ptrRightImage = cv_bridge::toCvShare(rightImageMsg, "mono8");
-
-		image_geometry::StereoCameraModel model;
-		model.fromCameraInfo(*leftCamInfoMsg, *rightCamInfoMsg);
-
-		float fx = model.left().fx();
-		float cx = model.left().cx();
-		float cy = model.left().cy();
-		float baseline = model.baseline();
-
-		process(leftImageMsg->header.seq,
-				ptrLeftImage->image,
-				lastPose_,
-				odomMsg->header.frame_id,
-				_variance>0?_variance:1.0f,
-				ptrRightImage->image,
-				fx,
-				baseline,
-				cx,
-				cy,
-				localTransform,
-				scan);
-		_variance = 0;
+		return;
 	}
+	commonStereoCallback(odomMsg->header.frame_id, leftImageMsg, rightImageMsg, leftCamInfoMsg, rightCamInfoMsg, scanMsg);
+}
+
+
+void CoreWrapper::depthTFCallback(
+		const sensor_msgs::ImageConstPtr& imageMsg,
+		const sensor_msgs::ImageConstPtr& depthMsg,
+		const sensor_msgs::CameraInfoConstPtr& cameraInfoMsg)
+{
+	if(!commonOdomTFUpdate(depthMsg->header.stamp))
+	{
+		return;
+	}
+	sensor_msgs::LaserScanConstPtr scanMsg; // Null
+	commonDepthCallback(odomFrameId_, imageMsg, depthMsg, cameraInfoMsg, scanMsg);
+}
+void CoreWrapper::depthScanTFCallback(
+		const sensor_msgs::ImageConstPtr& imageMsg,
+		const sensor_msgs::ImageConstPtr& depthMsg,
+		const sensor_msgs::CameraInfoConstPtr& cameraInfoMsg,
+		const sensor_msgs::LaserScanConstPtr& scanMsg)
+{
+	if(!commonOdomTFUpdate(scanMsg->header.stamp))
+	{
+		return;
+	}
+	commonDepthCallback(odomFrameId_, imageMsg, depthMsg, cameraInfoMsg, scanMsg);
+}
+void CoreWrapper::stereoTFCallback(
+		const sensor_msgs::ImageConstPtr& leftImageMsg,
+	   const sensor_msgs::ImageConstPtr& rightImageMsg,
+	   const sensor_msgs::CameraInfoConstPtr& leftCamInfoMsg,
+	   const sensor_msgs::CameraInfoConstPtr& rightCamInfoMsg)
+{
+	if(!commonOdomTFUpdate(leftImageMsg->header.stamp))
+	{
+		return;
+	}
+
+	sensor_msgs::LaserScanConstPtr scanMsg; // null
+	commonStereoCallback(odomFrameId_, leftImageMsg, rightImageMsg, leftCamInfoMsg, rightCamInfoMsg, scanMsg);
+}
+void CoreWrapper::stereoScanTFCallback(
+		const sensor_msgs::ImageConstPtr& leftImageMsg,
+	   const sensor_msgs::ImageConstPtr& rightImageMsg,
+	   const sensor_msgs::CameraInfoConstPtr& leftCamInfoMsg,
+	   const sensor_msgs::CameraInfoConstPtr& rightCamInfoMsg,
+	   const sensor_msgs::LaserScanConstPtr& scanMsg)
+{
+	if(!commonOdomTFUpdate(leftImageMsg->header.stamp))
+	{
+		return;
+	}
+	commonStereoCallback(odomFrameId_, leftImageMsg, rightImageMsg, leftCamInfoMsg, rightCamInfoMsg, scanMsg);
 }
 
 void CoreWrapper::process(
 		int id,
+		const ros::Time & stamp,
 		const cv::Mat & image,
 		const Transform & odom,
 		const std::string & odomFrameId,
-		float odomVariance,
+		float odomRotationalVariance,
+		float odomTransitionalVariance,
 		const cv::Mat & depthOrRightImage,
 		float fx,
 		float fyOrBaseline,
 		float cx,
 		float cy,
 		const Transform & localTransform,
-		const cv::Mat & scan)
+		const cv::Mat & scan,
+		int scanMaxPts)
 {
 	UTimer timer;
 	if(rtabmap_.isIDsGenerated() || id > 0)
 	{
+		double timeRtabmap = 0.0;
 		cv::Mat imageB;
 		if(!depthOrRightImage.empty())
 		{
@@ -911,6 +1096,7 @@ void CoreWrapper::process(
 		}
 
 		SensorData data(scan,
+				scanMaxPts,
 				image.clone(),
 				imageB,
 				fx,
@@ -919,23 +1105,47 @@ void CoreWrapper::process(
 				cy,
 				localTransform,
 				odom,
-				odomVariance,
-				id);
+				odomRotationalVariance,
+				odomTransitionalVariance,
+				id,
+				rtabmap_ros::timestampFromROS(stamp));
 
-		if(!rtabmap_.process(data))
+		if(rtabmap_.process(data))
 		{
-			ROS_WARN("RTAB-Map could not process the data received! (ROS id = %d)", id);
-		}
-		else
-		{
+			timeRtabmap = timer.ticks();
 			mapToOdomMutex_.lock();
 			rtabmap_ros::transformToTF(rtabmap_.getMapCorrection(), mapToOdom_);
 			odomFrameId_ = odomFrameId;
 			mapToOdomMutex_.unlock();
 
-			const Statistics & stats = rtabmap_.getStatistics();
-			ros::Time timeNow = ros::Time::now();
-			this->publishStats(stats, timeNow);
+			// Publish local graph, info
+			this->publishStats(stamp);
+			std::map<int, rtabmap::Transform> filteredPoses;
+
+			filteredPoses = this->updateMapCaches(rtabmap_.getLocalOptimizedPoses(),
+					cloudMapPub_.getNumSubscribers() != 0,
+					projMapPub_.getNumSubscribers() != 0,
+					gridMapPub_.getNumSubscribers() != 0);
+			this->publishMaps(filteredPoses, stamp);
+
+			// clear memory if no one subscribed
+			if(mapCacheCleanup_)
+			{
+				if(cloudMapPub_.getNumSubscribers() == 0)
+				{
+					clouds_.clear();
+				}
+
+				if(projMapPub_.getNumSubscribers() == 0)
+				{
+					projMaps_.clear();
+				}
+
+				if(gridMapPub_.getNumSubscribers() == 0)
+				{
+					gridMaps_.clear();
+				}
+			}
 
 			// update goal if planning is enabled
 			if(!currentMetricGoal_.isNull())
@@ -951,37 +1161,59 @@ void CoreWrapper::process(
 						goalReachedPub_.publish(result);
 					}
 					currentMetricGoal_.setNull();
+					latestNodeWasReached_ = false;
 				}
 				else
 				{
-					Transform updatedGoalPose = rtabmap_.getPose(rtabmap_.getPathCurrentGoalId());
-					if(!updatedGoalPose.isNull())
+					currentMetricGoal_ = rtabmap_.getPose(rtabmap_.getPathCurrentGoalId());
+					if(!currentMetricGoal_.isNull())
 					{
 						// Adjust the target pose relative to last node
-						if(rtabmap_.getPathCurrentGoalId() == rtabmap_.getPath().back())
+						if(rtabmap_.getPathCurrentGoalId() == rtabmap_.getPath().back().first && rtabmap_.getLocalOptimizedPoses().size())
 						{
-							updatedGoalPose *= rtabmap_.getPathTransformToGoal();
+							if(latestNodeWasReached_ ||
+							   rtabmap_.getLocalOptimizedPoses().rbegin()->second.getDistance(currentMetricGoal_) < rtabmap_.getGoalReachedRadius() ||
+							   rtabmap_.getPathTransformToGoal().getNorm() < rtabmap_.getGoalReachedRadius())
+							{
+								latestNodeWasReached_ = true;
+								currentMetricGoal_ *= rtabmap_.getPathTransformToGoal();
+							}
 						}
 
-						// detect if the goal has changed or local map
-						// has changed so much that current goal drifted
-						if(currentMetricGoal_.getDistance(updatedGoalPose) > rtabmap_.getGoalReachedRadius()/2.0f)
-						{
-							currentMetricGoal_ = updatedGoalPose;
-
-							publishCurrentGoal(timeNow);
-						}
+						// publish next goal with updated currentMetricGoal_
+						publishCurrentGoal(stamp);
 
 						// publish local path
-						publishLocalPath(timeNow);
+						publishLocalPath(stamp);
 					}
 					else
 					{
-						ROS_ERROR("Planning: Pose of node %d not found!? Cannot send a metric goal...", rtabmap_.getPathCurrentGoalId());
+						ROS_ERROR("Planning: Local map broken, current goal id=%d (the robot may have moved to far from planned nodes)",
+								rtabmap_.getPathCurrentGoalId());
+						rtabmap_.clearPath();
+						if(goalReachedPub_.getNumSubscribers())
+						{
+							std_msgs::Bool result;
+							result.data = false;
+							goalReachedPub_.publish(result);
+						}
+						currentMetricGoal_.setNull();
+						latestNodeWasReached_ = false;
 					}
 				}
 			}
 		}
+		else
+		{
+			timeRtabmap = timer.ticks();
+		}
+		ROS_INFO("rtabmap: Rate=%.2fs, Limit=%.3fs, RTAB-Map=%.4fs, Pub=%.4fs (local map=%d, WM=%d)",
+				rate_>0?1.0f/rate_:0,
+				rtabmap_.getTimeThreshold()/1000.0f,
+				timeRtabmap,
+				timer.ticks(),
+				(int)rtabmap_.getLocalOptimizedPoses().size(),
+				rtabmap_.getWMSize()+rtabmap_.getSTMSize());
 	}
 	else if(!rtabmap_.isIDsGenerated())
 	{
@@ -991,16 +1223,12 @@ void CoreWrapper::process(
 				 "when you need to have IDs output of RTAB-map synchronised with the source "
 				 "image sequence ID.");
 	}
-	ROS_INFO("rtabmap: Update rate=%fs, Limit=%fs, Processing time = %fs (%d local nodes)",
-			1.0f/rate_,
-			rtabmap_.getTimeThreshold()/1000.0f,
-			timer.ticks(),
-			rtabmap_.getWMSize()+rtabmap_.getSTMSize());
 }
 
-void CoreWrapper::goalCommonCallback(const std::list<std::pair<int, Transform> > & poses)
+void CoreWrapper::goalCommonCallback(const std::vector<std::pair<int, Transform> > & poses)
 {
 	currentMetricGoal_.setNull();
+	latestNodeWasReached_ = false;
 	if(poses.size())
 	{
 		currentMetricGoal_ = rtabmap_.getPose(rtabmap_.getPathCurrentGoalId());
@@ -1027,23 +1255,33 @@ void CoreWrapper::goalCommonCallback(const std::list<std::pair<int, Transform> >
 				path.header.frame_id = mapFrameId_;
 				path.header.stamp = now;
 				path.poses.resize(poses.size());
-				int oi = 0;
 				std::stringstream stream;
-				for(std::list<std::pair<int, Transform> >::const_iterator iter=poses.begin(); iter!=poses.end(); ++iter)
+				for(unsigned int i=0; i<poses.size(); ++i)
 				{
-					path.poses[oi].header = path.header;
-					rtabmap_ros::transformToPoseMsg(iter->second, path.poses[oi].pose);
-					++oi;
-					stream << iter->first << " ";
+					path.poses[i].header = path.header;
+					rtabmap_ros::transformToPoseMsg(poses[i].second, path.poses[i].pose);
+					stream << poses[i].first << " ";
 				}
+				if(!rtabmap_.getPathTransformToGoal().isIdentity())
+				{
+					path.poses.resize(poses.size()+1);
+					Transform t = poses.back().second*rtabmap_.getPathTransformToGoal();
+					rtabmap_ros::transformToPoseMsg(t, path.poses[path.poses.size()-1].pose);
+					stream << "G";
+				}
+
 				ROS_INFO("Publishing global path: [%s]", stream.str().c_str());
 				globalPathPub_.publish(path);
 			}
 
 			// Adjust the target pose relative to last node
-			if(rtabmap_.getPathCurrentGoalId() == poses.back().first)
+			if(rtabmap_.getPathCurrentGoalId() == rtabmap_.getPath().back().first && rtabmap_.getLocalOptimizedPoses().size())
 			{
-				currentMetricGoal_ *= rtabmap_.getPathTransformToGoal();
+				if(rtabmap_.getLocalOptimizedPoses().rbegin()->second.getDistance(currentMetricGoal_) < rtabmap_.getGoalReachedRadius())
+				{
+					latestNodeWasReached_ = true;
+					currentMetricGoal_ *= rtabmap_.getPathTransformToGoal();
+				}
 			}
 
 			publishCurrentGoal(now);
@@ -1052,7 +1290,9 @@ void CoreWrapper::goalCommonCallback(const std::list<std::pair<int, Transform> >
 	}
 	else
 	{
-		ROS_WARN("Planning: Goal already reached (RGBD/GoalReachedRadius=%fm).", rtabmap_.getGoalReachedRadius());
+		ROS_WARN("Planning: Goal already reached (RGBD/GoalReachedRadius=%fm) or too far from the graph (RGBD/GoalMaxDistance=%fm).",
+				rtabmap_.getGoalReachedRadius(),
+				rtabmap_.getLocalRadius());
 		rtabmap_.clearPath();
 		if(goalReachedPub_.getNumSubscribers())
 		{
@@ -1072,7 +1312,10 @@ void CoreWrapper::goalCallback(const geometry_msgs::PoseStampedConstPtr & msg)
 		return;
 	}
 	ROS_INFO("Planning: set goal %s", targetPose.prettyPrint().c_str());
-	goalCommonCallback(rtabmap_.computePath(targetPose, false));
+	UTimer timer;
+	rtabmap_.computePath(targetPose, false);
+	ROS_INFO("Planning: Time computing path = %f s", timer.ticks());
+	goalCommonCallback(rtabmap_.getPath());
 }
 
 void CoreWrapper::goalGlobalCallback(const geometry_msgs::PoseStampedConstPtr & msg)
@@ -1084,7 +1327,10 @@ void CoreWrapper::goalGlobalCallback(const geometry_msgs::PoseStampedConstPtr & 
 		return;
 	}
 	ROS_INFO("Planning: set goal %s", targetPose.prettyPrint().c_str());
-	goalCommonCallback(rtabmap_.computePath(targetPose, true));
+	UTimer timer;
+	rtabmap_.computePath(targetPose, true);
+	ROS_INFO("Planning: Time computing path = %f s", timer.ticks());
+	goalCommonCallback(rtabmap_.getPath());
 }
 
 bool CoreWrapper::updateRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&)
@@ -1132,9 +1378,14 @@ bool CoreWrapper::resetRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empt
 {
 	ROS_INFO("rtabmap: Reset");
 	rtabmap_.resetMemory();
-	_variance = 0;
+	rotVariance_ = 0;
+	transVariance_ = 0;
 	lastPose_.setIdentity();
 	currentMetricGoal_.setNull();
+	latestNodeWasReached_ = false;
+	clouds_.clear();
+	projMaps_.clear();
+	gridMaps_.clear();
 	return true;
 }
 
@@ -1177,6 +1428,29 @@ bool CoreWrapper::triggerNewMapCallback(std_srvs::Empty::Request&, std_srvs::Emp
 	return true;
 }
 
+bool CoreWrapper::backupDatabaseCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&)
+{
+	ROS_INFO("Backup: Saving memory...");
+	rtabmap_.close();
+	ROS_INFO("Backup: Saving memory... done!");
+
+	rotVariance_ = 0;
+	transVariance_ = 0;
+	lastPose_.setIdentity();
+	currentMetricGoal_.setNull();
+	latestNodeWasReached_ = false;
+
+	ROS_INFO("Backup: Saving \"%s\" to \"%s\"...", databasePath_.c_str(), (databasePath_+".back").c_str());
+	UFile::copy(databasePath_, databasePath_+".back");
+	ROS_INFO("Backup: Saving \"%s\" to \"%s\"... done!", databasePath_.c_str(), (databasePath_+".back").c_str());
+
+	ROS_INFO("Backup: Reloading memory...");
+	rtabmap_.init(parameters_, databasePath_);
+	ROS_INFO("Backup: Reloading memory... done!");
+
+	return true;
+}
+
 bool CoreWrapper::setModeLocalizationCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&)
 {
 	ROS_INFO("rtabmap: Set localization mode");
@@ -1195,7 +1469,7 @@ bool CoreWrapper::setModeMappingCallback(std_srvs::Empty::Request&, std_srvs::Em
 	return true;
 }
 
-bool CoreWrapper::getMapCallback(rtabmap_ros::GetMap::Request& req, rtabmap_ros::GetMap::Response& rep)
+bool CoreWrapper::getMapCallback(rtabmap_ros::GetMap::Request& req, rtabmap_ros::GetMap::Response& res)
 {
 	ROS_INFO("rtabmap: Getting map (global=%s optimized=%s graphOnly=%s)...",
 			req.global?"true":"false",
@@ -1205,6 +1479,9 @@ bool CoreWrapper::getMapCallback(rtabmap_ros::GetMap::Request& req, rtabmap_ros:
 	std::map<int, Transform> poses;
 	std::multimap<int, Link> constraints;
 	std::map<int, int> mapIds;
+	std::map<int, double> stamps;
+	std::map<int, std::string> labels;
+	std::map<int, std::vector<unsigned char> > userDatas;
 
 	if(req.graphOnly)
 	{
@@ -1212,6 +1489,9 @@ bool CoreWrapper::getMapCallback(rtabmap_ros::GetMap::Request& req, rtabmap_ros:
 				poses,
 				constraints,
 				mapIds,
+				stamps,
+				labels,
+				userDatas,
 				req.optimized,
 				req.global);
 	}
@@ -1222,6 +1502,9 @@ bool CoreWrapper::getMapCallback(rtabmap_ros::GetMap::Request& req, rtabmap_ros:
 				poses,
 				constraints,
 				mapIds,
+				stamps,
+				labels,
+				userDatas,
 				req.optimized,
 				req.global);
 	}
@@ -1235,41 +1518,152 @@ bool CoreWrapper::getMapCallback(rtabmap_ros::GetMap::Request& req, rtabmap_ros:
 	//RGB-D SLAM data
 	rtabmap_ros::mapGraphToROS(poses,
 		mapIds,
+		stamps,
+		labels,
+		userDatas,
 		constraints,
 		Transform::getIdentity(),
-		rep.data.graph);
+		res.data.graph);
 
 	// add data
-	rep.data.nodes.resize(signatures.size());
+	res.data.nodes.resize(signatures.size());
 	int i=0;
 	for(std::map<int, Signature>::iterator iter = signatures.begin(); iter!=signatures.end(); ++iter)
 	{
-		rtabmap_ros::nodeDataToROS(iter->second, rep.data.nodes[i++]);
+		rtabmap_ros::nodeDataToROS(iter->second, res.data.nodes[i++]);
 	}
 
-	rep.data.header.stamp = ros::Time::now();
-	rep.data.header.frame_id = mapFrameId_;
+	res.data.header.stamp = ros::Time::now();
+	res.data.header.frame_id = mapFrameId_;
 
 	return true;
 }
 
+bool CoreWrapper::getProjMapCallback(nav_msgs::GetMap::Request  &req, nav_msgs::GetMap::Response &res)
+{
+	std::map<int, rtabmap::Transform> filteredPoses;
+	filteredPoses = this->updateMapCaches(rtabmap_.getLocalOptimizedPoses(), false, true, false);
+	if(filteredPoses.size() && projMaps_.size())
+	{
+		// create the projection map
+		float xMin=0.0f, yMin=0.0f;
+		cv::Mat pixels = util3d::create2DMapFromOccupancyLocalMaps(
+				filteredPoses,
+				projMaps_,
+				gridCellSize_,
+				xMin, yMin,
+				gridSize_,
+				gridEroded_);
+
+		// clear memory if no one subscribed
+		if(mapCacheCleanup_ && projMapPub_.getNumSubscribers() == 0)
+		{
+			projMaps_.clear();
+		}
+
+		if(!pixels.empty())
+		{
+			//init
+			res.map.info.resolution = gridCellSize_;
+			res.map.info.origin.position.x = 0.0;
+			res.map.info.origin.position.y = 0.0;
+			res.map.info.origin.position.z = 0.0;
+			res.map.info.origin.orientation.x = 0.0;
+			res.map.info.origin.orientation.y = 0.0;
+			res.map.info.origin.orientation.z = 0.0;
+			res.map.info.origin.orientation.w = 1.0;
+
+			res.map.info.width = pixels.cols;
+			res.map.info.height = pixels.rows;
+			res.map.info.origin.position.x = xMin;
+			res.map.info.origin.position.y = yMin;
+			res.map.data.resize(res.map.info.width * res.map.info.height);
+
+			memcpy(res.map.data.data(), pixels.data, res.map.info.width * res.map.info.height);
+
+			res.map.header.frame_id = mapFrameId_;
+			res.map.header.stamp = ros::Time::now();
+			return true;
+		}
+	}
+	return false;
+}
+
+bool CoreWrapper::getGridMapCallback(nav_msgs::GetMap::Request  &req, nav_msgs::GetMap::Response &res)
+{
+	std::map<int, rtabmap::Transform> filteredPoses;
+	filteredPoses = this->updateMapCaches(rtabmap_.getLocalOptimizedPoses(), false, false, true);
+	if(filteredPoses.size() && gridMaps_.size())
+	{
+		// create the projection map
+		float xMin=0.0f, yMin=0.0f;
+		cv::Mat pixels = util3d::create2DMapFromOccupancyLocalMaps(
+				filteredPoses,
+				gridMaps_,
+				gridCellSize_,
+				xMin, yMin,
+				gridSize_,
+				gridEroded_);
+
+		// clear memory if no one subscribed
+		if(mapCacheCleanup_ && gridMapPub_.getNumSubscribers() == 0)
+		{
+			gridMaps_.clear();
+		}
+
+		if(!pixels.empty())
+		{
+			//init
+			res.map.info.resolution = gridCellSize_;
+			res.map.info.origin.position.x = 0.0;
+			res.map.info.origin.position.y = 0.0;
+			res.map.info.origin.position.z = 0.0;
+			res.map.info.origin.orientation.x = 0.0;
+			res.map.info.origin.orientation.y = 0.0;
+			res.map.info.origin.orientation.z = 0.0;
+			res.map.info.origin.orientation.w = 1.0;
+
+			res.map.info.width = pixels.cols;
+			res.map.info.height = pixels.rows;
+			res.map.info.origin.position.x = xMin;
+			res.map.info.origin.position.y = yMin;
+			res.map.data.resize(res.map.info.width * res.map.info.height);
+
+			memcpy(res.map.data.data(), pixels.data, res.map.info.width * res.map.info.height);
+
+			res.map.header.frame_id = mapFrameId_;
+			res.map.header.stamp = ros::Time::now();
+			return true;
+		}
+	}
+	return false;
+}
+
 bool CoreWrapper::publishMapCallback(rtabmap_ros::PublishMap::Request& req, rtabmap_ros::PublishMap::Response& res)
 {
-	if(mapData_.getNumSubscribers() || mapGraph_.getNumSubscribers())
-	{
-		ROS_INFO("rtabmap: Publishing map...");
+	ROS_INFO("rtabmap: Publishing map...");
 
+	if(mapDataPub_.getNumSubscribers() ||
+		mapGraphPub_.getNumSubscribers() ||
+		(!req.graphOnly && (cloudMapPub_.getNumSubscribers() || projMapPub_.getNumSubscribers() || gridMapPub_.getNumSubscribers())))
+	{
 		std::map<int, Signature> signatures;
 		std::map<int, Transform> poses;
 		std::multimap<int, Link> constraints;
 		std::map<int, int> mapIds;
+		std::map<int, double> stamps;
+		std::map<int, std::string> labels;
+		std::map<int, std::vector<unsigned char> > userDatas;
 
-		if(mapData_.getNumSubscribers() == 0 || req.graphOnly)
+		if(req.graphOnly)
 		{
 			rtabmap_.getGraph(
 					poses,
 					constraints,
 					mapIds,
+					stamps,
+					labels,
+					userDatas,
 					req.optimized,
 					req.global);
 		}
@@ -1280,6 +1674,9 @@ bool CoreWrapper::publishMapCallback(rtabmap_ros::PublishMap::Request& req, rtab
 					poses,
 					constraints,
 					mapIds,
+					stamps,
+					labels,
+					userDatas,
 					req.optimized,
 					req.global);
 		}
@@ -1287,59 +1684,251 @@ bool CoreWrapper::publishMapCallback(rtabmap_ros::PublishMap::Request& req, rtab
 		if(poses.size() && poses.size() != mapIds.size())
 		{
 			ROS_ERROR("poses and map ids are not the same size!? %d vs %d", (int)poses.size(), (int)mapIds.size());
-			return false;
 		}
 
-		rtabmap_ros::GraphPtr graphMsg(new rtabmap_ros::Graph);
-		graphMsg->header.stamp = ros::Time::now();
-		graphMsg->header.frame_id = mapFrameId_;
-
-		rtabmap_ros::mapGraphToROS(poses,
-			mapIds,
-			constraints,
-			Transform::getIdentity(),
-			*graphMsg);
-
-		if(mapData_.getNumSubscribers())
+		ros::Time now = ros::Time::now();
+		if(mapDataPub_.getNumSubscribers() || mapGraphPub_.getNumSubscribers())
 		{
-			//RGB-D SLAM data
-			rtabmap_ros::MapDataPtr msg(new rtabmap_ros::MapData);
-			msg->header = graphMsg->header;
-			msg->graph = *graphMsg;
+			rtabmap_ros::GraphPtr graphMsg(new rtabmap_ros::Graph);
+			graphMsg->header.stamp = now;
+			graphMsg->header.frame_id = mapFrameId_;
 
-			// add data
-			msg->nodes.resize(signatures.size());
-			int i=0;
-			for(std::map<int, Signature>::iterator iter = signatures.begin(); iter!=signatures.end(); ++iter)
+			rtabmap_ros::mapGraphToROS(poses,
+				mapIds,
+				stamps,
+				labels,
+				userDatas,
+				constraints,
+				Transform::getIdentity(),
+				*graphMsg);
+
+			if(mapDataPub_.getNumSubscribers())
 			{
-				rtabmap_ros::nodeDataToROS(iter->second, msg->nodes[i++]);
+				//RGB-D SLAM data
+				rtabmap_ros::MapDataPtr msg(new rtabmap_ros::MapData);
+				msg->header = graphMsg->header;
+				msg->graph = *graphMsg;
+
+				// add data
+				msg->nodes.resize(signatures.size());
+				int i=0;
+				for(std::map<int, Signature>::iterator iter = signatures.begin(); iter!=signatures.end(); ++iter)
+				{
+					rtabmap_ros::nodeDataToROS(iter->second, msg->nodes[i++]);
+				}
+
+				mapDataPub_.publish(msg);
 			}
 
-			mapData_.publish(msg);
+			if(mapGraphPub_.getNumSubscribers())
+			{
+				mapGraphPub_.publish(graphMsg);
+			}
 		}
 
-		if(mapGraph_.getNumSubscribers())
+		if(!req.graphOnly)
 		{
-			mapGraph_.publish(graphMsg);
+			std::map<int, Transform> filteredPoses;
+			if(signatures.size())
+			{
+				filteredPoses = this->updateMapCaches(poses,
+									cloudMapPub_.getNumSubscribers() != 0,
+									projMapPub_.getNumSubscribers() != 0,
+									gridMapPub_.getNumSubscribers() != 0,
+									signatures);
+			}
+			else if(mapFilterRadius_ > 0.0)
+			{
+				// filter nodes
+				double angle = mapFilterAngle_ == 0.0?CV_PI+0.1:mapFilterAngle_*CV_PI/180.0;
+				filteredPoses = rtabmap::graph::radiusPosesFiltering(poses, mapFilterRadius_, angle);
+			}
+			else
+			{
+				filteredPoses = poses;
+			}
+			publishMaps(filteredPoses, now);
+
+			// clear memory if no one subscribed
+			if(mapCacheCleanup_)
+			{
+				if(cloudMapPub_.getNumSubscribers() == 0)
+				{
+					clouds_.clear();
+				}
+
+				if(projMapPub_.getNumSubscribers() == 0)
+				{
+					projMaps_.clear();
+				}
+
+				if(gridMapPub_.getNumSubscribers() == 0)
+				{
+					gridMaps_.clear();
+				}
+			}
+		}
+
+		if(labelsPub_.getNumSubscribers())
+		{
+			if(poses.size() && labels.size())
+			{
+				visualization_msgs::MarkerArray markers;
+				for(std::map<int, std::string>::const_iterator iter=labels.begin();
+					iter!=labels.end();
+					++iter)
+				{
+					std::map<int, Transform>::const_iterator poseIter= poses.find(iter->first);
+					if(poseIter!=poses.end())
+					{
+						// Add labels
+						if(!iter->second.empty())
+						{
+							visualization_msgs::Marker marker;
+							marker.header.frame_id = mapFrameId_;
+							marker.header.stamp = now;
+							marker.ns = "labels";
+							marker.id = -iter->first;
+							marker.action = visualization_msgs::Marker::ADD;
+							marker.pose.position.x = poseIter->second.x();
+							marker.pose.position.y = poseIter->second.y();
+							marker.pose.position.z = poseIter->second.z();
+							marker.pose.orientation.x = 0.0;
+							marker.pose.orientation.y = 0.0;
+							marker.pose.orientation.z = 0.0;
+							marker.pose.orientation.w = 1.0;
+							marker.scale.x = 1;
+							marker.scale.y = 1;
+							marker.scale.z = 0.5;
+							marker.color.a = 0.7;
+							marker.color.r = 1.0;
+							marker.color.g = 0.0;
+							marker.color.b = 0.0;
+
+							marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+							marker.text = iter->second;
+
+							markers.markers.push_back(marker);
+						}
+						// Add node ids
+						visualization_msgs::Marker marker;
+						marker.header.frame_id = mapFrameId_;
+						marker.header.stamp = now;
+						marker.ns = "ids";
+						marker.id = iter->first;
+						marker.action = visualization_msgs::Marker::ADD;
+						marker.pose.position.x = poseIter->second.x();
+						marker.pose.position.y = poseIter->second.y();
+						marker.pose.position.z = poseIter->second.z();
+						marker.pose.orientation.x = 0.0;
+						marker.pose.orientation.y = 0.0;
+						marker.pose.orientation.z = 0.0;
+						marker.pose.orientation.w = 1.0;
+						marker.scale.x = 1;
+						marker.scale.y = 1;
+						marker.scale.z = 0.2;
+						marker.color.a = 0.5;
+						marker.color.r = 1.0;
+						marker.color.g = 1.0;
+						marker.color.b = 1.0;
+						marker.lifetime = ros::Duration(2.0f/rate_);
+
+						marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+						marker.text = uNumber2Str(iter->first);
+
+						markers.markers.push_back(marker);
+					}
+				}
+
+				if(markers.markers.size())
+				{
+					labelsPub_.publish(markers);
+				}
+			}
 		}
 	}
 	else
 	{
-		ROS_INFO("rtabmap: not publishing the map because there are no subscribers to MapData...");
+		UWARN("No subscribers, don't need to publish!");
 	}
+
 	return true;
 }
 
 bool CoreWrapper::setGoalCallback(rtabmap_ros::SetGoal::Request& req, rtabmap_ros::SetGoal::Response& res)
 {
-	int id = req.target_node_id;
-	ROS_INFO("Planning: set goal %d", id);
-	goalCommonCallback(rtabmap_.computePath(id, req.in_global_graph));
-	return !currentMetricGoal_.isNull();
+	int id = req.node_id;
+	if(id == 0 && !req.node_label.empty() && rtabmap_.getMemory())
+	{
+		id = rtabmap_.getMemory()->getSignatureIdByLabel(req.node_label);
+	}
+
+	if(id > 0)
+	{
+		ROS_INFO("Planning: set goal %d", id);
+		UTimer timer;
+		rtabmap_.computePath(id, true);
+		ROS_INFO("Planning: Time computing path = %f s", timer.ticks());
+		goalCommonCallback(rtabmap_.getPath());
+		if(currentMetricGoal_.isNull())
+		{
+			ROS_ERROR("Planning: Node id %d not found or goal already reached!", id);
+		}
+	}
+	else if(!req.node_label.empty())
+	{
+		ROS_ERROR("Planning: Node with label \"%s\" not found!", req.node_label.c_str());
+	}
+	else
+	{
+		ROS_ERROR("Planning: Node id should be > 0 !");
+	}
+	return true;
 }
 
-void CoreWrapper::publishStats(const Statistics & stats, const ros::Time & stamp)
+bool CoreWrapper::setLabelCallback(rtabmap_ros::SetLabel::Request& req, rtabmap_ros::SetLabel::Response& res)
 {
+	if(rtabmap_.labelLocation(req.node_id, req.node_label))
+	{
+		if(req.node_id > 0)
+		{
+			ROS_INFO("Set label \"%s\" to node %d", req.node_label.c_str(), req.node_id);
+		}
+		else
+		{
+			ROS_INFO("Set label \"%s\" to last node", req.node_label.c_str());
+		}
+	}
+	else
+	{
+		if(req.node_id > 0)
+		{
+			ROS_ERROR("Could not set label \"%s\" to node %d", req.node_label.c_str(), req.node_id);
+		}
+		else
+		{
+			ROS_ERROR("Could not set label \"%s\" to last node", req.node_label.c_str());
+		}
+	}
+	return true;
+}
+
+bool CoreWrapper::listLabelsCallback(rtabmap_ros::ListLabels::Request& req, rtabmap_ros::ListLabels::Response& res)
+{
+	if(rtabmap_.getMemory())
+	{
+		std::map<int, std::string> labels = rtabmap_.getMemory()->getAllLabels();
+		res.labels = uValues(labels);
+		ROS_INFO("List labels service: %d labels found.", (int)res.labels.size());
+	}
+	return true;
+}
+
+void CoreWrapper::publishStats(const ros::Time & stamp)
+{
+	UDEBUG("Publishing stats...");
+	const rtabmap::Statistics & stats = rtabmap_.getStatistics();
+
 	if(infoPub_.getNumSubscribers())
 	{
 		//ROS_INFO("Sending RtabmapInfo msg (last_id=%d)...", stat.refImageId());
@@ -1351,9 +1940,12 @@ void CoreWrapper::publishStats(const Statistics & stats, const ros::Time & stamp
 		infoPub_.publish(msg);
 	}
 
-	if(mapData_.getNumSubscribers() || mapGraph_.getNumSubscribers())
+	if(mapDataPub_.getNumSubscribers() || mapGraphPub_.getNumSubscribers())
 	{
-		if(stats.poses().size() == 0 || stats.poses().size() == stats.getMapIds().size())
+		if(stats.poses().size() == stats.getMapIds().size() &&
+		   stats.poses().size() == stats.getStamps().size() &&
+		   stats.poses().size() == stats.getLabels().size() &&
+		   stats.poses().size() == stats.getUserDatas().size())
 		{
 			rtabmap_ros::GraphPtr graphMsg(new rtabmap_ros::Graph);
 			graphMsg->header.stamp = stamp;
@@ -1362,11 +1954,14 @@ void CoreWrapper::publishStats(const Statistics & stats, const ros::Time & stamp
 			rtabmap_ros::mapGraphToROS(
 				stats.poses(),
 				stats.getMapIds(),
+				stats.getStamps(),
+				stats.getLabels(),
+				stats.getUserDatas(),
 				stats.constraints(),
 				stats.mapCorrection(),
 				*graphMsg);
 
-			if(mapData_.getNumSubscribers())
+			if(mapDataPub_.getNumSubscribers())
 			{
 				//RGB-D SLAM data
 				rtabmap_ros::MapDataPtr msg(new rtabmap_ros::MapData);
@@ -1376,17 +1971,499 @@ void CoreWrapper::publishStats(const Statistics & stats, const ros::Time & stamp
 				msg->nodes.resize(1);
 				rtabmap_ros::nodeDataToROS(stats.getSignature(), msg->nodes[0]);
 
-				mapData_.publish(msg);
+				mapDataPub_.publish(msg);
 			}
 
-			if(mapGraph_.getNumSubscribers())
+			if(mapGraphPub_.getNumSubscribers())
 			{
-				mapGraph_.publish(graphMsg);
+				mapGraphPub_.publish(graphMsg);
 			}
 		}
 		else
 		{
-			ROS_ERROR("Poses and map ids are not the same size!? %d vs %d", (int)stats.poses().size(), (int)stats.getMapIds().size());
+			ROS_ERROR("Poses, map ids and labels are not the same size!? %d vs %d vs %d",
+					(int)stats.poses().size(), (int)stats.getMapIds().size(), (int)stats.getLabels().size());
+		}
+	}
+
+	if(labelsPub_.getNumSubscribers())
+	{
+		if(stats.poses().size() && stats.getLabels().size())
+		{
+			visualization_msgs::MarkerArray markers;
+			for(std::map<int, std::string>::const_iterator iter=stats.getLabels().begin();
+				iter!=stats.getLabels().end();
+				++iter)
+			{
+				std::map<int, Transform>::const_iterator poseIter= stats.poses().find(iter->first);
+				if(poseIter!=stats.poses().end())
+				{
+					// Add labels
+					if(!iter->second.empty())
+					{
+						visualization_msgs::Marker marker;
+						marker.header.frame_id = mapFrameId_;
+						marker.header.stamp = stamp;
+						marker.ns = "labels";
+						marker.id = -iter->first;
+						marker.action = visualization_msgs::Marker::ADD;
+						marker.pose.position.x = poseIter->second.x();
+						marker.pose.position.y = poseIter->second.y();
+						marker.pose.position.z = poseIter->second.z();
+						marker.pose.orientation.x = 0.0;
+						marker.pose.orientation.y = 0.0;
+						marker.pose.orientation.z = 0.0;
+						marker.pose.orientation.w = 1.0;
+						marker.scale.x = 1;
+						marker.scale.y = 1;
+						marker.scale.z = 0.5;
+						marker.color.a = 0.7;
+						marker.color.r = 1.0;
+						marker.color.g = 0.0;
+						marker.color.b = 0.0;
+
+						marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+						marker.text = iter->second;
+
+						markers.markers.push_back(marker);
+					}
+					// Add node ids
+					visualization_msgs::Marker marker;
+					marker.header.frame_id = mapFrameId_;
+					marker.header.stamp = stamp;
+					marker.ns = "ids";
+					marker.id = iter->first;
+					marker.action = visualization_msgs::Marker::ADD;
+					marker.pose.position.x = poseIter->second.x();
+					marker.pose.position.y = poseIter->second.y();
+					marker.pose.position.z = poseIter->second.z();
+					marker.pose.orientation.x = 0.0;
+					marker.pose.orientation.y = 0.0;
+					marker.pose.orientation.z = 0.0;
+					marker.pose.orientation.w = 1.0;
+					marker.scale.x = 1;
+					marker.scale.y = 1;
+					marker.scale.z = 0.2;
+					marker.color.a = 0.5;
+					marker.color.r = 1.0;
+					marker.color.g = 1.0;
+					marker.color.b = 1.0;
+					marker.lifetime = ros::Duration(2.0f/rate_);
+
+					marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+					marker.text = uNumber2Str(iter->first);
+
+					markers.markers.push_back(marker);
+				}
+			}
+
+			if(markers.markers.size())
+			{
+				labelsPub_.publish(markers);
+			}
+		}
+	}
+}
+
+std::map<int, rtabmap::Transform> CoreWrapper::updateMapCaches(
+		const std::map<int, rtabmap::Transform> & poses,
+		bool updateCloud,
+		bool updateProj,
+		bool updateGrid,
+		const std::map<int, Signature> & signatures)
+{
+	UDEBUG("Updating map caches...");
+
+	if(!rtabmap_.getMemory() && signatures.size() == 0)
+	{
+		ROS_FATAL("Memory not initialized!?");
+		return std::map<int, rtabmap::Transform>();
+	}
+
+	std::map<int, rtabmap::Transform> filteredPoses;
+
+	// update cache
+	if(updateCloud || updateProj || updateGrid)
+	{
+		// filter nodes
+		if(mapFilterRadius_ > 0.0)
+		{
+			double angle = mapFilterAngle_ == 0.0?CV_PI+0.1:mapFilterAngle_*CV_PI/180.0;
+			filteredPoses = rtabmap::graph::radiusPosesFiltering(poses, mapFilterRadius_, angle);
+		}
+		else
+		{
+			filteredPoses = poses;
+		}
+
+
+		for(std::map<int, Transform>::iterator iter=filteredPoses.begin(); iter!=filteredPoses.end(); ++iter)
+		{
+			if(!iter->second.isNull())
+			{
+				Signature data;
+				bool rgbDepthRequired = updateCloud && !uContains(clouds_, iter->first);
+				bool depthRequired = updateProj && !uContains(projMaps_, iter->first);
+				bool scanRequired = updateGrid && !uContains(gridMaps_, iter->first);
+				if(rgbDepthRequired ||
+					depthRequired ||
+					scanRequired)
+				{
+					if(signatures.size())
+					{
+						std::map<int, Signature>::const_iterator findIter = signatures.find(iter->first);
+						if(findIter != signatures.end())
+						{
+							data = findIter->second;
+						}
+					}
+					else
+					{
+						data = rtabmap_.getMemory()->getSignatureDataConst(iter->first);
+					}
+				}
+
+				if(data.id() > 0)
+				{
+					Transform localTransform = data.getLocalTransform();
+					if(!localTransform.isNull())
+					{
+						// Which data should we decompress?
+						cv::Mat image, depth, scan;
+						data.uncompressDataConst(rgbDepthRequired?&image:0, rgbDepthRequired||depthRequired?&depth:0, scanRequired?&scan:0);
+						if(!depth.empty() &&
+							depth.type() == CV_8UC1 &&
+							image.empty() &&
+							!rgbDepthRequired)
+						{
+							// Stereo detected, we should uncompress left image too
+							data.uncompressDataConst(&image, 0, 0);
+						}
+						float fx = data.getFx();
+						float fy = data.getFy();
+						float cx = data.getCx();
+						float cy = data.getCy();
+
+						pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudRGB;
+						pcl::PointCloud<pcl::PointXYZ>::Ptr cloudXYZ;
+						if(rgbDepthRequired)
+						{
+							if(!image.empty() &&
+								!depth.empty() &&
+								fx > 0.0f && fy > 0.0f &&
+								cx >= 0.0f && cy >= 0.0f)
+							{
+								if(depth.type() == CV_8UC1)
+								{
+									cloudRGB = util3d::cloudFromStereoImages(image, depth, cx, cy, fx, fy, cloudDecimation_);
+								}
+								else
+								{
+									cloudRGB = util3d::cloudFromDepthRGB(image, depth, cx, cy, fx, fy, cloudDecimation_);
+								}
+
+								if(cloudRGB->size() && cloudMaxDepth_ > 0)
+								{
+									cloudRGB = util3d::passThrough<pcl::PointXYZRGB>(cloudRGB, "z", 0, cloudMaxDepth_);
+								}
+								if(cloudRGB->size() && cloudVoxelSize_ > 0)
+								{
+									cloudRGB = util3d::voxelize<pcl::PointXYZRGB>(cloudRGB, cloudVoxelSize_);
+								}
+								if(cloudRGB->size())
+								{
+									cloudRGB = util3d::transformPointCloud<pcl::PointXYZRGB>(cloudRGB, localTransform);
+								}
+							}
+							else
+							{
+								ROS_ERROR("RGB or Depth image not found (node=%d)!", iter->first);
+							}
+						}
+						else if(depthRequired)
+						{
+							if(	!depth.empty() &&
+								fx > 0.0f && fy > 0.0f &&
+								cx >= 0.0f && cy >= 0.0f)
+							{
+								if(depth.type() == CV_8UC1)
+								{
+									if(!image.empty())
+									{
+										cv::Mat leftMono;
+										if(image.channels() == 3)
+										{
+											cv::cvtColor(image, leftMono, CV_BGR2GRAY);
+										}
+										else
+										{
+											leftMono = image;
+										}
+										cloudXYZ = rtabmap::util3d::cloudFromDisparity(
+												util3d::disparityFromStereoImages(leftMono, depth),
+												cx, cy,
+												fx, fy,
+												cloudDecimation_);
+									}
+								}
+								else
+								{
+									cloudXYZ = util3d::cloudFromDepth(depth, cx, cy, fx, fy, cloudDecimation_);
+								}
+
+								if(cloudXYZ.get())
+								{
+									if(cloudXYZ->size() && cloudMaxDepth_ > 0)
+									{
+										cloudXYZ = util3d::passThrough<pcl::PointXYZ>(cloudXYZ, "z", 0, cloudMaxDepth_);
+									}
+									if(cloudXYZ->size() && gridCellSize_ > 0)
+									{
+										// use gridCellSize since this cloud is only for the projection map
+										cloudXYZ = util3d::voxelize<pcl::PointXYZ>(cloudXYZ, gridCellSize_);
+									}
+									if(cloudXYZ->size())
+									{
+										cloudXYZ = util3d::transformPointCloud<pcl::PointXYZ>(cloudXYZ, localTransform);
+									}
+								}
+								else
+								{
+									ROS_ERROR("Left stereo image was empty! (node=%d)", iter->first);
+								}
+							}
+							else
+							{
+								ROS_ERROR("RGB or Depth image not found (node=%d)!", iter->first);
+							}
+						}
+
+						if(cloudRGB.get())
+						{
+							clouds_.insert(std::make_pair(iter->first, cloudRGB));
+						}
+
+						if(depthRequired)
+						{
+							cv::Mat ground, obstacles;
+							if(cloudRGB.get())
+							{
+								pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudClipped = cloudRGB;
+								if(cloudClipped->size() && projMaxHeight_ > 0)
+								{
+									cloudClipped = util3d::passThrough<pcl::PointXYZRGB>(cloudClipped, "z", std::numeric_limits<int>::min(), projMaxHeight_);
+								}
+								if(cloudClipped->size())
+								{
+									cloudClipped = util3d::voxelize<pcl::PointXYZRGB>(cloudClipped, gridCellSize_);
+									util3d::occupancy2DFromCloud3D<pcl::PointXYZRGB>(cloudClipped, ground, obstacles, gridCellSize_, projMaxGroundAngle_*M_PI/180.0, projMinClusterSize_);
+								}
+							}
+							else if(cloudXYZ.get())
+							{
+								pcl::PointCloud<pcl::PointXYZ>::Ptr cloudClipped = cloudXYZ;
+								if(cloudClipped->size() && projMaxHeight_ > 0)
+								{
+									cloudClipped = util3d::passThrough<pcl::PointXYZ>(cloudClipped, "z", std::numeric_limits<int>::min(), projMaxHeight_);
+								}
+								if(cloudClipped->size())
+								{
+									util3d::occupancy2DFromCloud3D<pcl::PointXYZ>(cloudClipped, ground, obstacles, gridCellSize_, projMaxGroundAngle_*M_PI/180.0, projMinClusterSize_);
+								}
+							}
+							projMaps_.insert(std::make_pair(iter->first, std::make_pair(ground, obstacles)));
+						}
+
+						if(scanRequired)
+						{
+							cv::Mat ground, obstacles;
+							util3d::occupancy2DFromLaserScan(scan, ground, obstacles, gridCellSize_);
+							gridMaps_.insert(std::make_pair(iter->first, std::make_pair(ground, obstacles)));
+						}
+					}
+					else
+					{
+						ROS_ERROR("Local transform detected for node %d", iter->first);
+					}
+				}
+			}
+			else
+			{
+				ROS_ERROR("Pose null for node %d", iter->first);
+			}
+		}
+
+		// cleanup not used nodes
+		for(std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr >::iterator iter=clouds_.begin();
+			iter!=clouds_.end();)
+		{
+			if(!uContains(poses, iter->first))
+			{
+				clouds_.erase(iter++);
+			}
+			else
+			{
+				++iter;
+			}
+		}
+		for(std::map<int, std::pair<cv::Mat, cv::Mat> >::iterator iter=projMaps_.begin();
+			iter!=projMaps_.end();)
+		{
+			if(!uContains(poses, iter->first))
+			{
+				projMaps_.erase(iter++);
+			}
+			else
+			{
+				++iter;
+			}
+		}
+		for(std::map<int, std::pair<cv::Mat, cv::Mat> >::iterator iter=gridMaps_.begin();
+			iter!=gridMaps_.end();)
+		{
+			if(!uContains(poses, iter->first))
+			{
+				gridMaps_.erase(iter++);
+			}
+			else
+			{
+				++iter;
+			}
+		}
+	}
+
+	return filteredPoses;
+}
+
+void CoreWrapper::publishMaps(
+		const std::map<int, rtabmap::Transform> & poses,
+		const ros::Time & stamp)
+{
+	UDEBUG("Publishing maps...");
+
+	// publish maps
+	if(cloudMapPub_.getNumSubscribers())
+	{
+		// generate the assembled cloud!
+		UTimer time;
+		pcl::PointCloud<pcl::PointXYZRGB>::Ptr assembledCloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+		int count = 0;
+		for(std::map<int, Transform>::const_iterator iter = poses.begin(); iter!=poses.end(); ++iter)
+		{
+			std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr >::iterator jter = clouds_.find(iter->first);
+			if(jter != clouds_.end())
+			{
+				pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed = util3d::transformPointCloud<pcl::PointXYZRGB>(jter->second, iter->second);
+				*assembledCloud+=*transformed;
+				++count;
+			}
+		}
+
+		if(assembledCloud->size())
+		{
+			if(cloudVoxelSize_ > 0 && cloudOutputVoxelized_)
+			{
+				assembledCloud = util3d::voxelize<pcl::PointXYZRGB>(assembledCloud, cloudVoxelSize_);
+			}
+			ROS_INFO("Assembled %d clouds (%fs)", count, time.ticks());
+
+			sensor_msgs::PointCloud2::Ptr cloudMsg(new sensor_msgs::PointCloud2);
+			pcl::toROSMsg(*assembledCloud, *cloudMsg);
+			cloudMsg->header.stamp = stamp;
+			cloudMsg->header.frame_id = mapFrameId_;
+			cloudMapPub_.publish(cloudMsg);
+		}
+		else if(poses.size())
+		{
+			ROS_WARN("Cloud map is empty! (clouds=%d)", (int)clouds_.size());
+		}
+	}
+
+	if(projMapPub_.getNumSubscribers())
+	{
+		// create the projection map
+		float xMin=0.0f, yMin=0.0f;
+		cv::Mat pixels = util3d::create2DMapFromOccupancyLocalMaps(
+				poses,
+				projMaps_,
+				gridCellSize_,
+				xMin, yMin,
+				gridSize_,
+				gridEroded_);
+
+		if(!pixels.empty())
+		{
+			//init
+			nav_msgs::OccupancyGrid map;
+			map.info.resolution = gridCellSize_;
+			map.info.origin.position.x = 0.0;
+			map.info.origin.position.y = 0.0;
+			map.info.origin.position.z = 0.0;
+			map.info.origin.orientation.x = 0.0;
+			map.info.origin.orientation.y = 0.0;
+			map.info.origin.orientation.z = 0.0;
+			map.info.origin.orientation.w = 1.0;
+
+			map.info.width = pixels.cols;
+			map.info.height = pixels.rows;
+			map.info.origin.position.x = xMin;
+			map.info.origin.position.y = yMin;
+			map.data.resize(map.info.width * map.info.height);
+
+			memcpy(map.data.data(), pixels.data, map.info.width * map.info.height);
+
+			map.header.frame_id = mapFrameId_;
+			map.header.stamp = stamp;
+
+			projMapPub_.publish(map);
+		}
+		else if(poses.size())
+		{
+			ROS_WARN("Projection map is empty! (proj maps=%d)", (int)projMaps_.size());
+		}
+	}
+
+	if(gridMapPub_.getNumSubscribers())
+	{
+		// create the grid map
+		float xMin=0.0f, yMin=0.0f;
+		cv::Mat pixels = util3d::create2DMapFromOccupancyLocalMaps(
+				poses,
+				gridMaps_,
+				gridCellSize_,
+				xMin, yMin,
+				gridSize_,
+				gridEroded_);
+
+		if(!pixels.empty())
+		{
+			//init
+			nav_msgs::OccupancyGrid map;
+			map.info.resolution = gridCellSize_;
+			map.info.origin.position.x = 0.0;
+			map.info.origin.position.y = 0.0;
+			map.info.origin.position.z = 0.0;
+			map.info.origin.orientation.x = 0.0;
+			map.info.origin.orientation.y = 0.0;
+			map.info.origin.orientation.z = 0.0;
+			map.info.origin.orientation.w = 1.0;
+
+			map.info.width = pixels.cols;
+			map.info.height = pixels.rows;
+			map.info.origin.position.x = xMin;
+			map.info.origin.position.y = yMin;
+			map.data.resize(map.info.width * map.info.height);
+
+			memcpy(map.data.data(), pixels.data, map.info.width * map.info.height);
+
+			map.header.frame_id = mapFrameId_;
+			map.header.stamp = stamp;
+
+			gridMapPub_.publish(map);
+		}
+		else if(poses.size())
+		{
+			ROS_WARN("Grid map is empty! (local maps=%d)", (int)gridMaps_.size());
 		}
 	}
 }
@@ -1437,18 +2514,31 @@ void CoreWrapper::publishCurrentGoal(const ros::Time & stamp)
 void CoreWrapper::goalDoneCb(const actionlib::SimpleClientGoalState& state,
              const move_base_msgs::MoveBaseResultConstPtr& result)
 {
+	bool ignore = false;
 	if(!currentMetricGoal_.isNull())
 	{
 		if(state == actionlib::SimpleClientGoalState::SUCCEEDED)
 		{
-			ROS_INFO("Planning: move_base success!");
+			if(rtabmap_.getPath().size() &&
+				rtabmap_.getPathCurrentGoalId() != rtabmap_.getPath().back().first &&
+				(!uContains(rtabmap_.getLocalOptimizedPoses(), rtabmap_.getPath().back().first) || !latestNodeWasReached_))
+			{
+				ROS_WARN("Planning: move_base reached current goal but it is not "
+						 "the last one planned by rtabmap. A new goal should be sent when "
+						 "rtabmap will be able to retrieve next locations on the path.");
+				ignore = true;
+			}
+			else
+			{
+				ROS_INFO("Planning: move_base success!");
+			}
 		}
 		else
 		{
 			ROS_ERROR("Planning: move_base failed for some reason. Aborting the plan...");
 		}
 
-		if(!goalReachedPub_.getNumSubscribers())
+		if(!ignore && !goalReachedPub_.getNumSubscribers())
 		{
 			std_msgs::Bool result;
 			result.data = state == actionlib::SimpleClientGoalState::SUCCEEDED;
@@ -1456,8 +2546,12 @@ void CoreWrapper::goalDoneCb(const actionlib::SimpleClientGoalState& state,
 		}
 	}
 
-	rtabmap_.clearPath();
-	currentMetricGoal_.setNull();
+	if(!ignore)
+	{
+		rtabmap_.clearPath();
+		currentMetricGoal_.setNull();
+		latestNodeWasReached_ = false;
+	}
 }
 
 // Called once when the goal becomes active
@@ -1477,7 +2571,7 @@ void CoreWrapper::publishLocalPath(const ros::Time & stamp)
 {
 	if(rtabmap_.getPath().size())
 	{
-		std::list<std::pair<int, Transform> > poses = rtabmap_.getPathNextPoses();
+		std::vector<std::pair<int, Transform> > poses = rtabmap_.getPathNextPoses();
 		if(poses.size())
 		{
 			if(localPathPub_.getNumSubscribers())
@@ -1488,7 +2582,7 @@ void CoreWrapper::publishLocalPath(const ros::Time & stamp)
 				path.poses.resize(poses.size());
 				int oi = 0;
 				std::stringstream stream;
-				for(std::list<std::pair<int, Transform> >::iterator iter=poses.begin(); iter!=poses.end(); ++iter)
+				for(std::vector<std::pair<int, Transform> >::iterator iter=poses.begin(); iter!=poses.end(); ++iter)
 				{
 					path.poses[oi].header = path.header;
 					rtabmap_ros::transformToPoseMsg(iter->second, path.poses[oi].pose);
@@ -1501,6 +2595,95 @@ void CoreWrapper::publishLocalPath(const ros::Time & stamp)
 		}
 	}
 }
+
+#ifdef WITH_OCTOMAP
+// returned OcTree must be deleted
+// RTAB-Map optimizes the graph at almost each iteration, an octomap cannot
+// be updated online. Only available on service. To have an "online" octomap published as a topic,
+// you may want to subscribe an octomap_server to /rtabmap/cloud topic.
+//
+octomap::OcTree * CoreWrapper::createOctomap()
+{
+	octomap::OcTree * octree = new octomap::OcTree(gridCellSize_);
+	UTimer time;
+	std::map<int, Transform> poses = rtabmap_.getLocalOptimizedPoses();
+	if(clouds_.size() == 0)
+	{
+		poses = this->updateMapCaches(poses, true, false, false);
+	}
+	for(std::map<int, Transform>::const_iterator posesIter = poses.begin(); posesIter!=poses.end(); ++posesIter)
+	{
+		std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr >::iterator cloudsIter = clouds_.find(posesIter->first);
+		if(cloudsIter != clouds_.end() && cloudsIter->second->size())
+		{
+			octomap::Pointcloud * scan = new octomap::Pointcloud();
+
+			//octomap::pointcloudPCLToOctomap(*cloudsIter->second, *scan); // Not anymore in Indigo!
+			scan->reserve(cloudsIter->second->size());
+			for(pcl::PointCloud<pcl::PointXYZRGB>::const_iterator it = cloudsIter->second->begin();
+				it != cloudsIter->second->end();
+				++it)
+			{
+				// Check if the point is invalid
+				if(pcl::isFinite(*it))
+				{
+					scan->push_back(it->x, it->y, it->z);
+				}
+			}
+
+			float x,y,z, r,p,w;
+			posesIter->second.getTranslationAndEulerAngles(x,y,z,r,p,w);
+			octomap::ScanNode node(scan, octomap::pose6d(x,y,z, r,p,w), posesIter->first);
+			octree->insertPointCloud(node, cloudMaxDepth_, true, true);
+			ROS_INFO("inserted %d pt=%d (%fs)", posesIter->first, (int)scan->size(), time.ticks());
+		}
+	}
+
+	octree->updateInnerOccupancy();
+	ROS_INFO("updated inner occupancy (%fs)", time.ticks());
+
+	// clear memory if no one subscribed
+	if(mapCacheCleanup_ && cloudMapPub_.getNumSubscribers() == 0)
+	{
+		clouds_.clear();
+	}
+	return octree;
+}
+
+bool CoreWrapper::octomapBinaryCallback(
+		octomap_msgs::GetOctomap::Request  &req,
+		octomap_msgs::GetOctomap::Response &res)
+{
+	ROS_INFO("Sending binary map data on service request");
+	res.map.header.frame_id = mapFrameId_;
+	res.map.header.stamp = ros::Time::now();
+
+	octomap::OcTree * octree = createOctomap();
+	bool success = octree != 0 && octree->size() && octomap_msgs::binaryMapToMsg(*octree, res.map);
+	if(octree)
+	{
+		delete octree;
+	}
+	return success;
+}
+
+bool CoreWrapper::octomapFullCallback(
+		octomap_msgs::GetOctomap::Request  &req,
+		octomap_msgs::GetOctomap::Response &res)
+{
+	ROS_INFO("Sending full map data on service request");
+	res.map.header.frame_id = mapFrameId_;
+	res.map.header.stamp = ros::Time::now();
+
+	octomap::OcTree * octree = createOctomap();
+	bool success = octree != 0 && octree->size() && octomap_msgs::fullMapToMsg(*octree, res.map);
+	if(octree)
+	{
+		delete octree;
+	}
+	return success;
+}
+#endif
 
 /**
  * exclusive callbacks:
@@ -1537,20 +2720,66 @@ void CoreWrapper::setupCallbacks(
 		imageSub_.subscribe(rgb_it, rgb_nh.resolveName("image"), 1, hintsRgb);
 		imageDepthSub_.subscribe(depth_it, depth_nh.resolveName("image"), 1, hintsDepth);
 		cameraInfoSub_.subscribe(rgb_nh, "camera_info", 1);
-		odomSub_.subscribe(nh, "odom", 1);
 
-		if(subscribeLaserScan)
+		if(odomFrameId_.empty())
 		{
-			ROS_INFO("Registering Depth+LaserScan callback...");
-			scanSub_.subscribe(nh, "scan", 1);
-			depthScanSync_ = new message_filters::Synchronizer<MyDepthScanSyncPolicy>(MyDepthScanSyncPolicy(queueSize), imageSub_, odomSub_, imageDepthSub_, cameraInfoSub_, scanSub_);
-			depthScanSync_->registerCallback(boost::bind(&CoreWrapper::depthScanCallback, this, _1, _2, _3, _4, _5));
+			odomSub_.subscribe(nh, "odom", 1);
+			if(subscribeLaserScan)
+			{
+				ROS_INFO("Registering Depth+LaserScan callback...");
+				scanSub_.subscribe(nh, "scan", 1);
+				depthScanSync_ = new message_filters::Synchronizer<MyDepthScanSyncPolicy>(MyDepthScanSyncPolicy(queueSize), imageSub_, odomSub_, imageDepthSub_, cameraInfoSub_, scanSub_);
+				depthScanSync_->registerCallback(boost::bind(&CoreWrapper::depthScanCallback, this, _1, _2, _3, _4, _5));
+
+				ROS_INFO("\n%s subscribed to:\n   %s,\n   %s,\n   %s,\n   %s,\n   %s",
+						ros::this_node::getName().c_str(),
+						imageSub_.getTopic().c_str(),
+						imageDepthSub_.getTopic().c_str(),
+						cameraInfoSub_.getTopic().c_str(),
+						odomSub_.getTopic().c_str(),
+						scanSub_.getTopic().c_str());
+			}
+			else //!subscribeLaserScan
+			{
+				ROS_INFO("Registering Depth callback...");
+				depthSync_ = new message_filters::Synchronizer<MyDepthSyncPolicy>(MyDepthSyncPolicy(queueSize), imageSub_, odomSub_, imageDepthSub_, cameraInfoSub_);
+				depthSync_->registerCallback(boost::bind(&CoreWrapper::depthCallback, this, _1, _2, _3, _4));
+
+				ROS_INFO("\n%s subscribed to:\n   %s,\n   %s,\n   %s,\n   %s",
+						ros::this_node::getName().c_str(),
+						imageSub_.getTopic().c_str(),
+						imageDepthSub_.getTopic().c_str(),
+						cameraInfoSub_.getTopic().c_str(),
+						odomSub_.getTopic().c_str());
+			}
 		}
-		else //!subscribeLaserScan
+		else
 		{
-			ROS_INFO("Registering Depth callback...");
-			depthSync_ = new message_filters::Synchronizer<MyDepthSyncPolicy>(MyDepthSyncPolicy(queueSize), imageSub_, odomSub_, imageDepthSub_, cameraInfoSub_);
-			depthSync_->registerCallback(boost::bind(&CoreWrapper::depthCallback, this, _1, _2, _3, _4));
+			// use odom from TF, so subscribe to sensors only
+			if(subscribeLaserScan)
+			{
+				scanSub_.subscribe(nh, "scan", 1);
+				depthScanTFSync_ = new message_filters::Synchronizer<MyDepthScanTFSyncPolicy>(MyDepthScanTFSyncPolicy(queueSize), imageSub_, imageDepthSub_, cameraInfoSub_, scanSub_);
+				depthScanTFSync_->registerCallback(boost::bind(&CoreWrapper::depthScanTFCallback, this, _1, _2, _3, _4));
+
+				ROS_INFO("\n%s subscribed to:\n   %s,\n   %s,\n   %s,\n   %s",
+						ros::this_node::getName().c_str(),
+						imageSub_.getTopic().c_str(),
+						imageDepthSub_.getTopic().c_str(),
+						cameraInfoSub_.getTopic().c_str(),
+						scanSub_.getTopic().c_str());
+			}
+			else //!subscribeLaserScan
+			{
+				depthTFSync_ = new message_filters::Synchronizer<MyDepthTFSyncPolicy>(MyDepthTFSyncPolicy(queueSize), imageSub_, imageDepthSub_, cameraInfoSub_);
+				depthTFSync_->registerCallback(boost::bind(&CoreWrapper::depthTFCallback, this, _1, _2, _3));
+
+				ROS_INFO("\n%s subscribed to:\n   %s,\n   %s,\n   %s",
+						ros::this_node::getName().c_str(),
+						imageSub_.getTopic().c_str(),
+						imageDepthSub_.getTopic().c_str(),
+						cameraInfoSub_.getTopic().c_str());
+			}
 		}
 	}
 	else if(subscribeStereo)
@@ -1568,40 +2797,100 @@ void CoreWrapper::setupCallbacks(
 		imageRectRight_.subscribe(right_it, right_nh.resolveName("image_rect"), 1, hintsRight);
 		cameraInfoLeft_.subscribe(left_nh, "camera_info", 1);
 		cameraInfoRight_.subscribe(right_nh, "camera_info", 1);
-		odomSub_.subscribe(nh, "odom", 1);
 
-		if(subscribeLaserScan)
+		if(odomFrameId_.empty())
 		{
-			ROS_INFO("Registering Stereo+LaserScan callback...");
-			scanSub_.subscribe(nh, "scan", 1);
-			stereoScanSync_ = new message_filters::Synchronizer<MyStereoScanSyncPolicy>(MyStereoScanSyncPolicy(queueSize), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_, scanSub_, odomSub_);
-			stereoScanSync_->registerCallback(boost::bind(&CoreWrapper::stereoScanCallback, this, _1, _2, _3, _4, _5, _6));
+			odomSub_.subscribe(nh, "odom", 1);
+			if(subscribeLaserScan)
+			{
+				scanSub_.subscribe(nh, "scan", 1);
+				stereoScanSync_ = new message_filters::Synchronizer<MyStereoScanSyncPolicy>(MyStereoScanSyncPolicy(queueSize), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_, scanSub_, odomSub_);
+				stereoScanSync_->registerCallback(boost::bind(&CoreWrapper::stereoScanCallback, this, _1, _2, _3, _4, _5, _6));
+
+				ROS_INFO("\n%s subscribed to:\n   %s,\n   %s,\n   %s,\n   %s,\n   %s,\n   %s",
+						ros::this_node::getName().c_str(),
+						imageRectLeft_.getTopic().c_str(),
+						imageRectRight_.getTopic().c_str(),
+						cameraInfoLeft_.getTopic().c_str(),
+						cameraInfoRight_.getTopic().c_str(),
+						odomSub_.getTopic().c_str(),
+						scanSub_.getTopic().c_str());
+			}
+			else //!subscribeLaserScan
+			{
+				if(stereoApproxSync)
+				{
+					ROS_INFO("Registering Stereo Approx callback...");
+					stereoApproxSync_ = new message_filters::Synchronizer<MyStereoApproxSyncPolicy>(MyStereoApproxSyncPolicy(queueSize), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_, odomSub_);
+					stereoApproxSync_->registerCallback(boost::bind(&CoreWrapper::stereoCallback, this, _1, _2, _3, _4, _5));
+				}
+				else
+				{
+					ROS_INFO("Registering Stereo Exact callback...");
+					stereoExactSync_ = new message_filters::Synchronizer<MyStereoExactSyncPolicy>(MyStereoExactSyncPolicy(queueSize), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_, odomSub_);
+					stereoExactSync_->registerCallback(boost::bind(&CoreWrapper::stereoCallback, this, _1, _2, _3, _4, _5));
+				}
+
+				ROS_INFO("\n%s subscribed to:\n   %s,\n   %s,\n   %s,\n   %s,\n   %s",
+						ros::this_node::getName().c_str(),
+						imageRectLeft_.getTopic().c_str(),
+						imageRectRight_.getTopic().c_str(),
+						cameraInfoLeft_.getTopic().c_str(),
+						cameraInfoRight_.getTopic().c_str(),
+						odomSub_.getTopic().c_str());
+			}
 		}
-		else //!subscribeLaserScan
+		else
 		{
-			if(stereoApproxSync)
+			// use odom from TF, so subscribe to sensors only
+			if(subscribeLaserScan)
 			{
-				ROS_INFO("Registering Stereo Approx callback...");
-				stereoApproxSync_ = new message_filters::Synchronizer<MyStereoApproxSyncPolicy>(MyStereoApproxSyncPolicy(queueSize), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_, odomSub_);
-				stereoApproxSync_->registerCallback(boost::bind(&CoreWrapper::stereoCallback, this, _1, _2, _3, _4, _5));
-			}
-			else
-			{
-				ROS_INFO("Registering Stereo Exact callback...");
-				stereoExactSync_ = new message_filters::Synchronizer<MyStereoExactSyncPolicy>(MyStereoExactSyncPolicy(queueSize), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_, odomSub_);
-				stereoExactSync_->registerCallback(boost::bind(&CoreWrapper::stereoCallback, this, _1, _2, _3, _4, _5));
-			}
+				ROS_INFO("Registering Stereo+LaserScan+OdomTF callback...");
+				scanSub_.subscribe(nh, "scan", 1);
+				stereoScanTFSync_ = new message_filters::Synchronizer<MyStereoScanTFSyncPolicy>(MyStereoScanTFSyncPolicy(queueSize), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_, scanSub_);
+				stereoScanTFSync_->registerCallback(boost::bind(&CoreWrapper::stereoScanTFCallback, this, _1, _2, _3, _4, _5));
 
+				ROS_INFO("\n%s subscribed to:\n   %s,\n   %s,\n   %s,\n   %s,\n   %s",
+						ros::this_node::getName().c_str(),
+						imageRectLeft_.getTopic().c_str(),
+						imageRectRight_.getTopic().c_str(),
+						cameraInfoLeft_.getTopic().c_str(),
+						cameraInfoRight_.getTopic().c_str(),
+						scanSub_.getTopic().c_str());
+			}
+			else //!subscribeLaserScan
+			{
+				if(stereoApproxSync)
+				{
+					ROS_INFO("Registering Stereo+OdomTF Approx callback...");
+					stereoApproxTFSync_ = new message_filters::Synchronizer<MyStereoApproxTFSyncPolicy>(MyStereoApproxTFSyncPolicy(queueSize), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_);
+					stereoApproxTFSync_->registerCallback(boost::bind(&CoreWrapper::stereoTFCallback, this, _1, _2, _3, _4));
+				}
+				else
+				{
+					ROS_INFO("Registering Stereo+OdomTF Exact callback...");
+					stereoExactTFSync_ = new message_filters::Synchronizer<MyStereoExactTFSyncPolicy>(MyStereoExactTFSyncPolicy(queueSize), imageRectLeft_, imageRectRight_, cameraInfoLeft_, cameraInfoRight_);
+					stereoExactTFSync_->registerCallback(boost::bind(&CoreWrapper::stereoTFCallback, this, _1, _2, _3, _4));
+				}
+
+				ROS_INFO("\n%s subscribed to:\n   %s,\n   %s,\n   %s,\n   %s",
+						ros::this_node::getName().c_str(),
+						imageRectLeft_.getTopic().c_str(),
+						imageRectRight_.getTopic().c_str(),
+						cameraInfoLeft_.getTopic().c_str(),
+						cameraInfoRight_.getTopic().c_str());
+			}
 		}
 	}
 	else
 	{
-		ROS_INFO("Registering image-only callback...");
 		ros::NodeHandle rgb_nh(nh, "rgb");
 		ros::NodeHandle rgb_pnh(pnh, "rgb");
 		image_transport::ImageTransport rgb_it(rgb_nh);
 		image_transport::TransportHints hintsRgb("raw", ros::TransportHints(), rgb_pnh);
 		defaultSub_ = rgb_it.subscribe("image", 1, &CoreWrapper::defaultCallback, this);
+
+		ROS_INFO("\n%s subscribed to:\n   %s", ros::this_node::getName().c_str(), defaultSub_.getTopic().c_str());
 	}
 }
 
