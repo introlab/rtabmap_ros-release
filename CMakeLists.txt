@@ -5,15 +5,19 @@ project(rtabmap_ros)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS 
-             cv_bridge roscpp rospy sensor_msgs std_msgs std_srvs nav_msgs geometry_msgs
+             cv_bridge roscpp rospy sensor_msgs std_msgs std_srvs nav_msgs geometry_msgs visualization_msgs
              image_transport tf tf_conversions laser_geometry pcl_conversions 
              pcl_ros nodelet dynamic_reconfigure rviz message_filters class_loader
              genmsg stereo_msgs
 )
 
+# Optional components
+find_package(costmap_2d)
+find_package(octomap_ros)
+
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(RTABMap 0.8 REQUIRED)
+find_package(RTABMap 0.8.12 REQUIRED)
 
 #Qt stuff
 FIND_PACKAGE(Qt4 COMPONENTS QtCore QtGui REQUIRED)
@@ -44,15 +48,19 @@ add_message_files(
    NodeData.msg
    Link.msg
    OdomInfo.msg
+   UserData.msg
+   Point2f.msg
 )
 
 ## Generate services in the 'srv' folder
  add_service_files(
    FILES
    GetMap.srv
+   ListLabels.srv
    PublishMap.srv
    ResetPose.srv
    SetGoal.srv
+   SetLabel.srv
  )
 
 ## Generate added messages and services with any dependencies listed here
@@ -78,7 +86,7 @@ generate_dynamic_reconfigure_options(cfg/Camera.cfg)
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES rtabmap_ros
-  CATKIN_DEPENDS cv_bridge roscpp rospy sensor_msgs std_msgs std_srvs nav_msgs geometry_msgs
+  CATKIN_DEPENDS cv_bridge roscpp rospy sensor_msgs std_msgs std_srvs nav_msgs geometry_msgs visualization_msgs
                  image_transport tf tf_conversions laser_geometry pcl_conversions 
                  pcl_ros nodelet dynamic_reconfigure rviz message_filters class_loader
                  stereo_msgs
@@ -117,8 +125,7 @@ set_property(
    PROPERTY COMPILE_DEFINITIONS QT_NO_KEYWORDS
    )
    
-## Declare a cpp library
-add_library(rtabmap_ros
+SET(rtabmap_ros_lib_src
    src/nodelets/data_throttle.cpp
    src/nodelets/stereo_throttle.cpp
    src/nodelets/data_odom_sync.cpp
@@ -133,6 +140,25 @@ add_library(rtabmap_ros
    src/rviz/InfoDisplay.cpp
    src/rviz/OrbitOrientedViewController.cpp
    ${MOC_FILES}
+)   
+
+# If costmap_2d is found, add the plugin
+IF(costmap_2d_FOUND)
+MESSAGE(STATUS "WITH costmap_2d")
+include_directories(${costmap_2d_INCLUDE_DIRS})
+SET(Libraries
+  ${costmap_2d_LIBRARIES}
+  ${Libraries}
+  )
+SET(rtabmap_ros_lib_src
+  src/costmap_2d/static_layer.cpp
+  ${rtabmap_ros_lib_src}
+  )
+ENDIF(costmap_2d_FOUND)
+
+## Declare a cpp library
+add_library(rtabmap_ros
+   ${rtabmap_ros_lib_src}
 )
 target_link_libraries(rtabmap_ros
   ${Libraries}
@@ -140,6 +166,19 @@ target_link_libraries(rtabmap_ros
   ${OGRE_LIBRARIES}
 )
 add_dependencies(rtabmap_ros rtabmap_generate_messages_cpp)
+
+# If octomap is found, add definition
+IF(octomap_ros_FOUND)
+MESSAGE(STATUS "WITH octomap")
+include_directories(
+  ${octomap_ros_INCLUDE_DIRS}
+)
+SET(Libraries
+  ${octomap_ros_LIBRARIES}
+  ${Libraries}
+)
+add_definitions(-DWITH_OCTOMAP)
+ENDIF(octomap_ros_FOUND)
 
 add_executable(rtabmap src/CoreNode.cpp src/CoreWrapper.cpp)
 add_dependencies(rtabmap rtabmap_generate_messages_cpp)
@@ -166,9 +205,6 @@ target_link_libraries(camera ${Libraries})
 
 add_executable(rtabmapviz src/GuiNode.cpp src/GuiWrapper.cpp src/PreferencesDialogROS.cpp)
 target_link_libraries(rtabmapviz rtabmap_ros ${QT_LIBRARIES} ${Libraries})
-
-add_executable(data_recorder src/DataRecorderNode.cpp)
-target_link_libraries(data_recorder rtabmap_ros ${QT_LIBRARIES} ${Libraries})
 
 add_executable(data_player src/DbPlayerNode.cpp)
 target_link_libraries(data_player rtabmap_ros ${QT_LIBRARIES} ${Libraries})
@@ -200,7 +236,6 @@ install(TARGETS
    map_assembler
    grid_map_assembler
    map_optimizer
-   data_recorder
    data_player
    camera
    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
@@ -218,8 +253,8 @@ install(DIRECTORY include/${PROJECT_NAME}/
 ## Mark other files for installation (e.g. launch and bag files, etc.)
 install(FILES
    launch/rgbd_mapping.launch
-   launch/rgbd_localization.launch
    launch/data_recorder.launch
+   launch/rgbd_mapping_kinect2.launch
    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
 )
 install(DIRECTORY 
@@ -233,6 +268,7 @@ install(DIRECTORY
 install(FILES
    nodelet_plugins.xml
    plugin_description.xml
+   costmap_plugins.xml
    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
