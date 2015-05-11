@@ -1,0 +1,12 @@
+Source: ros-hydro-rtabmap-ros
+Section: misc
+Priority: extra
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), libpcl-1.7-all-dev, ros-hydro-catkin, ros-hydro-class-loader, ros-hydro-costmap-2d, ros-hydro-cv-bridge, ros-hydro-dynamic-reconfigure, ros-hydro-genmsg, ros-hydro-geometry-msgs, ros-hydro-image-transport, ros-hydro-laser-geometry, ros-hydro-message-filters, ros-hydro-move-base-msgs, ros-hydro-nav-msgs, ros-hydro-nodelet, ros-hydro-octomap, ros-hydro-octomap-ros, ros-hydro-pcl-conversions, ros-hydro-pcl-ros, ros-hydro-roscpp, ros-hydro-rospy, ros-hydro-rtabmap, ros-hydro-rviz, ros-hydro-sensor-msgs, ros-hydro-std-msgs, ros-hydro-std-srvs, ros-hydro-stereo-msgs, ros-hydro-tf, ros-hydro-tf-conversions, ros-hydro-visualization-msgs
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-hydro-rtabmap-ros
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-hydro-class-loader, ros-hydro-costmap-2d, ros-hydro-cv-bridge, ros-hydro-dynamic-reconfigure, ros-hydro-geometry-msgs, ros-hydro-image-transport, ros-hydro-image-transport-plugins, ros-hydro-laser-geometry, ros-hydro-message-filters, ros-hydro-move-base-msgs, ros-hydro-nav-msgs, ros-hydro-nodelet, ros-hydro-octomap, ros-hydro-octomap-ros, ros-hydro-pcl-conversions, ros-hydro-pcl-ros, ros-hydro-roscpp, ros-hydro-rospy, ros-hydro-rtabmap, ros-hydro-rviz, ros-hydro-sensor-msgs, ros-hydro-std-msgs, ros-hydro-std-srvs, ros-hydro-stereo-msgs, ros-hydro-tf, ros-hydro-tf-conversions, ros-hydro-visualization-msgs
+Description: RTAB-Map's ros-pkg. RTAB-Map is a RGB-D SLAM approach with real-time constraints.
