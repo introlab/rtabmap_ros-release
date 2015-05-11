@@ -1,6 +1,10 @@
 
 int32 id
 int32 mapId
+int32 weight
+float64 stamp
+string label
+UserData userData
 
 # Pose from odometry not corrected
 geometry_msgs/Pose pose

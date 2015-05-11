@@ -200,7 +200,7 @@ void infoToROS(const rtabmap::Statistics & stats, rtabmap_ros::Info & info)
 
 rtabmap::Link linkFromROS(const rtabmap_ros::Link & msg)
 {
-	return rtabmap::Link(msg.fromId, msg.toId, (rtabmap::Link::Type)msg.type, transformFromGeometryMsg(msg.transform), msg.variance);
+	return rtabmap::Link(msg.fromId, msg.toId, (rtabmap::Link::Type)msg.type, transformFromGeometryMsg(msg.transform), msg.rotVariance, msg.transVariance);
 }
 
 void linkToROS(const rtabmap::Link & link, rtabmap_ros::Link & msg)
@@ -208,13 +208,14 @@ void linkToROS(const rtabmap::Link & link, rtabmap_ros::Link & msg)
 	msg.fromId = link.from();
 	msg.toId = link.to();
 	msg.type = link.type();
-	msg.variance = link.variance();
+	msg.rotVariance = link.rotVariance();
+	msg.transVariance = link.transVariance();
 	transformToGeometryMsg(link.transform(), msg.transform);
 }
 
 cv::KeyPoint keypointFromROS(const rtabmap_ros::KeyPoint & msg)
 {
-	return cv::KeyPoint(msg.ptx, msg.pty, msg.size, msg.angle, msg.response, msg.octave, msg.class_id);
+	return cv::KeyPoint(msg.pt.x, msg.pt.y, msg.size, msg.angle, msg.response, msg.octave, msg.class_id);
 }
 
 void keypointToROS(const cv::KeyPoint & kpt, rtabmap_ros::KeyPoint & msg)
@@ -222,8 +223,8 @@ void keypointToROS(const cv::KeyPoint & kpt, rtabmap_ros::KeyPoint & msg)
 	msg.angle = kpt.angle;
 	msg.class_id = kpt.class_id;
 	msg.octave = kpt.octave;
-	msg.ptx = kpt.pt.x;
-	msg.pty = kpt.pt.y;
+	msg.pt.x = kpt.pt.x;
+	msg.pt.y = kpt.pt.y;
 	msg.response = kpt.response;
 	msg.size = kpt.size;
 }
@@ -247,22 +248,61 @@ void keypointsToROS(const std::vector<cv::KeyPoint> & kpts, std::vector<rtabmap_
 	}
 }
 
+cv::Point2f point2fFromROS(const rtabmap_ros::Point2f & msg)
+{
+	return cv::Point2f(msg.x, msg.y);
+}
+
+void point2fToROS(const cv::Point2f & kpt, rtabmap_ros::Point2f & msg)
+{
+	msg.x = kpt.x;
+	msg.y = kpt.y;
+}
+
+std::vector<cv::Point2f> points2fFromROS(const std::vector<rtabmap_ros::Point2f> & msg)
+{
+	std::vector<cv::Point2f> v(msg.size());
+	for(unsigned int i=0; i<msg.size(); ++i)
+	{
+		v[i] = point2fFromROS(msg[i]);
+	}
+	return v;
+}
+
+void points2fToROS(const std::vector<cv::Point2f> & kpts, std::vector<rtabmap_ros::Point2f> & msg)
+{
+	msg.resize(kpts.size());
+	for(unsigned int i=0; i<msg.size(); ++i)
+	{
+		point2fToROS(kpts[i], msg[i]);
+	}
+}
+
 void mapGraphFromROS(
 		const rtabmap_ros::Graph & msg,
 		std::map<int, rtabmap::Transform> & poses,
 		std::map<int, int> & mapIds,
+		std::map<int, double> & stamps,
+		std::map<int, std::string> & labels,
+		std::map<int, std::vector<unsigned char> > & userDatas,
 		std::multimap<int, rtabmap::Link> & links,
 		rtabmap::Transform & mapToOdom)
 {
 	mapToOdom = transformFromGeometryMsg(msg.mapToOdom);
 
-	for(unsigned int i=0; i<msg.nodeIds.size() && i<msg.mapIds.size(); ++i)
+	UASSERT(msg.nodeIds.size() == msg.mapIds.size());
+	UASSERT(msg.nodeIds.size() == msg.poses.size());
+	UASSERT(msg.nodeIds.size() == msg.stamps.size());
+	UASSERT(msg.nodeIds.size() == msg.labels.size());
+	UASSERT(msg.nodeIds.size() == msg.userDatas.size());
+
+	for(unsigned int i=0; i<msg.nodeIds.size(); ++i)
 	{
-		if(msg.poses.size())
-		{
-			poses.insert(std::make_pair(msg.nodeIds[i], rtabmap_ros::transformFromPoseMsg(msg.poses[i])));
-		}
+		poses.insert(std::make_pair(msg.nodeIds[i], rtabmap_ros::transformFromPoseMsg(msg.poses[i])));
 		mapIds.insert(std::make_pair(msg.nodeIds[i], msg.mapIds[i]));
+		stamps.insert(std::make_pair(msg.nodeIds[i], msg.stamps[i]));
+		labels.insert(std::make_pair(msg.nodeIds[i], msg.labels[i]));
+		userDatas.insert(std::make_pair(msg.nodeIds[i], msg.userDatas[i].data));
 	}
 
 	for(unsigned int i=0; i<msg.links.size(); ++i)
@@ -274,30 +314,46 @@ void mapGraphFromROS(
 void mapGraphToROS(
 		const std::map<int, rtabmap::Transform> & poses,
 		const std::map<int, int> & mapIds,
+		const std::map<int, double> & stamps,
+		const std::map<int, std::string> & labels,
+		const std::map<int, std::vector<unsigned char> > & userDatas,
 		const std::multimap<int, rtabmap::Link> & links,
 		const rtabmap::Transform & mapToOdom,
 		rtabmap_ros::Graph & msg)
 {
-	UASSERT(poses.size() == 0 || poses.size() == mapIds.size());
+	UASSERT(poses.size() == 0 ||
+			(poses.size() == mapIds.size() &&
+			 poses.size() == labels.size() &&
+			 poses.size() == stamps.size() &&
+			 poses.size() == userDatas.size()));
 
 	transformToGeometryMsg(mapToOdom, msg.mapToOdom);
 
-	msg.nodeIds.resize(mapIds.size());
+	msg.nodeIds.resize(poses.size());
 	msg.poses.resize(poses.size());
-	msg.mapIds.resize(mapIds.size());
+	msg.mapIds.resize(poses.size());
+	msg.stamps.resize(poses.size());
+	msg.labels.resize(poses.size());
+	msg.userDatas.resize(poses.size());
 	int index = 0;
 	std::map<int, rtabmap::Transform>::const_iterator iterPoses = poses.begin();
-	for(std::map<int, int>::const_iterator iter = mapIds.begin();
-		iter!=mapIds.end();
-		++iter)
+	std::map<int, int>::const_iterator iterMapIds = mapIds.begin();
+	std::map<int, double>::const_iterator iterStamps = stamps.begin();
+	std::map<int, std::string>::const_iterator iterLabels = labels.begin();
+	std::map<int, std::vector<unsigned char> >::const_iterator iterUserDatas = userDatas.begin();
+	while(iterPoses != poses.end())
 	{
-		msg.nodeIds[index] = iter->first;
-		msg.mapIds[index] = iter->second;
-		if(iterPoses != poses.end())
-		{
-			transformToPoseMsg(iterPoses->second, msg.poses[index]);
-			++iterPoses;
-		}
+		msg.nodeIds[index] = iterPoses->first;
+		msg.mapIds[index] = iterMapIds->second;
+		msg.stamps[index] = iterStamps->second;
+		msg.labels[index] = iterLabels->second;
+		msg.userDatas[index].data = iterUserDatas->second;
+		transformToPoseMsg(iterPoses->second, msg.poses[index]);
+		++iterPoses;
+		++iterMapIds;
+		++iterStamps;
+		++iterLabels;
+		++iterUserDatas;
 		++index;
 	}
 
@@ -336,11 +392,16 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 		ROS_ERROR("Words 2D and 3D should be the same size (%d, %d)!", (int)words.size(), (int)words3D.size());
 	}
 
-	return rtabmap::Signature(msg.id,
+	return rtabmap::Signature(
+			msg.id,
 			msg.mapId,
+			msg.weight,
+			msg.stamp,
+			msg.label,
 			words,
 			words3D,
 			transformFromPoseMsg(msg.pose),
+			msg.userData.data,
 			compressedMatFromBytes(msg.laserScan),
 			compressedMatFromBytes(msg.image),
 			compressedMatFromBytes(msg.depth),
@@ -355,14 +416,18 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 	// add data
 	msg.id = signature.id();
 	msg.mapId = signature.mapId();
+	msg.weight = signature.getWeight();
+	msg.stamp = signature.getStamp();
+	msg.label = signature.getLabel();
+	msg.userData.data = signature.getUserData();
 	transformToPoseMsg(signature.getPose(), msg.pose);
 	compressedMatToBytes(signature.getImageCompressed(), msg.image);
 	compressedMatToBytes(signature.getDepthCompressed(), msg.depth);
 	compressedMatToBytes(signature.getLaserScanCompressed(), msg.laserScan);
-	msg.fx = signature.getDepthFx();
-	msg.fy = signature.getDepthFy();
-	msg.cx = signature.getDepthCx();
-	msg.cy = signature.getDepthCy();
+	msg.fx = signature.getFx();
+	msg.fy = signature.getFy();
+	msg.cx = signature.getCx();
+	msg.cy = signature.getCy();
 	transformToGeometryMsg(signature.getLocalTransform(), msg.localTransform);
 
 	//Features stuff...
@@ -419,8 +484,8 @@ rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg)
 	info.wordMatches = msg.wordMatches;
 	info.wordInliers = msg.wordInliers;
 
-	info.refCorners = keypointsFromROS(msg.refCorners);
-	info.newCorners = keypointsFromROS(msg.newCorners);
+	info.refCorners = points2fFromROS(msg.refCorners);
+	info.newCorners = points2fFromROS(msg.newCorners);
 	info.cornerInliers = msg.cornerInliers;
 
 	return info;
@@ -444,8 +509,8 @@ void odomInfoToROS(const rtabmap::OdometryInfo & info, rtabmap_ros::OdomInfo & m
 	msg.wordMatches = info.wordMatches;
 	msg.wordInliers = info.wordInliers;
 
-	keypointsToROS(info.refCorners, msg.refCorners);
-	keypointsToROS(info.newCorners, msg.newCorners);
+	points2fToROS(info.refCorners, msg.refCorners);
+	points2fToROS(info.newCorners, msg.newCorners);
 	msg.cornerInliers = info.cornerInliers;
 
 }
