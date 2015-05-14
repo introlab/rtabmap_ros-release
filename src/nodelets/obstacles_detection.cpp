@@ -33,7 +33,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 
-#include <tf/tf.h>
 #include <tf/transform_listener.h>
 
 #include <sensor_msgs/PointCloud2.h>
@@ -56,6 +55,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap_ros/MsgConversion.h>
 
 #include "rtabmap/core/util3d.h"
+#include "rtabmap/core/util3d_filtering.h"
+#include "rtabmap/core/util3d_mapping.h"
+#include "rtabmap/core/util3d_transforms.h"
 
 namespace rtabmap_ros
 {
@@ -128,11 +130,11 @@ private:
 			pcl::IndicesPtr ground, obstacles;
 			if(cloud->size())
 			{
-				cloud = rtabmap::util3d::transformPointCloud<pcl::PointXYZ>(cloud, localTransform);
+				cloud = rtabmap::util3d::transformPointCloud(cloud, localTransform);
 
 				if(maxObstaclesHeight_ > 0)
 				{
-					cloud = rtabmap::util3d::passThrough<pcl::PointXYZ>(cloud, "z", std::numeric_limits<int>::min(), maxObstaclesHeight_);
+					cloud = rtabmap::util3d::passThrough(cloud, "z", std::numeric_limits<int>::min(), maxObstaclesHeight_);
 				}
 				if(cloud->size())
 				{
