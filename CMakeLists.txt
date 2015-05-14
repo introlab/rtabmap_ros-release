@@ -6,9 +6,9 @@ project(rtabmap_ros)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS 
              cv_bridge roscpp rospy sensor_msgs std_msgs std_srvs nav_msgs geometry_msgs visualization_msgs
-             image_transport tf tf_conversions laser_geometry pcl_conversions 
+             image_transport tf tf_conversions tf2_ros eigen_conversions laser_geometry pcl_conversions 
              pcl_ros nodelet dynamic_reconfigure rviz message_filters class_loader
-             genmsg stereo_msgs
+             genmsg stereo_msgs move_base_msgs
 )
 
 # Optional components
@@ -17,7 +17,7 @@ find_package(octomap_ros)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(RTABMap 0.8.12 REQUIRED)
+find_package(RTABMap 0.9.0 REQUIRED)
 
 #Qt stuff
 FIND_PACKAGE(Qt4 COMPONENTS QtCore QtGui REQUIRED)
@@ -87,9 +87,9 @@ catkin_package(
   INCLUDE_DIRS include
   LIBRARIES rtabmap_ros
   CATKIN_DEPENDS cv_bridge roscpp rospy sensor_msgs std_msgs std_srvs nav_msgs geometry_msgs visualization_msgs
-                 image_transport tf tf_conversions laser_geometry pcl_conversions 
+                 image_transport tf tf_conversions tf2_ros eigen_conversions laser_geometry pcl_conversions 
                  pcl_ros nodelet dynamic_reconfigure rviz message_filters class_loader
-                 stereo_msgs
+                 stereo_msgs move_base_msgs 
 )
 
 ###########
@@ -180,7 +180,7 @@ SET(Libraries
 add_definitions(-DWITH_OCTOMAP)
 ENDIF(octomap_ros_FOUND)
 
-add_executable(rtabmap src/CoreNode.cpp src/CoreWrapper.cpp)
+add_executable(rtabmap src/CoreNode.cpp src/CoreWrapper.cpp src/MapsManager.cpp)
 add_dependencies(rtabmap rtabmap_generate_messages_cpp)
 target_link_libraries(rtabmap rtabmap_ros ${Libraries})
 
