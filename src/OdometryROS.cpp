@@ -37,7 +37,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cv_bridge/cv_bridge.h>
 
 #include <rtabmap/core/Odometry.h>
-#include <rtabmap/core/util3d.h>
+#include <rtabmap/core/util3d_transforms.h>
 #include <rtabmap/core/Memory.h>
 #include <rtabmap/core/Signature.h>
 #include "rtabmap_ros/MsgConversion.h"
@@ -316,12 +316,15 @@ void OdometryROS::processData(const SensorData & data, const std_msgs::Header & 
 		//*********************
 		// Update odometry
 		//*********************
-		tf::Transform poseTF;
-		rtabmap_ros::transformToTF(pose, poseTF);
+		geometry_msgs::TransformStamped poseMsg;
+		poseMsg.child_frame_id = frameId_;
+		poseMsg.header.frame_id = odomFrameId_;
+		poseMsg.header.stamp = header.stamp;
+		rtabmap_ros::transformToGeometryMsg(pose, poseMsg.transform);
 
 		if(publishTf_)
 		{
-			tfBroadcaster_.sendTransform( tf::StampedTransform (poseTF, header.stamp, odomFrameId_, frameId_));
+			tfBroadcaster_.sendTransform(poseMsg);
 		}
 
 		if(odomPub_.getNumSubscribers())
@@ -333,10 +336,10 @@ void OdometryROS::processData(const SensorData & data, const std_msgs::Header & 
 			odom.child_frame_id = frameId_;
 
 			//set the position
-			odom.pose.pose.position.x = poseTF.getOrigin().x();
-			odom.pose.pose.position.y = poseTF.getOrigin().y();
-			odom.pose.pose.position.z = poseTF.getOrigin().z();
-			tf::quaternionTFToMsg(poseTF.getRotation().normalized(), odom.pose.pose.orientation);
+			odom.pose.pose.position.x = poseMsg.transform.translation.x;
+			odom.pose.pose.position.y = poseMsg.transform.translation.y;
+			odom.pose.pose.position.z = poseMsg.transform.translation.z;
+			odom.pose.pose.orientation = poseMsg.transform.rotation;
 
 			//set covariance
 			odom.pose.covariance.at(0) = info.variance;  // xx
@@ -396,7 +399,7 @@ void OdometryROS::processData(const SensorData & data, const std_msgs::Header & 
 				if(cloud->size())
 				{
 					pcl::PointCloud<pcl::PointXYZ>::Ptr cloudTransformed;
-					cloudTransformed = util3d::transformPointCloud<pcl::PointXYZ>(cloud, pose);
+					cloudTransformed = util3d::transformPointCloud(cloud, pose);
 					sensor_msgs::PointCloud2 cloudMsg;
 					pcl::toROSMsg(*cloudTransformed, cloudMsg);
 					cloudMsg.header.stamp = header.stamp; // use corresponding time stamp to image
