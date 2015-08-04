@@ -6,9 +6,9 @@ project(rtabmap_ros)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS 
              cv_bridge roscpp rospy sensor_msgs std_msgs std_srvs nav_msgs geometry_msgs visualization_msgs
-             image_transport tf tf_conversions laser_geometry pcl_conversions 
+             image_transport tf tf_conversions tf2_ros eigen_conversions laser_geometry pcl_conversions 
              pcl_ros nodelet dynamic_reconfigure rviz message_filters class_loader
-             genmsg stereo_msgs
+             genmsg stereo_msgs move_base_msgs
 )
 
 # Optional components
@@ -17,7 +17,9 @@ find_package(octomap_ros)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(RTABMap 0.8.12 REQUIRED)
+find_package(RTABMap 0.10.4 REQUIRED)
+
+find_package(OpenCV REQUIRED)
 
 #Qt stuff
 FIND_PACKAGE(Qt4 COMPONENTS QtCore QtGui REQUIRED)
@@ -44,11 +46,9 @@ add_message_files(
    Info.msg
    KeyPoint.msg
    MapData.msg
-   Graph.msg
    NodeData.msg
    Link.msg
    OdomInfo.msg
-   UserData.msg
    Point2f.msg
 )
 
@@ -87,9 +87,9 @@ catkin_package(
   INCLUDE_DIRS include
   LIBRARIES rtabmap_ros
   CATKIN_DEPENDS cv_bridge roscpp rospy sensor_msgs std_msgs std_srvs nav_msgs geometry_msgs visualization_msgs
-                 image_transport tf tf_conversions laser_geometry pcl_conversions 
+                 image_transport tf tf_conversions tf2_ros eigen_conversions laser_geometry pcl_conversions 
                  pcl_ros nodelet dynamic_reconfigure rviz message_filters class_loader
-                 stereo_msgs
+                 stereo_msgs move_base_msgs 
 )
 
 ###########
@@ -102,11 +102,13 @@ catkin_package(
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${RTABMap_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
 )
 
 # libraries
 SET(Libraries
+   ${OpenCV_LIBRARIES}
    ${catkin_LIBRARIES}
    ${RTABMap_LIBRARIES}
 )
@@ -133,6 +135,7 @@ SET(rtabmap_ros_lib_src
    src/nodelets/point_cloud_xyz.cpp
    src/nodelets/disparity_to_depth.cpp 
    src/nodelets/obstacles_detection.cpp
+   src/nodelets/point_cloud_aggregator.cpp
    src/MsgConversion.cpp
    src/OdometryROS.cpp
    src/rviz/MapCloudDisplay.cpp
@@ -180,7 +183,7 @@ SET(Libraries
 add_definitions(-DWITH_OCTOMAP)
 ENDIF(octomap_ros_FOUND)
 
-add_executable(rtabmap src/CoreNode.cpp src/CoreWrapper.cpp)
+add_executable(rtabmap src/CoreNode.cpp src/CoreWrapper.cpp src/MapsManager.cpp)
 add_dependencies(rtabmap rtabmap_generate_messages_cpp)
 target_link_libraries(rtabmap rtabmap_ros ${Libraries})
 
@@ -253,6 +256,7 @@ install(DIRECTORY include/${PROJECT_NAME}/
 ## Mark other files for installation (e.g. launch and bag files, etc.)
 install(FILES
    launch/rgbd_mapping.launch
+   launch/stereo_mapping.launch
    launch/data_recorder.launch
    launch/rgbd_mapping_kinect2.launch
    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
