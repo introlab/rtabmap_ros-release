@@ -17,7 +17,9 @@ find_package(octomap_ros)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(RTABMap 0.9.0 REQUIRED)
+find_package(RTABMap 0.10.4 REQUIRED)
+
+find_package(OpenCV REQUIRED)
 
 #Qt stuff
 FIND_PACKAGE(Qt4 COMPONENTS QtCore QtGui REQUIRED)
@@ -44,11 +46,9 @@ add_message_files(
    Info.msg
    KeyPoint.msg
    MapData.msg
-   Graph.msg
    NodeData.msg
    Link.msg
    OdomInfo.msg
-   UserData.msg
    Point2f.msg
 )
 
@@ -102,11 +102,13 @@ catkin_package(
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${RTABMap_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
 )
 
 # libraries
 SET(Libraries
+   ${OpenCV_LIBRARIES}
    ${catkin_LIBRARIES}
    ${RTABMap_LIBRARIES}
 )
@@ -133,6 +135,7 @@ SET(rtabmap_ros_lib_src
    src/nodelets/point_cloud_xyz.cpp
    src/nodelets/disparity_to_depth.cpp 
    src/nodelets/obstacles_detection.cpp
+   src/nodelets/point_cloud_aggregator.cpp
    src/MsgConversion.cpp
    src/OdometryROS.cpp
    src/rviz/MapCloudDisplay.cpp
@@ -253,6 +256,7 @@ install(DIRECTORY include/${PROJECT_NAME}/
 ## Mark other files for installation (e.g. launch and bag files, etc.)
 install(FILES
    launch/rgbd_mapping.launch
+   launch/stereo_mapping.launch
    launch/data_recorder.launch
    launch/rgbd_mapping_kinect2.launch
    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
