@@ -28,7 +28,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ros/ros.h>
 #include "rtabmap_ros/MapData.h"
 #include "rtabmap_ros/MsgConversion.h"
-#include <rtabmap/core/util3d.h>
+#include <rtabmap/core/util3d_mapping.h>
 #include <rtabmap/core/Graph.h>
 #include <rtabmap/core/Compression.h>
 #include <rtabmap/utilite/ULogger.h>
@@ -99,9 +99,10 @@ public:
 		}
 
 		std::map<int, Transform> poses;
-		for(unsigned int i=0; i<msg->graph.nodeIds.size() && i<msg->graph.poses.size(); ++i)
+		UASSERT(msg->posesId.size() == msg->poses.size());
+		for(unsigned int i=0; i<msg->posesId.size(); ++i)
 		{
-			poses.insert(std::make_pair(msg->graph.nodeIds[i], rtabmap_ros::transformFromPoseMsg(msg->graph.poses[i])));
+			poses.insert(std::make_pair(msg->posesId[i], rtabmap_ros::transformFromPoseMsg(msg->poses[i])));
 		}
 
 		if(filterRadius_ > 0.0 && filterAngle_ > 0.0)
