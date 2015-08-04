@@ -32,13 +32,13 @@ tracks:
       -i :{release_inc}
     - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
       :{release_inc}
-    devel_branch: null
+    devel_branch: indigo-devel
     last_version: 0.8.12
     name: rtabmap_ros
     patches: null
     release_inc: '0'
     release_repo_url: null
-    release_tag: :{version}
+    release_tag: :{version}-indigo
     ros_distro: indigo
     vcs_type: git
     vcs_uri: https://github.com/introlab/rtabmap_ros.git
