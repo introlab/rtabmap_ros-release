@@ -10,6 +10,7 @@
 #include <rtabmap/utilite/ULogger.h>
 #include <rtabmap/utilite/UTimer.h>
 #include <rtabmap/utilite/UStl.h>
+#include <rtabmap/utilite/UConversion.h>
 #include <rtabmap/core/util3d_mapping.h>
 #include <rtabmap/core/util3d_filtering.h>
 #include <rtabmap/core/util3d_transforms.h>
@@ -41,7 +42,11 @@ MapsManager::MapsManager() :
 		gridEroded_(false),
 		mapFilterRadius_(0.5),
 		mapFilterAngle_(30.0), // degrees
-		mapCacheCleanup_(true)
+		mapCacheCleanup_(true),
+		laserScanMaxRange_(0),
+		laserScanMinAngle_(0),
+		laserScanMaxAngle_(0),
+		laserScanIncrement_(0)
 {
 
 	ros::NodeHandle nh;
@@ -66,7 +71,7 @@ MapsManager::MapsManager() :
 	// common map stuff
 	pnh.param("map_filter_radius", mapFilterRadius_, mapFilterRadius_);
 	pnh.param("map_filter_angle", mapFilterAngle_, mapFilterAngle_);
-	pnh.param("map_mapsManager_cleanup", mapCacheCleanup_, mapCacheCleanup_);
+	pnh.param("map_cleanup", mapCacheCleanup_, mapCacheCleanup_);
 
 	// mapping topics
 	cloudMapPub_ = nh.advertise<sensor_msgs::PointCloud2>("cloud_map", 1);
@@ -83,6 +88,29 @@ void MapsManager::clear()
 	clouds_.clear();
 	projMaps_.clear();
 	gridMaps_.clear();
+	laserScanMaxRange_ = 0;
+	laserScanMinAngle_ = 0;
+	laserScanMaxAngle_ = 0;
+	laserScanIncrement_ = 0;
+}
+
+bool MapsManager::hasSubscribers() const
+{
+	return  cloudMapPub_.getNumSubscribers() != 0 ||
+			projMapPub_.getNumSubscribers() != 0 ||
+			gridMapPub_.getNumSubscribers() != 0;
+}
+
+void MapsManager::setLaserScanParameters(
+		float maxRange,
+		float minAngle,
+		float maxAngle,
+		float increment)
+{
+	laserScanMaxRange_ = maxRange;
+	laserScanMinAngle_ = minAngle;
+	laserScanMaxAngle_ = maxAngle;
+	laserScanIncrement_ = increment;
 }
 
 std::map<int, Transform> MapsManager::getFilteredPoses(const std::map<int, Transform> & poses)
@@ -141,7 +169,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 		{
 			if(!iter->second.isNull())
 			{
-				rtabmap::Signature data;
+				rtabmap::SensorData data;
 				bool rgbDepthRequired = updateCloud && !uContains(clouds_, iter->first);
 				bool depthRequired = updateProj && !uContains(projMaps_, iter->first);
 				bool scanRequired = updateGrid && !uContains(gridMaps_, iter->first);
@@ -154,7 +182,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 						std::map<int, rtabmap::Signature>::const_iterator findIter = signatures.find(iter->first);
 						if(findIter != signatures.end())
 						{
-							data = findIter->second;
+							data = findIter->second.sensorData();
 						}
 					}
 					else
@@ -165,55 +193,28 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 
 				if(data.id() > 0)
 				{
-					rtabmap::Transform localTransform = data.getLocalTransform();
-					if(!localTransform.isNull())
+					if(!data.imageCompressed().empty() &&
+					   !data.depthOrRightCompressed().empty() &&
+					   (data.cameraModels().size() || data.stereoCameraModel().isValid()))
 					{
 						// Which data should we decompress?
 						cv::Mat image, depth, scan;
-						data.uncompressDataConst(rgbDepthRequired?&image:0, rgbDepthRequired||depthRequired?&depth:0, scanRequired?&scan:0);
-						if(!depth.empty() &&
-							depth.type() == CV_8UC1 &&
-							image.empty() &&
-							!rgbDepthRequired)
-						{
-							// Stereo detected, we should uncompress left image too
-							data.uncompressDataConst(&image, 0, 0);
-						}
-						float fx = data.getFx();
-						float fy = data.getFy();
-						float cx = data.getCx();
-						float cy = data.getCy();
+						data.uncompressData(
+								(rgbDepthRequired||data.stereoCameraModel().isValid()) ? &image:0,
+								(rgbDepthRequired||depthRequired) ? &depth:0,
+								scanRequired?&scan:0);
 
 						pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudRGB;
 						pcl::PointCloud<pcl::PointXYZ>::Ptr cloudXYZ;
 						if(rgbDepthRequired)
 						{
-							if(!image.empty() &&
-								!depth.empty() &&
-								fx > 0.0f && fy > 0.0f &&
-								cx >= 0.0f && cy >= 0.0f)
+							if(!image.empty() && !depth.empty())
 							{
-								if(depth.type() == CV_8UC1)
-								{
-									cloudRGB = util3d::cloudFromStereoImages(image, depth, cx, cy, fx, fy, cloudDecimation_);
-								}
-								else
-								{
-									cloudRGB = util3d::cloudFromDepthRGB(image, depth, cx, cy, fx, fy, cloudDecimation_);
-								}
-
-								if(cloudRGB->size() && cloudMaxDepth_ > 0)
-								{
-									cloudRGB = util3d::passThrough(cloudRGB, "z", 0, cloudMaxDepth_);
-								}
-								if(cloudRGB->size() && cloudVoxelSize_ > 0)
-								{
-									cloudRGB = util3d::voxelize(cloudRGB, cloudVoxelSize_);
-								}
-								if(cloudRGB->size())
-								{
-									cloudRGB = util3d::transformPointCloud(cloudRGB, localTransform);
-								}
+								cloudRGB = util3d::cloudRGBFromSensorData(
+										data,
+										cloudDecimation_,
+										cloudMaxDepth_,
+										cloudVoxelSize_);
 							}
 							else
 							{
@@ -222,55 +223,13 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 						}
 						else if(depthRequired)
 						{
-							if(	!depth.empty() &&
-								fx > 0.0f && fy > 0.0f &&
-								cx >= 0.0f && cy >= 0.0f)
+							if(	!depth.empty())
 							{
-								if(depth.type() == CV_8UC1)
-								{
-									if(!image.empty())
-									{
-										cv::Mat leftMono;
-										if(image.channels() == 3)
-										{
-											cv::cvtColor(image, leftMono, CV_BGR2GRAY);
-										}
-										else
-										{
-											leftMono = image;
-										}
-										cloudXYZ = rtabmap::util3d::cloudFromDisparity(
-												util2d::disparityFromStereoImages(leftMono, depth),
-												cx, cy,
-												fx, fy,
-												cloudDecimation_);
-									}
-								}
-								else
-								{
-									cloudXYZ = util3d::cloudFromDepth(depth, cx, cy, fx, fy, cloudDecimation_);
-								}
-
-								if(cloudXYZ.get())
-								{
-									if(cloudXYZ->size() && cloudMaxDepth_ > 0)
-									{
-										cloudXYZ = util3d::passThrough(cloudXYZ, "z", 0, cloudMaxDepth_);
-									}
-									if(cloudXYZ->size() && gridCellSize_ > 0)
-									{
-										// use gridCellSize since this cloud is only for the projection map
-										cloudXYZ = util3d::voxelize(cloudXYZ, gridCellSize_);
-									}
-									if(cloudXYZ->size())
-									{
-										cloudXYZ = util3d::transformPointCloud(cloudXYZ, localTransform);
-									}
-								}
-								else
-								{
-									ROS_ERROR("Left stereo image was empty! (node=%d)", iter->first);
-								}
+								cloudXYZ = util3d::cloudFromSensorData(
+										data,
+										cloudDecimation_,
+										cloudMaxDepth_,
+										gridCellSize_); // use gridCellSize since this cloud is only for the projection map
 							}
 							else
 							{
@@ -532,13 +491,57 @@ cv::Mat MapsManager::generateGridMap(
 		float & gridCellSize)
 {
 	gridCellSize = gridCellSize_;
-	return util3d::create2DMapFromOccupancyLocalMaps(
+	cv::Mat map = util3d::create2DMapFromOccupancyLocalMaps(
 			poses,
 			gridMaps_,
 			gridCellSize_,
 			xMin, yMin,
 			gridSize_,
 			gridEroded_);
+
+	// Fill unknown space around the last pose
+	if(!map.empty() &&
+		laserScanMaxRange_ &&
+		laserScanMinAngle_ < laserScanMaxAngle_ &&
+		laserScanIncrement_ &&
+		poses.size())
+	{
+		const Transform & pose = poses.rbegin()->second;
+		float roll, pitch, yaw;
+		pose.getEulerAngles(roll, pitch, yaw);
+		cv::Point2i start((pose.x()-xMin)/gridCellSize_ + 0.5f, (pose.y()-yMin)/gridCellSize_ + 0.5f);
+
+		//rotate counterclockwise 180 degrees at the computed step "a" degrees
+		cv::Mat rotation = (cv::Mat_<float>(2,2) << cos(laserScanIncrement_), -sin(laserScanIncrement_),
+													 sin(laserScanIncrement_), cos(laserScanIncrement_));
+
+		cv::Mat origin(2,1,CV_32F), endFirst(2,1,CV_32F);
+		origin.at<float>(0) = pose.x();
+		origin.at<float>(1) = pose.y();
+		endFirst.at<float>(0) = laserScanMaxRange_;
+		endFirst.at<float>(1) = 0;
+
+		yaw += laserScanMinAngle_;
+		cv::Mat initRotation = (cv::Mat_<float>(2,2) << cos(yaw), -sin(yaw),
+														 sin(yaw), cos(yaw));
+
+		cv::Mat endCurrent = initRotation*endFirst + origin;
+		for(float a=laserScanMinAngle_; a<=laserScanMaxAngle_; a+=laserScanIncrement_)
+		{
+			cv::Point2i end((endCurrent.at<float>(0)-xMin)/gridCellSize_ + 0.5f, (endCurrent.at<float>(1)-yMin)/gridCellSize_ + 0.5f);
+			//end must be inside the grid
+			end.x = end.x < 0?0:end.x;
+			end.x = end.x >= map.cols?map.cols-1:end.x;
+			end.y = end.y < 0?0:end.y;
+			end.y = end.y >= map.rows?map.rows-1:end.y;
+			util3d::rayTrace(start, end, map, true); // trace free space
+
+			// next point
+			endCurrent = rotation*(endCurrent - origin) + origin;
+		}
+	}
+
+	return map;
 }
 
 #ifdef WITH_OCTOMAP
