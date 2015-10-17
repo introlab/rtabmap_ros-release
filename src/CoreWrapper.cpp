@@ -45,6 +45,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/utilite/UStl.h>
 #include <rtabmap/utilite/UMath.h>
 
+#include <rtabmap/core/util2d.h>
 #include <rtabmap/core/util3d.h>
 #include <rtabmap/core/util3d_transforms.h>
 #include <rtabmap/core/Memory.h>
@@ -63,6 +64,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //msgs
 #include "rtabmap_ros/Info.h"
 #include "rtabmap_ros/MapData.h"
+#include "rtabmap_ros/MapGraph.h"
 #include "rtabmap_ros/GetMap.h"
 #include "rtabmap_ros/PublishMap.h"
 
@@ -82,6 +84,7 @@ CoreWrapper::CoreWrapper(bool deleteDbOnStart) :
 		configPath_(""),
 		databasePath_(UDirectory::homeDir()+"/.ros/"+rtabmap::Parameters::getDefaultDatabaseName()),
 		waitForTransform_(true),
+		waitForTransformDuration_(0.1), // 100 ms
 		useActionForGoal_(false),
 		genScan_(false),
 		genScanMaxDepth_(4.0),
@@ -147,6 +150,7 @@ CoreWrapper::CoreWrapper(bool deleteDbOnStart) :
 	pnh.param("tf_delay",            tfDelay, tfDelay);
 	pnh.param("tf_prefix",           tfPrefix, tfPrefix);
 	pnh.param("wait_for_transform",  waitForTransform_, waitForTransform_);
+	pnh.param("wait_for_transform_duration",  waitForTransformDuration_, waitForTransformDuration_);
 	pnh.param("use_action_for_goal", useActionForGoal_, useActionForGoal_);
 	pnh.param("gen_scan",            genScan_, genScan_);
 	pnh.param("gen_scan_max_depth",  genScanMaxDepth_, genScanMaxDepth_);
@@ -184,10 +188,12 @@ CoreWrapper::CoreWrapper(bool deleteDbOnStart) :
 
 	infoPub_ = nh.advertise<rtabmap_ros::Info>("info", 1);
 	mapDataPub_ = nh.advertise<rtabmap_ros::MapData>("mapData", 1);
+	mapGraphPub_ = nh.advertise<rtabmap_ros::MapGraph>("mapGraph", 1);
 	labelsPub_ = nh.advertise<visualization_msgs::MarkerArray>("labels", 1);
 
 	// planning topics
 	goalSub_ = nh.subscribe("goal", 1, &CoreWrapper::goalCallback, this);
+	goalNodeSub_ = nh.subscribe("goal_node", 1, &CoreWrapper::goalNodeCallback, this);
 	nextMetricGoalPub_ = nh.advertise<geometry_msgs::PoseStamped>("goal_out", 1);
 	goalReachedPub_ = nh.advertise<std_msgs::Bool>("goal_reached", 1);
 	globalPathPub_ = nh.advertise<nav_msgs::Path>("global_path", 1);
@@ -473,8 +479,7 @@ CoreWrapper::~CoreWrapper()
 	this->saveParameters(configPath_);
 
 	ros::NodeHandle nh;
-	ParametersMap parameters = Parameters::getDefaultParameters();
-	for(ParametersMap::iterator iter=parameters.begin(); iter!=parameters.end(); ++iter)
+	for(ParametersMap::iterator iter=parameters_.begin(); iter!=parameters_.end(); ++iter)
 	{
 		nh.deleteParam(iter->first);
 	}
@@ -510,19 +515,7 @@ void CoreWrapper::saveParameters(const std::string & configFile)
 		{
 			printf("Config file doesn't exist, a new one will be created.\n");
 		}
-
-		ParametersMap parameters = Parameters::getDefaultParameters();
-		ros::NodeHandle nh;
-		for(ParametersMap::iterator iter=parameters.begin(); iter!=parameters.end(); ++iter)
-		{
-			std::string value;
-			if(nh.getParam(iter->first,value))
-			{
-				iter->second = value;
-			}
-		}
-
-		Rtabmap::writeParameters(configFile.c_str(), parameters);
+		Rtabmap::writeParameters(configFile.c_str(), parameters_);
 	}
 	else
 	{
@@ -660,26 +653,9 @@ bool CoreWrapper::commonOdomTFUpdate(const ros::Time & stamp)
 	if(!paused_)
 	{
 		// Odom TF ready?
-		Transform odom;
-		try
+		Transform odom = getTransform(odomFrameId_, frameId_, stamp);
+		if(odom.isNull())
 		{
-			if(waitForTransform_)
-			{
-				//if(!tfBuffer_.canTransform(odomFrameId_, frameId_, stamp, ros::Duration(1)))
-				if(!tfListener_.waitForTransform(odomFrameId_, frameId_, stamp, ros::Duration(1)))
-				{
-					ROS_WARN("Could not get transform from %s to %s after 1 second!", odomFrameId_.c_str(), frameId_.c_str());
-					return false;
-				}
-			}
-
-			tf::StampedTransform tmp;
-			tfListener_.lookupTransform(odomFrameId_, frameId_, stamp, tmp);
-			odom = rtabmap_ros::transformFromTF(tmp);
-		}
-		catch(tf::TransformException & ex)
-		{
-			ROS_WARN("%s",ex.what());
 			return false;
 		}
 
@@ -710,28 +686,28 @@ bool CoreWrapper::commonOdomTFUpdate(const ros::Time & stamp)
 Transform CoreWrapper::getTransform(const std::string & fromFrameId, const std::string & toFrameId, const ros::Time & stamp) const
 {
 	// TF ready?
-	Transform localTransform;
+	Transform transform;
 	try
 	{
-		if(waitForTransform_)
+		if(waitForTransform_ && !stamp.isZero() && waitForTransformDuration_>0.0)
 		{
 			//if(!tfBuffer_.canTransform(fromFrameId, toFrameId, stamp, ros::Duration(1)))
-			if(!tfListener_.waitForTransform(fromFrameId, toFrameId, stamp, ros::Duration(1)))
+			if(!tfListener_.waitForTransform(fromFrameId, toFrameId, stamp, ros::Duration(waitForTransformDuration_)))
 			{
-				ROS_WARN("Could not get transform from %s to %s after 1 second!", fromFrameId.c_str(), toFrameId.c_str());
-				return localTransform;
+				ROS_WARN("rtabmap: Could not get transform from %s to %s after %f second!", fromFrameId.c_str(), toFrameId.c_str(), waitForTransformDuration_);
+				return transform;
 			}
 		}
 
 		tf::StampedTransform tmp;
 		tfListener_.lookupTransform(fromFrameId, toFrameId, stamp, tmp);
-		localTransform = rtabmap_ros::transformFromTF(tmp);
+		transform = rtabmap_ros::transformFromTF(tmp);
 	}
 	catch(tf::TransformException & ex)
 	{
 		ROS_WARN("%s",ex.what());
 	}
-	return localTransform;
+	return transform;
 }
 
 void CoreWrapper::commonDepthCallback(
@@ -775,6 +751,7 @@ void CoreWrapper::commonDepthCallback(
 	cv::Mat depth;
 	pcl::PointCloud<pcl::PointXYZ> scanCloud;
 	std::vector<CameraModel> cameraModels;
+	int genMaxScanPts = 0;
 	for(unsigned int i=0; i<imageMsgs.size(); ++i)
 	{
 		if(!(imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_8UC1) == 0 ||
@@ -827,14 +804,17 @@ void CoreWrapper::commonDepthCallback(
 		}
 		cv_bridge::CvImageConstPtr ptrDepth = cv_bridge::toCvShare(depthMsgs[i]);
 		cv::Mat subDepth = ptrDepth->image;
-		if(subDepth.type() == CV_32FC1)
+		UASSERT(uContains(parameters_, Parameters::kMemSaveDepth16Format()));
+		if(subDepth.type() == CV_32FC1 && uStr2Bool(parameters_.at(Parameters::kMemSaveDepth16Format())))
 		{
-			subDepth = util3d::cvtDepthFromFloat(subDepth);
+			subDepth = util2d::cvtDepthFromFloat(subDepth);
 			static bool shown = false;
 			if(!shown)
 			{
-				ROS_WARN("Use depth image with \"unsigned short\" type to "
-						 "avoid conversion. This message is only printed once...");
+				ROS_WARN("Save depth data to 16 bits format: depth type detected is "
+					  "32FC1, use 16UC1 depth format to avoid this conversion "
+					  "(or set parameter \"Mem/SaveDepth16Format=false\" to use "
+					  "32bits format). This message is only printed once...");
 				shown = true;
 			}
 		}
@@ -888,6 +868,7 @@ void CoreWrapper::commonDepthCallback(
 					model.cy(),
 					genScanMaxDepth_,
 					localTransform);
+			genMaxScanPts += subDepth.cols;
 		}
 	}
 
@@ -899,13 +880,6 @@ void CoreWrapper::commonDepthCallback(
 		{
 			return;
 		}
-
-		// set maps manager laser scan range parameter
-		mapsManager_.setLaserScanParameters(
-				scanMsg->range_max,
-				scanMsg->angle_min,
-				scanMsg->angle_max,
-				scanMsg->angle_increment);
 
 		//transform in frameId_ frame
 		sensor_msgs::PointCloud2 scanOut;
@@ -940,7 +914,8 @@ void CoreWrapper::commonDepthCallback(
 
 	process(stamp,
 			SensorData(scan,
-					scanMsg.get() != 0?(int)scanMsg->ranges.size():0,
+					scanMsg.get() != 0?(int)scanMsg->ranges.size():genMaxScanPts,
+					scanMsg.get() != 0?scanMsg->range_max:(genScan_?genScanMaxDepth_:0.0f),
 					rgb,
 					depth,
 					cameraModels,
@@ -1012,13 +987,6 @@ void CoreWrapper::commonStereoCallback(
 			return;
 		}
 
-		// set maps manager laser scan range parameter
-		mapsManager_.setLaserScanParameters(
-				scanMsg->range_max,
-				scanMsg->angle_min,
-				scanMsg->angle_max,
-				scanMsg->angle_increment);
-
 		//transform in frameId_ frame
 		sensor_msgs::PointCloud2 scanOut;
 		laser_geometry::LaserProjection projection;
@@ -1042,6 +1010,7 @@ void CoreWrapper::commonStereoCallback(
 
 			}
 		}
+
 		scan = util3d::laserScanFromPointCloud(*pclScan);
 	}
 
@@ -1067,10 +1036,24 @@ void CoreWrapper::commonStereoCallback(
 			model.baseline(),
 			localTransform);
 
+	if(model.baseline() > 10.0)
+	{
+		static bool shown = false;
+		if(!shown)
+		{
+			ROS_WARN("Detected baseline (%f m) is quite large! Is your "
+					 "right camera_info P(0,3) correctly set? Note that "
+					 "baseline=-P(0,3)/P(0,0). This warning is printed only once.",
+					 model.baseline());
+			shown = true;
+		}
+	}
+
 	ros::Time stamp = scanMsg.get() != 0?scanMsg->header.stamp:leftImageMsg->header.stamp;
 	process(stamp,
 			SensorData(scan,
 					scanMsg.get() != 0?(int)scanMsg->ranges.size():0,
+					scanMsg.get() != 0?scanMsg->range_max:0,
 					ptrLeftImage->image,
 					ptrRightImage->image,
 					stereoModel,
@@ -1245,14 +1228,24 @@ void CoreWrapper::process(
 
 			// Publish local graph, info
 			this->publishStats(stamp);
-			std::map<int, rtabmap::Transform> filteredPoses;
+			std::map<int, rtabmap::Transform> filteredPoses = rtabmap_.getLocalOptimizedPoses();
 
+			// create a tmp signature with latest sensory data
+			std::map<int, rtabmap::Signature> tmpSignature;
+			SensorData tmpData = data;
+			tmpData.setId(-1);
+			tmpSignature.insert(std::make_pair(-1, Signature(-1, -1, 0, data.stamp(), "", odom, tmpData)));
+			filteredPoses.insert(std::make_pair(-1, rtabmap_.getMapCorrection()*odom));
+
+			// Update maps
 			filteredPoses = mapsManager_.updateMapCaches(
-					rtabmap_.getLocalOptimizedPoses(),
+					filteredPoses,
 					rtabmap_.getMemory(),
 					false,
 					false,
-					false);
+					false,
+					tmpSignature);
+
 			mapsManager_.publishMaps(filteredPoses, stamp, mapFrameId_);
 
 			// update goal if planning is enabled
@@ -1260,12 +1253,23 @@ void CoreWrapper::process(
 			{
 				if(rtabmap_.getPath().size() == 0)
 				{
-					// Goal reached
-					ROS_INFO("Planning: Publishing goal reached!");
+					if(rtabmap_.getPathStatus() > 0)
+					{
+						// Goal reached
+						ROS_INFO("Planning: Publishing goal reached!");
+					}
+					else
+					{
+						ROS_WARN("Planning: Plan failed!");
+						if(mbClient_.isServerConnected())
+						{
+							mbClient_.cancelGoal();
+						}
+					}
 					if(goalReachedPub_.getNumSubscribers())
 					{
 						std_msgs::Bool result;
-						result.data = true;
+						result.data = rtabmap_.getPathStatus() > 0;
 						goalReachedPub_.publish(result);
 					}
 					currentMetricGoal_.setNull();
@@ -1293,12 +1297,15 @@ void CoreWrapper::process(
 
 						// publish local path
 						publishLocalPath(stamp);
+
+						// publish global path
+						publishGlobalPath(stamp);
 					}
 					else
 					{
 						ROS_ERROR("Planning: Local map broken, current goal id=%d (the robot may have moved to far from planned nodes)",
 								rtabmap_.getPathCurrentGoalId());
-						rtabmap_.clearPath();
+						rtabmap_.clearPath(-1);
 						if(goalReachedPub_.getNumSubscribers())
 						{
 							std_msgs::Bool result;
@@ -1333,79 +1340,110 @@ void CoreWrapper::process(
 	}
 }
 
-void CoreWrapper::goalCommonCallback(const std::vector<std::pair<int, Transform> > & poses)
+void CoreWrapper::goalCommonCallback(
+		int id,
+		const std::string & label,
+		const Transform & pose,
+		const ros::Time & stamp)
 {
-	currentMetricGoal_.setNull();
-	latestNodeWasReached_ = false;
-	if(poses.size())
+	UTimer timer;
+
+	if(id == 0 && !label.empty() && rtabmap_.getMemory())
 	{
-		currentMetricGoal_ = rtabmap_.getPose(rtabmap_.getPathCurrentGoalId());
-		if(currentMetricGoal_.isNull())
+		id = rtabmap_.getMemory()->getSignatureIdByLabel(label);
+	}
+
+	if(id > 0)
+	{
+		ROS_INFO("Planning: set goal %d", id);
+	}
+	else if(!pose.isNull())
+	{
+		ROS_INFO("Planning: set goal %s", pose.prettyPrint().c_str());
+	}
+
+	bool success = false;
+	if((id > 0 && rtabmap_.computePath(id, true)) ||
+	   (!pose.isNull() && rtabmap_.computePath(pose)))
+	{
+		ROS_INFO("Planning: Time computing path = %f s", timer.ticks());
+		const std::vector<std::pair<int, Transform> > & poses = rtabmap_.getPath();
+
+		currentMetricGoal_.setNull();
+		latestNodeWasReached_ = false;
+		if(poses.size() == 0)
 		{
-			ROS_ERROR("Pose of node %d not found!? Cannot send a metric goal...", rtabmap_.getPathCurrentGoalId());
-			rtabmap_.clearPath();
+			ROS_WARN("Planning: Goal already reached (RGBD/GoalReachedRadius=%fm).",
+					rtabmap_.getGoalReachedRadius());
+			rtabmap_.clearPath(1);
 			if(goalReachedPub_.getNumSubscribers())
 			{
 				std_msgs::Bool result;
-				result.data = false;
+				result.data = true;
 				goalReachedPub_.publish(result);
 			}
+			success = true;
 		}
 		else
 		{
-			ROS_INFO("Planning: Path successfully created (size=%d)", (int)poses.size());
-			ros::Time now = ros::Time::now();
-
-			// Global path
-			if(globalPathPub_.getNumSubscribers())
+			currentMetricGoal_ = rtabmap_.getPose(rtabmap_.getPathCurrentGoalId());
+			if(!currentMetricGoal_.isNull())
 			{
-				nav_msgs::Path path;
-				path.header.frame_id = mapFrameId_;
-				path.header.stamp = now;
-				path.poses.resize(poses.size());
+				ROS_INFO("Planning: Path successfully created (size=%d)", (int)poses.size());
+
+				// Adjust the target pose relative to last node
+				if(rtabmap_.getPathCurrentGoalId() == rtabmap_.getPath().back().first && rtabmap_.getLocalOptimizedPoses().size())
+				{
+					if(rtabmap_.getLocalOptimizedPoses().rbegin()->second.getDistance(currentMetricGoal_) < rtabmap_.getGoalReachedRadius())
+					{
+						latestNodeWasReached_ = true;
+						currentMetricGoal_ *= rtabmap_.getPathTransformToGoal();
+					}
+				}
+
+				publishCurrentGoal(stamp);
+				publishLocalPath(stamp);
+				publishGlobalPath(stamp);
+
+				// Just output the path on screen
 				std::stringstream stream;
-				for(unsigned int i=0; i<poses.size(); ++i)
+				for(std::vector<std::pair<int, Transform> >::const_iterator iter=poses.begin(); iter!=poses.end(); ++iter)
 				{
-					path.poses[i].header = path.header;
-					rtabmap_ros::transformToPoseMsg(poses[i].second, path.poses[i].pose);
-					stream << poses[i].first << " ";
+					if(iter != poses.begin())
+					{
+						stream << " ";
+					}
+					stream << iter->first;
 				}
-				if(!rtabmap_.getPathTransformToGoal().isIdentity())
-				{
-					path.poses.resize(poses.size()+1);
-					Transform t = poses.back().second*rtabmap_.getPathTransformToGoal();
-					rtabmap_ros::transformToPoseMsg(t, path.poses[path.poses.size()-1].pose);
-					stream << "G";
-				}
-
-				ROS_INFO("Publishing global path: [%s]", stream.str().c_str());
-				globalPathPub_.publish(path);
+				ROS_INFO("Global path: [%s]", stream.str().c_str());
+				success=true;
 			}
-
-			// Adjust the target pose relative to last node
-			if(rtabmap_.getPathCurrentGoalId() == rtabmap_.getPath().back().first && rtabmap_.getLocalOptimizedPoses().size())
+			else
 			{
-				if(rtabmap_.getLocalOptimizedPoses().rbegin()->second.getDistance(currentMetricGoal_) < rtabmap_.getGoalReachedRadius())
-				{
-					latestNodeWasReached_ = true;
-					currentMetricGoal_ *= rtabmap_.getPathTransformToGoal();
-				}
+				ROS_ERROR("Pose of node %d not found!? Cannot send a metric goal...", rtabmap_.getPathCurrentGoalId());
 			}
-
-			publishCurrentGoal(now);
-			publishLocalPath(now);
 		}
+	}
+	else if(!label.empty())
+	{
+		ROS_ERROR("Planning: Node with label \"%s\" not found!", label.c_str());
+	}
+	else if(pose.isNull())
+	{
+		ROS_ERROR("Planning: Node id should be > 0 !");
 	}
 	else
 	{
-		ROS_WARN("Planning: Goal already reached (RGBD/GoalReachedRadius=%fm) or too far from the graph (RGBD/GoalMaxDistance=%fm).",
-				rtabmap_.getGoalReachedRadius(),
-				rtabmap_.getLocalRadius());
-		rtabmap_.clearPath();
+		ROS_ERROR("Planning: A node near the goal's pose not found! The pose may be to far from the graph (RGBD/LocalRadius=%f m)", rtabmap_.getLocalRadius());
+	}
+
+	if(!success)
+	{
+		rtabmap_.clearPath(-1);
 		if(goalReachedPub_.getNumSubscribers())
 		{
 			std_msgs::Bool result;
-			result.data = true;
+			result.data = false;
 			goalReachedPub_.publish(result);
 		}
 	}
@@ -1419,18 +1457,23 @@ void CoreWrapper::goalCallback(const geometry_msgs::PoseStampedConstPtr & msg)
 		ROS_ERROR("Pose received is null!");
 		return;
 	}
-	ROS_INFO("Planning: set goal %s", targetPose.prettyPrint().c_str());
-	UTimer timer;
-	rtabmap_.computePath(targetPose);
-	ROS_INFO("Planning: Time computing path = %f s", timer.ticks());
-	goalCommonCallback(rtabmap_.getPath());
+	goalCommonCallback(0, "", targetPose, msg->header.stamp);
+}
+
+void CoreWrapper::goalNodeCallback(const rtabmap_ros::GoalConstPtr & msg)
+{
+	if(msg->node_id <= 0 && msg->node_label.empty())
+	{
+		ROS_ERROR("Node id or label should be set!");
+		return;
+	}
+	goalCommonCallback(msg->node_id, msg->node_label, Transform(), msg->header.stamp);
 }
 
 bool CoreWrapper::updateRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&)
 {
-	rtabmap::ParametersMap parameters = rtabmap::Parameters::getDefaultParameters();
 	ros::NodeHandle nh;
-	for(rtabmap::ParametersMap::iterator iter=parameters.begin(); iter!=parameters.end(); ++iter)
+	for(rtabmap::ParametersMap::iterator iter=parameters_.begin(); iter!=parameters_.end(); ++iter)
 	{
 		std::string vStr;
 		bool vBool;
@@ -1458,12 +1501,12 @@ bool CoreWrapper::updateRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Emp
 		}
 	}
 	ROS_INFO("rtabmap: Updating parameters");
-	if(parameters.find(Parameters::kRtabmapDetectionRate()) != parameters.end())
+	if(parameters_.find(Parameters::kRtabmapDetectionRate()) != parameters_.end())
 	{
-		rate_ = uStr2Float(parameters.at(Parameters::kRtabmapDetectionRate()));
+		rate_ = uStr2Float(parameters_.at(Parameters::kRtabmapDetectionRate()));
 		ROS_INFO("RTAB-Map rate detection = %f Hz", rate_);
 	}
-	rtabmap_.parseParameters(parameters);
+	rtabmap_.parseParameters(parameters_);
 	return true;
 }
 
@@ -1740,6 +1783,20 @@ bool CoreWrapper::publishMapCallback(rtabmap_ros::PublishMap::Request& req, rtab
 			mapDataPub_.publish(msg);
 		}
 
+		if(mapGraphPub_.getNumSubscribers())
+		{
+			rtabmap_ros::MapGraphPtr msg(new rtabmap_ros::MapGraph);
+			msg->header.stamp = now;
+			msg->header.frame_id = mapFrameId_;
+
+			rtabmap_ros::mapGraphToROS(poses,
+				constraints,
+				Transform::getIdentity(),
+				*msg);
+
+			mapGraphPub_.publish(msg);
+		}
+
 		if(!req.graphOnly && mapsManager_.hasSubscribers())
 		{
 			std::map<int, Transform> filteredPoses;
@@ -1848,31 +1905,14 @@ bool CoreWrapper::publishMapCallback(rtabmap_ros::PublishMap::Request& req, rtab
 
 bool CoreWrapper::setGoalCallback(rtabmap_ros::SetGoal::Request& req, rtabmap_ros::SetGoal::Response& res)
 {
-	int id = req.node_id;
-	if(id == 0 && !req.node_label.empty() && rtabmap_.getMemory())
+	goalCommonCallback(req.node_id, req.node_label, Transform(), ros::Time::now());
+	const std::vector<std::pair<int, Transform> > & path = rtabmap_.getPath();
+	res.path_ids.resize(path.size());
+	res.path_poses.resize(path.size());
+	for(unsigned int i=0; i<path.size(); ++i)
 	{
-		id = rtabmap_.getMemory()->getSignatureIdByLabel(req.node_label);
-	}
-
-	if(id > 0)
-	{
-		ROS_INFO("Planning: set goal %d", id);
-		UTimer timer;
-		rtabmap_.computePath(id, true);
-		ROS_INFO("Planning: Time computing path = %f s", timer.ticks());
-		goalCommonCallback(rtabmap_.getPath());
-		if(currentMetricGoal_.isNull())
-		{
-			ROS_ERROR("Planning: Node id %d not found or goal already reached!", id);
-		}
-	}
-	else if(!req.node_label.empty())
-	{
-		ROS_ERROR("Planning: Node with label \"%s\" not found!", req.node_label.c_str());
-	}
-	else
-	{
-		ROS_ERROR("Planning: Node id should be > 0 !");
+		res.path_ids[i] = path[i].first;
+		rtabmap_ros::transformToPoseMsg(path[i].second, res.path_poses[i]);
 	}
 	return true;
 }
@@ -1882,14 +1922,20 @@ bool CoreWrapper::cancelGoalCallback(std_srvs::Empty::Request& req, std_srvs::Em
 	if(rtabmap_.getPath().size())
 	{
 		ROS_WARN("Goal cancelled!");
-		rtabmap_.clearPath();
+		rtabmap_.clearPath(0);
 		currentMetricGoal_.setNull();
 		latestNodeWasReached_ = false;
-		if(mbClient_.isServerConnected())
+		if(goalReachedPub_.getNumSubscribers())
 		{
-			mbClient_.cancelGoal();
+			std_msgs::Bool result;
+			result.data = false;
+			goalReachedPub_.publish(result);
 		}
 	}
+	if(mbClient_.isServerConnected())
+        {
+        	mbClient_.cancelGoal();
+        }
 
 	return true;
 }
@@ -1962,6 +2008,21 @@ void CoreWrapper::publishStats(const ros::Time & stamp)
 			*msg);
 
 		mapDataPub_.publish(msg);
+	}
+
+	if(mapGraphPub_.getNumSubscribers())
+	{
+		rtabmap_ros::MapGraphPtr msg(new rtabmap_ros::MapGraph);
+		msg->header.stamp = stamp;
+		msg->header.frame_id = mapFrameId_;
+
+		rtabmap_ros::mapGraphToROS(
+			stats.poses(),
+			stats.constraints(),
+			stats.mapCorrection(),
+			*msg);
+
+		mapGraphPub_.publish(msg);
 	}
 
 	if(labelsPub_.getNumSubscribers())
@@ -2047,7 +2108,7 @@ void CoreWrapper::publishCurrentGoal(const ros::Time & stamp)
 {
 	if(!currentMetricGoal_.isNull())
 	{
-		ROS_INFO("Planning: Publishing next goal: Location %d pose=%s",
+		ROS_INFO("Publishing next goal: %d -> %s",
 				rtabmap_.getPathCurrentGoalId(), currentMetricGoal_.prettyPrint().c_str());
 
 		geometry_msgs::PoseStamped poseMsg;
@@ -2055,7 +2116,6 @@ void CoreWrapper::publishCurrentGoal(const ros::Time & stamp)
 		poseMsg.header.stamp = stamp;
 		rtabmap_ros::transformToPoseMsg(currentMetricGoal_, poseMsg.pose);
 
-		ROS_INFO("Publishing next goal: %d", rtabmap_.getPathCurrentGoalId());
 		if(useActionForGoal_)
 		{
 			if(!mbClient_.isServerConnected())
@@ -2113,7 +2173,7 @@ void CoreWrapper::goalDoneCb(const actionlib::SimpleClientGoalState& state,
 			ROS_ERROR("Planning: move_base failed for some reason. Aborting the plan...");
 		}
 
-		if(!ignore && !goalReachedPub_.getNumSubscribers())
+		if(!ignore && goalReachedPub_.getNumSubscribers())
 		{
 			std_msgs::Bool result;
 			result.data = state == actionlib::SimpleClientGoalState::SUCCEEDED;
@@ -2123,7 +2183,7 @@ void CoreWrapper::goalDoneCb(const actionlib::SimpleClientGoalState& state,
 
 	if(!ignore)
 	{
-		rtabmap_.clearPath();
+		rtabmap_.clearPath(1);
 		currentMetricGoal_.setNull();
 		latestNodeWasReached_ = false;
 	}
@@ -2156,17 +2216,46 @@ void CoreWrapper::publishLocalPath(const ros::Time & stamp)
 				path.header.stamp = stamp;
 				path.poses.resize(poses.size());
 				int oi = 0;
-				std::stringstream stream;
 				for(std::vector<std::pair<int, Transform> >::iterator iter=poses.begin(); iter!=poses.end(); ++iter)
 				{
 					path.poses[oi].header = path.header;
 					rtabmap_ros::transformToPoseMsg(iter->second, path.poses[oi].pose);
 					++oi;
-					stream << iter->first << " ";
 				}
-				ROS_INFO("Publishing local path: [%s]", stream.str().c_str());
 				localPathPub_.publish(path);
 			}
+		}
+	}
+}
+
+void CoreWrapper::publishGlobalPath(const ros::Time & stamp)
+{
+	if(globalPathPub_.getNumSubscribers() && rtabmap_.getPath().size())
+	{
+		Transform pose = uValue(rtabmap_.getLocalOptimizedPoses(), rtabmap_.getPathCurrentGoalId(), Transform());
+		if(!pose.isNull() && rtabmap_.getPathCurrentGoalIndex() < rtabmap_.getPath().size())
+		{
+			// transform the global path in the goal referential
+			Transform t = pose * rtabmap_.getPath().at(rtabmap_.getPathCurrentGoalIndex()).second.inverse();
+
+			nav_msgs::Path path;
+			path.header.frame_id = mapFrameId_;
+			path.header.stamp = stamp;
+			path.poses.resize(rtabmap_.getPath().size());
+			int oi = 0;
+			for(std::vector<std::pair<int, Transform> >::const_iterator iter=rtabmap_.getPath().begin(); iter!=rtabmap_.getPath().end(); ++iter)
+			{
+				path.poses[oi].header = path.header;
+				rtabmap_ros::transformToPoseMsg(t*iter->second, path.poses[oi].pose);
+				++oi;
+			}
+			if(!rtabmap_.getPathTransformToGoal().isIdentity())
+			{
+				path.poses.resize(path.poses.size()+1);
+				Transform p = t * rtabmap_.getPath().back().second*rtabmap_.getPathTransformToGoal();
+				rtabmap_ros::transformToPoseMsg(p, path.poses[path.poses.size()-1].pose);
+			}
+			globalPathPub_.publish(path);
 		}
 	}
 }
