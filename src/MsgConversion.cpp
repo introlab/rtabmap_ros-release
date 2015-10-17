@@ -32,6 +32,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ros/ros.h>
 #include <rtabmap/core/util3d.h>
 #include <rtabmap/utilite/UStl.h>
+#include <rtabmap/utilite/ULogger.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <eigen_conversions/eigen_msg.h>
 #include <tf_conversions/tf_eigen.h>
@@ -174,6 +175,7 @@ void infoFromROS(const rtabmap_ros::Info & info, rtabmap::Statistics & stat)
 	stat.setWeights(mapIntInt);
 
 	stat.setLocalPath(info.localPath);
+	stat.setCurrentGoalId(info.currentGoalId);
 
 	// Statistics data
 	for(unsigned int i=0; i<info.statsKeys.size() && i<info.statsValues.size(); i++)
@@ -203,6 +205,7 @@ void infoToROS(const rtabmap::Statistics & stats, rtabmap_ros::Info & info)
 		info.weightsKeys = uKeys(stats.weights());
 		info.weightsValues = uValues(stats.weights());
 		info.localPath = stats.localPath();
+		info.currentGoalId = stats.currentGoalId();
 
 		// Statistics data
 		info.statsKeys = uKeys(stats.data());
@@ -298,7 +301,7 @@ void mapDataFromROS(
 		rtabmap::Transform & mapToOdom)
 {
 	//optimized graph
-	mapDataFromROS(msg, poses, links, mapToOdom);
+	mapGraphFromROS(msg.graph, poses, links, mapToOdom);
 
 	//Data
 	for(unsigned int i=0; i<msg.nodes.size(); ++i)
@@ -306,8 +309,29 @@ void mapDataFromROS(
 		signatures.insert(std::make_pair(msg.nodes[i].id, nodeDataFromROS(msg.nodes[i])));
 	}
 }
-void mapDataFromROS(
-		const rtabmap_ros::MapData & msg,
+void mapDataToROS(
+		const std::map<int, rtabmap::Transform> & poses,
+		const std::multimap<int, rtabmap::Link> & links,
+		const std::map<int, rtabmap::Signature> & signatures,
+		const rtabmap::Transform & mapToOdom,
+		rtabmap_ros::MapData & msg)
+{
+	//Optimized graph
+	mapGraphToROS(poses, links, mapToOdom, msg.graph);
+
+	//Data
+	msg.nodes.resize(signatures.size());
+	int index=0;
+	for(std::multimap<int, rtabmap::Signature>::const_iterator iter = signatures.begin();
+		iter!=signatures.end();
+		++iter)
+	{
+		nodeDataToROS(iter->second, msg.nodes[index++]);
+	}
+}
+
+void mapGraphFromROS(
+		const rtabmap_ros::MapGraph & msg,
 		std::map<int, rtabmap::Transform> & poses,
 		std::multimap<int, rtabmap::Link> & links,
 		rtabmap::Transform & mapToOdom)
@@ -325,32 +349,11 @@ void mapDataFromROS(
 	}
 	mapToOdom = transformFromGeometryMsg(msg.mapToOdom);
 }
-void mapDataToROS(
-		const std::map<int, rtabmap::Transform> & poses,
-		const std::multimap<int, rtabmap::Link> & links,
-		const std::map<int, rtabmap::Signature> & signatures,
-		const rtabmap::Transform & mapToOdom,
-		rtabmap_ros::MapData & msg)
-{
-	//Optimized graph
-	mapDataToROS(poses, links, mapToOdom, msg);
-
-	//Data
-	msg.nodes.resize(signatures.size());
-	int index=0;
-	for(std::multimap<int, rtabmap::Signature>::const_iterator iter = signatures.begin();
-		iter!=signatures.end();
-		++iter)
-	{
-		nodeDataToROS(iter->second, msg.nodes[index++]);
-	}
-}
-
-void mapDataToROS(
+void mapGraphToROS(
 		const std::map<int, rtabmap::Transform> & poses,
 		const std::multimap<int, rtabmap::Link> & links,
 		const rtabmap::Transform & mapToOdom,
-		rtabmap_ros::MapData & msg)
+		rtabmap_ros::MapGraph & msg)
 {
 	//Optimized graph
 	msg.posesId.resize(poses.size());
@@ -456,6 +459,7 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 				rtabmap::SensorData(
 					compressedMatFromBytes(msg.laserScan),
 					msg.laserScanMaxPts,
+					msg.laserScanMaxRange,
 					compressedMatFromBytes(msg.image),
 					compressedMatFromBytes(msg.depth),
 					stereoModel,
@@ -465,6 +469,7 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 				rtabmap::SensorData(
 					compressedMatFromBytes(msg.laserScan),
 					msg.laserScanMaxPts,
+					msg.laserScanMaxRange,
 					compressedMatFromBytes(msg.image),
 					compressedMatFromBytes(msg.depth),
 					models,
@@ -488,6 +493,8 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 	compressedMatToBytes(signature.sensorData().depthOrRightCompressed(), msg.depth);
 	compressedMatToBytes(signature.sensorData().laserScanCompressed(), msg.laserScan);
 	compressedMatToBytes(signature.sensorData().userDataCompressed(), msg.userData);
+	msg.laserScanMaxPts = signature.sensorData().laserScanMaxPts();
+	msg.laserScanMaxRange = signature.sensorData().laserScanMaxRange();
 	msg.baseline = 0;
 	if(signature.sensorData().cameraModels().size())
 	{
