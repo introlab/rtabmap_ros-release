@@ -17,7 +17,7 @@ find_package(octomap_ros)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(RTABMap 0.10.4 REQUIRED)
+find_package(RTABMap 0.10.10 REQUIRED)
 
 find_package(OpenCV REQUIRED)
 
@@ -30,6 +30,7 @@ include($ENV{ROS_ROOT}/core/rosbuild/FindPkgConfig.cmake)
 pkg_check_modules(OGRE OGRE)
 include_directories( ${OGRE_INCLUDE_DIRS} )
 link_directories( ${OGRE_LIBRARY_DIRS} )
+
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -46,10 +47,12 @@ add_message_files(
    Info.msg
    KeyPoint.msg
    MapData.msg
+   MapGraph.msg
    NodeData.msg
    Link.msg
    OdomInfo.msg
    Point2f.msg
+   Goal.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -168,7 +171,7 @@ target_link_libraries(rtabmap_ros
   ${QT_LIBRARIES}
   ${OGRE_LIBRARIES}
 )
-add_dependencies(rtabmap_ros rtabmap_generate_messages_cpp)
+add_dependencies(rtabmap_ros ${${PROJECT_NAME}_EXPORTED_TARGETS})
 
 # If octomap is found, add definition
 IF(octomap_ros_FOUND)
@@ -184,7 +187,6 @@ add_definitions(-DWITH_OCTOMAP)
 ENDIF(octomap_ros_FOUND)
 
 add_executable(rtabmap src/CoreNode.cpp src/CoreWrapper.cpp src/MapsManager.cpp)
-add_dependencies(rtabmap rtabmap_generate_messages_cpp)
 target_link_libraries(rtabmap rtabmap_ros ${Libraries})
 
 add_executable(rgbd_odometry src/RGBDOdometryNode.cpp)
@@ -206,8 +208,12 @@ add_executable(camera src/CameraNode.cpp)
 add_dependencies(camera ${${PROJECT_NAME}_EXPORTED_TARGETS})
 target_link_libraries(camera ${Libraries})
 
-add_executable(rtabmapviz src/GuiNode.cpp src/GuiWrapper.cpp src/PreferencesDialogROS.cpp)
-target_link_libraries(rtabmapviz rtabmap_ros ${QT_LIBRARIES} ${Libraries})
+IF(RTABMAP_GUI)
+    add_executable(rtabmapviz src/GuiNode.cpp src/GuiWrapper.cpp src/PreferencesDialogROS.cpp)
+    target_link_libraries(rtabmapviz rtabmap_ros ${QT_LIBRARIES} ${Libraries})
+ELSE()
+    MESSAGE(WARNING "Found RTAB-Map built without its GUI library. Node rtabmapviz will not be built!")
+ENDIF()
 
 add_executable(data_player src/DbPlayerNode.cpp)
 target_link_libraries(data_player rtabmap_ros ${QT_LIBRARIES} ${Libraries})
@@ -230,6 +236,7 @@ target_link_libraries(odom_msg_to_tf rtabmap_ros ${Libraries})
 # )
 
 ## Mark executables and/or libraries for installation
+IF(RTABMAP_GUI)
 install(TARGETS 
    rtabmap_ros 
    rtabmap 
@@ -245,6 +252,22 @@ install(TARGETS
    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
  )
+ ELSE() # without rtabmapviz
+ install(TARGETS 
+   rtabmap_ros 
+   rtabmap 
+   rgbd_odometry 
+   stereo_odometry
+   map_assembler
+   grid_map_assembler
+   map_optimizer
+   data_player
+   camera
+   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+ )
+ ENDIF()
 
 ## Mark cpp header files for installation
 install(DIRECTORY include/${PROJECT_NAME}/
