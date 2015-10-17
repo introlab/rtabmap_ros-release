@@ -36,6 +36,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <rtabmap/utilite/UEventsManager.h>
 #include <rtabmap/utilite/UConversion.h>
+#include <rtabmap/utilite/UDirectory.h>
 
 #include <opencv2/highgui/highgui.hpp>
 
@@ -47,6 +48,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/core/Parameters.h>
 #include <rtabmap/core/ParamEvent.h>
 #include <rtabmap/core/OdometryEvent.h>
+#include <rtabmap/core/util2d.h>
 #include <rtabmap/core/util3d.h>
 #include <rtabmap/core/util3d_transforms.h>
 #include <rtabmap/utilite/UTimer.h>
@@ -73,6 +75,7 @@ GuiWrapper::GuiWrapper(int & argc, char** argv) :
 		mainWindow_(0),
 		frameId_("base_link"),
 		waitForTransform_(true),
+		waitForTransformDuration_(0.1), // 100 ms
 		cameraNodeName_(""),
 		lastOdomInfoUpdateTime_(0),
 		depthScanSync_(0),
@@ -123,6 +126,7 @@ GuiWrapper::GuiWrapper(int & argc, char** argv) :
 	int queueSize = 10;
 	int depthCameras = 1;
 	std::string tfPrefix;
+	std::string initCachePath;
 	pnh.param("frame_id", frameId_, frameId_);
 	pnh.param("odom_frame_id", odomFrameId_, odomFrameId_); // set to use odom from TF
 	pnh.param("subscribe_depth", subscribeDepth, subscribeDepth);
@@ -133,7 +137,35 @@ GuiWrapper::GuiWrapper(int & argc, char** argv) :
 	pnh.param("queue_size", queueSize, queueSize);
 	pnh.param("tf_prefix", tfPrefix, tfPrefix);
 	pnh.param("wait_for_transform", waitForTransform_, waitForTransform_);
+	pnh.param("wait_for_transform_duration",  waitForTransformDuration_, waitForTransformDuration_);
 	pnh.param("camera_node_name", cameraNodeName_, cameraNodeName_); // used to pause the rtabmap_ros/camera when pausing the process
+	pnh.param("init_cache_path", initCachePath, initCachePath);
+	if(initCachePath.size())
+	{
+		initCachePath = uReplaceChar(initCachePath, '~', UDirectory::homeDir());
+		if(initCachePath.at(0) != '/')
+		{
+			initCachePath = UDirectory::currentDir(true) + initCachePath;
+		}
+		ROS_INFO("rtabmapviz: Initializing cache with local database \"%s\"", initCachePath.c_str());
+		uSleep(2000); // make sure rtabmap node is created if launched at the same time
+		rtabmap_ros::GetMap getMapSrv;
+		getMapSrv.request.global = false;
+		getMapSrv.request.optimized = true;
+		getMapSrv.request.graphOnly = true;
+		if(!ros::service::call("get_map", getMapSrv))
+		{
+			ROS_WARN("Can't call \"get_map\" service. The cache will still be loaded "
+					"but the clouds won't be created until next time rtabmapviz "
+					"receives the optimized graph.");
+		}
+		else
+		{
+			// this will update the poses and constraints of the MainWindow
+			processRequestedMap(getMapSrv.response.data);
+		}
+		QMetaObject::invokeMethod(mainWindow_, "updateCacheFromDatabase", Q_ARG(QString, QString(initCachePath.c_str())));
+	}
 
 	if(!tfPrefix.empty())
 	{
@@ -165,6 +197,15 @@ GuiWrapper::GuiWrapper(int & argc, char** argv) :
 			infoTopic_,
 			mapDataTopic_);
 	infoMapSync_->registerCallback(boost::bind(&GuiWrapper::infoMapCallback, this, _1, _2));
+
+	goalTopic_.subscribe(nh, "goal_node", 1);
+	pathTopic_.subscribe(nh, "global_path", 1);
+	goalPathSync_ = new message_filters::Synchronizer<MyGoalPathSyncPolicy>(
+			MyGoalPathSyncPolicy(queueSize),
+			goalTopic_,
+			pathTopic_);
+	goalPathSync_->registerCallback(boost::bind(&GuiWrapper::goalPathCallback, this, _1, _2));
+	goalReachedTopic_ = nh.subscribe("goal_reached", 1, &GuiWrapper::goalReachedCallback, this);
 }
 
 GuiWrapper::~GuiWrapper()
@@ -238,6 +279,26 @@ void GuiWrapper::infoMapCallback(
 	stat.setConstraints(links);
 
 	this->post(new RtabmapEvent(stat));
+}
+
+void GuiWrapper::goalPathCallback(
+		const rtabmap_ros::GoalConstPtr & goalMsg,
+		const nav_msgs::PathConstPtr & pathMsg)
+{
+	// we don't have the node ids, just generate fake ones.
+	std::vector<std::pair<int, Transform> > poses(pathMsg->poses.size());
+	for(unsigned int i=0; i<pathMsg->poses.size(); ++i)
+	{
+		poses[i].first = -int(i)-1;
+		poses[i].second = rtabmap_ros::transformFromPoseMsg(pathMsg->poses[i].pose);
+	}
+	this->post(new RtabmapGlobalPathEvent(goalMsg->node_id, goalMsg->node_label, poses));
+}
+
+void GuiWrapper::goalReachedCallback(
+		const std_msgs::BoolConstPtr & value)
+{
+	this->post(new RtabmapGoalStatusEvent(value->data?1:-1));
 }
 
 void GuiWrapper::processRequestedMap(const rtabmap_ros::MapData & map)
@@ -371,6 +432,17 @@ void GuiWrapper::handleEvent(UEvent * anEvent)
 			{
 				ROS_ERROR("Can't call \"set_goal\" service");
 			}
+			else
+			{
+				UASSERT(setGoalSrv.response.path_ids.size() == setGoalSrv.response.path_poses.size());
+				std::vector<std::pair<int, Transform> > poses(setGoalSrv.response.path_poses.size());
+				for(unsigned int i=0; i<setGoalSrv.response.path_poses.size(); ++i)
+				{
+					poses[i].first = setGoalSrv.response.path_ids[i];
+					poses[i].second = rtabmap_ros::transformFromPoseMsg(setGoalSrv.response.path_poses[i]);
+				}
+				this->post(new RtabmapGlobalPathEvent(setGoalSrv.request.node_id, setGoalSrv.request.node_label, poses));
+			}
 		}
 		else if(cmd == rtabmap::RtabmapEventCmd::kCmdCancelGoal)
 		{
@@ -409,28 +481,28 @@ void GuiWrapper::handleEvent(UEvent * anEvent)
 Transform GuiWrapper::getTransform(const std::string & fromFrameId, const std::string & toFrameId, const ros::Time & stamp) const
 {
 	// TF ready?
-	Transform localTransform;
+	Transform transform;
 	try
 	{
-		if(waitForTransform_ && !stamp.isZero())
+		if(waitForTransform_ && !stamp.isZero() && waitForTransformDuration_ > 0.0)
 		{
 			//if(!tfBuffer_.canTransform(fromFrameId, toFrameId, stamp, ros::Duration(1)))
-			if(!tfListener_.waitForTransform(fromFrameId, toFrameId, stamp, ros::Duration(1)))
+			if(!tfListener_.waitForTransform(fromFrameId, toFrameId, stamp, ros::Duration(waitForTransformDuration_)))
 			{
-				ROS_WARN("Could not get transform from %s to %s after 1 second!", fromFrameId.c_str(), toFrameId.c_str());
-				return localTransform;
+				ROS_WARN("rtabmapviz: Could not get transform from %s to %s after %f seconds!", fromFrameId.c_str(), toFrameId.c_str(), waitForTransformDuration_);
+				return transform;
 			}
 		}
 
 		tf::StampedTransform tmp;
 		tfListener_.lookupTransform(fromFrameId, toFrameId, stamp, tmp);
-		localTransform = rtabmap_ros::transformFromTF(tmp);
+		transform = rtabmap_ros::transformFromTF(tmp);
 	}
 	catch(tf::TransformException & ex)
 	{
 		ROS_WARN("%s",ex.what());
 	}
-	return localTransform;
+	return transform;
 }
 
 void GuiWrapper::commonDepthCallback(
@@ -515,121 +587,107 @@ void GuiWrapper::commonDepthCallback(
 			return;
 		}
 
-		//for sync transform
-		if(odomT.isNull())
-		{
-			return;
-		}
-
-		int imageWidth = imageMsgs[0]->width;
-		int imageHeight = imageMsgs[0]->height;
-		int cameraCount = imageMsgs.size();
 		cv::Mat rgb;
 		cv::Mat depth;
-		pcl::PointCloud<pcl::PointXYZ> scanCloud;
 		std::vector<CameraModel> cameraModels;
-		for(unsigned int i=0; i<imageMsgs.size(); ++i)
+		if(imageMsgs[0].get() && depthMsgs[0].get())
 		{
-			if(!(imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_8UC1) ==0 ||
-				 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO8) ==0 ||
-				 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) ==0 ||
-				 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
-				 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0) ||
-				!(depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_16UC1) == 0 ||
-				 depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_32FC1) == 0 ||
-				 depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0))
+			int imageWidth = imageMsgs[0]->width;
+			int imageHeight = imageMsgs[0]->height;
+			int cameraCount = imageMsgs.size();
+			pcl::PointCloud<pcl::PointXYZ> scanCloud;
+			for(unsigned int i=0; i<imageMsgs.size(); ++i)
 			{
-				ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8 and image_depth=32FC1,16UC1,mono16");
-				return;
-			}
-			UASSERT(imageMsgs[i]->width == imageWidth && imageMsgs[i]->height == imageHeight);
-			UASSERT(depthMsgs[i]->width == imageWidth && depthMsgs[i]->height == imageHeight);
-
-			Transform localTransform = getTransform(frameId_, depthMsgs[i]->header.frame_id, depthMsgs[i]->header.stamp);
-			if(localTransform.isNull())
-			{
-				return;
-			}
-			// sync with odometry stamp
-			if(odomHeader.stamp != depthMsgs[i]->header.stamp)
-			{
-				if(!odomT.isNull())
+				if(!(imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_8UC1) ==0 ||
+					 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO8) ==0 ||
+					 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) ==0 ||
+					 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
+					 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0) ||
+					!(depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_16UC1) == 0 ||
+					 depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_32FC1) == 0 ||
+					 depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0))
 				{
-					Transform sensorT = getTransform(odomHeader.frame_id, frameId_, depthMsgs[i]->header.stamp);
-					if(sensorT.isNull())
+					ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8 and image_depth=32FC1,16UC1,mono16");
+					return;
+				}
+				UASSERT(imageMsgs[i]->width == imageWidth && imageMsgs[i]->height == imageHeight);
+				UASSERT(depthMsgs[i]->width == imageWidth && depthMsgs[i]->height == imageHeight);
+
+				Transform localTransform = getTransform(frameId_, depthMsgs[i]->header.frame_id, depthMsgs[i]->header.stamp);
+				if(localTransform.isNull())
+				{
+					return;
+				}
+				// sync with odometry stamp
+				if(odomHeader.stamp != depthMsgs[i]->header.stamp)
+				{
+					if(!odomT.isNull())
 					{
-						return;
+						Transform sensorT = getTransform(odomHeader.frame_id, frameId_, depthMsgs[i]->header.stamp);
+						if(sensorT.isNull())
+						{
+							return;
+						}
+						localTransform = odomT.inverse() * sensorT * localTransform;
 					}
-					localTransform = odomT.inverse() * sensorT * localTransform;
 				}
-			}
 
-			cv_bridge::CvImageConstPtr ptrImage;
-			if(imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_8UC1)==0)
-			{
-				ptrImage = cv_bridge::toCvShare(imageMsgs[i]);
-			}
-			else if(imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
-			   imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0)
-			{
-				ptrImage = cv_bridge::toCvShare(imageMsgs[i], "mono8");
-			}
-			else
-			{
-				ptrImage = cv_bridge::toCvShare(imageMsgs[i], "bgr8");
-			}
-			cv_bridge::CvImageConstPtr ptrDepth = cv_bridge::toCvShare(depthMsgs[i]);
-			cv::Mat subDepth = ptrDepth->image;
-			if(subDepth.type() == CV_32FC1)
-			{
-				subDepth = util3d::cvtDepthFromFloat(subDepth);
-				static bool shown = false;
-				if(!shown)
+				cv_bridge::CvImageConstPtr ptrImage;
+				if(imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_8UC1)==0)
 				{
-					ROS_WARN("Use depth image with \"unsigned short\" type to "
-							 "avoid conversion. This message is only printed once...");
-					shown = true;
+					ptrImage = cv_bridge::toCvShare(imageMsgs[i]);
 				}
-			}
+				else if(imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
+				   imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0)
+				{
+					ptrImage = cv_bridge::toCvShare(imageMsgs[i], "mono8");
+				}
+				else
+				{
+					ptrImage = cv_bridge::toCvShare(imageMsgs[i], "bgr8");
+				}
+				cv_bridge::CvImageConstPtr ptrDepth = cv_bridge::toCvShare(depthMsgs[i]);
+				cv::Mat subDepth = ptrDepth->image;
 
-			// initialize
-			if(rgb.empty())
-			{
-				rgb = cv::Mat(imageHeight, imageWidth*cameraCount, ptrImage->image.type());
-			}
-			if(depth.empty())
-			{
-				depth = cv::Mat(imageHeight, imageWidth*cameraCount, subDepth.type());
-			}
+				// initialize
+				if(rgb.empty())
+				{
+					rgb = cv::Mat(imageHeight, imageWidth*cameraCount, ptrImage->image.type());
+				}
+				if(depth.empty())
+				{
+					depth = cv::Mat(imageHeight, imageWidth*cameraCount, subDepth.type());
+				}
 
-			if(ptrImage->image.type() == rgb.type())
-			{
-				ptrImage->image.copyTo(cv::Mat(rgb, cv::Rect(i*imageWidth, 0, imageWidth, imageHeight)));
-			}
-			else
-			{
-				ROS_ERROR("Some RGB images are not the same type!");
-				return;
-			}
+				if(ptrImage->image.type() == rgb.type())
+				{
+					ptrImage->image.copyTo(cv::Mat(rgb, cv::Rect(i*imageWidth, 0, imageWidth, imageHeight)));
+				}
+				else
+				{
+					ROS_ERROR("Some RGB images are not the same type!");
+					return;
+				}
 
-			if(subDepth.type() == depth.type())
-			{
-				subDepth.copyTo(cv::Mat(depth, cv::Rect(i*imageWidth, 0, imageWidth, imageHeight)));
-			}
-			else
-			{
-				ROS_ERROR("Some Depth images are not the same type!");
-				return;
-			}
+				if(subDepth.type() == depth.type())
+				{
+					subDepth.copyTo(cv::Mat(depth, cv::Rect(i*imageWidth, 0, imageWidth, imageHeight)));
+				}
+				else
+				{
+					ROS_ERROR("Some Depth images are not the same type!");
+					return;
+				}
 
-			image_geometry::PinholeCameraModel model;
-			model.fromCameraInfo(*cameraInfoMsgs[i]);
-			cameraModels.push_back(rtabmap::CameraModel(
-					model.fx(),
-					model.fy(),
-					model.cx(),
-					model.cy(),
-					localTransform));
+				image_geometry::PinholeCameraModel model;
+				model.fromCameraInfo(*cameraInfoMsgs[i]);
+				cameraModels.push_back(rtabmap::CameraModel(
+						model.fx(),
+						model.fy(),
+						model.cx(),
+						model.cy(),
+						localTransform));
+			}
 		}
 
 		cv::Mat scan;
@@ -676,12 +734,13 @@ void GuiWrapper::commonDepthCallback(
 			rtabmap::SensorData(
 					scan,
 					scanMsg.get()?(int)scanMsg->ranges.size():0,
+					scanMsg.get()?(int)scanMsg->range_max:0,
 					rgb,
 					depth,
 					cameraModels,
 					odomHeader.seq,
 					rtabmap_ros::timestampFromROS(odomHeader.stamp)),
-			odomT,
+			odomMsg.get()?rtabmap_ros::transformFromPoseMsg(odomMsg->pose.pose):odomT,
 			covariance,
 			info);
 
@@ -760,12 +819,6 @@ void GuiWrapper::commonStereoCallback(
 			return;
 		}
 
-		//for sync transform
-		if(odomT.isNull())
-		{
-			return;
-		}
-
 		Transform localTransform = getTransform(frameId_, leftCamInfoMsg->header.frame_id, leftCamInfoMsg->header.stamp);
 		if(localTransform.isNull())
 		{
@@ -774,12 +827,15 @@ void GuiWrapper::commonStereoCallback(
 		// sync with odometry stamp
 		if(odomHeader.stamp != leftCamInfoMsg->header.stamp)
 		{
-			Transform sensorT = getTransform(odomHeader.frame_id, frameId_, leftCamInfoMsg->header.stamp);
-			if(sensorT.isNull())
+			if(!odomT.isNull())
 			{
-				return;
+				Transform sensorT = getTransform(odomHeader.frame_id, frameId_, leftCamInfoMsg->header.stamp);
+				if(sensorT.isNull())
+				{
+					return;
+				}
+				localTransform = odomT.inverse() * sensorT * localTransform;
 			}
-			localTransform = odomT.inverse() * sensorT * localTransform;
 		}
 
 		image_geometry::StereoCameraModel model;
@@ -791,6 +847,19 @@ void GuiWrapper::commonStereoCallback(
 				model.left().cy(),
 				model.baseline(),
 				localTransform);
+
+		if(model.baseline() > 10.0)
+		{
+			static bool shown = false;
+			if(!shown)
+			{
+				ROS_WARN("Detected baseline (%f m) is quite large! Is your "
+						 "right camera_info P(0,3) correctly set? Note that "
+						 "baseline=-P(0,3)/P(0,0). This warning is printed only once.",
+						 model.baseline());
+				shown = true;
+			}
+		}
 
 		// left
 		cv_bridge::CvImageConstPtr ptrImage;
@@ -852,12 +921,13 @@ void GuiWrapper::commonStereoCallback(
 			rtabmap::SensorData(
 					scan,
 					scanMsg.get()?(int)scanMsg->ranges.size():0,
+					scanMsg.get()?(int)scanMsg->range_max:0,
 					left,
 					right,
 					stereoModel,
 					odomHeader.seq,
 					rtabmap_ros::timestampFromROS(odomHeader.stamp)),
-			odomT,
+			odomMsg.get()?rtabmap_ros::transformFromPoseMsg(odomMsg->pose.pose):odomT,
 			covariance,
 			info);
 
@@ -1514,7 +1584,7 @@ void GuiWrapper::setupCallbacks(
 
 		ROS_INFO("\n%s subscribed to:\n   %s",
 				ros::this_node::getName().c_str(),
-				odomSub_.getTopic().c_str());
+				defaultSub_.getTopic().c_str());
 	}
 }
 
