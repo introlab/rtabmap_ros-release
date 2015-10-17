@@ -36,6 +36,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <cv_bridge/cv_bridge.h>
 
+#include <rtabmap/core/Rtabmap.h>
 #include <rtabmap/core/Odometry.h>
 #include <rtabmap/core/util3d_transforms.h>
 #include <rtabmap/core/Memory.h>
@@ -45,22 +46,22 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rtabmap/utilite/UConversion.h"
 #include "rtabmap/utilite/ULogger.h"
 #include "rtabmap/utilite/UStl.h"
+#include "rtabmap/utilite/UFile.h"
 
 using namespace rtabmap;
 
 namespace rtabmap_ros {
 
-OdometryROS::OdometryROS(int argc, char * argv[]) :
+OdometryROS::OdometryROS(int argc, char * argv[], bool stereo) :
 	odometry_(0),
 	frameId_("base_link"),
 	odomFrameId_("odom"),
 	groundTruthFrameId_(""),
 	publishTf_(true),
 	waitForTransform_(true),
+	waitForTransformDuration_(0.1), // 100 ms
 	paused_(false)
 {
-	this->processArguments(argc, argv);
-
 	ros::NodeHandle nh;
 
 	odomPub_ = nh.advertise<nav_msgs::Odometry>("odom", 1);
@@ -73,13 +74,21 @@ OdometryROS::OdometryROS(int argc, char * argv[]) :
 	Transform initialPose = Transform::getIdentity();
 	std::string initialPoseStr;
 	std::string tfPrefix;
+	std::string configPath;
 	pnh.param("frame_id", frameId_, frameId_);
 	pnh.param("odom_frame_id", odomFrameId_, odomFrameId_);
 	pnh.param("publish_tf", publishTf_, publishTf_);
 	pnh.param("tf_prefix", tfPrefix, tfPrefix);
 	pnh.param("wait_for_transform", waitForTransform_, waitForTransform_);
+	pnh.param("wait_for_transform_duration",  waitForTransformDuration_, waitForTransformDuration_);
 	pnh.param("initial_pose", initialPoseStr, initialPoseStr); // "x y z roll pitch yaw"
 	pnh.param("ground_truth_frame_id", groundTruthFrameId_, groundTruthFrameId_);
+	pnh.param("config_path", configPath, configPath);
+	configPath = uReplaceChar(configPath, '~', UDirectory::homeDir());
+	if(configPath.size() && configPath.at(0) != '/')
+	{
+		configPath = UDirectory::currentDir(true) + configPath;
+	}
 
 	if(!tfPrefix.empty())
 	{
@@ -115,25 +124,29 @@ OdometryROS::OdometryROS(int argc, char * argv[]) :
 
 
 	//parameters
-	rtabmap::ParametersMap parameters = rtabmap::Parameters::getDefaultParameters();
-	for(rtabmap::ParametersMap::iterator iter=parameters.begin(); iter!=parameters.end(); ++iter)
+	parameters_ = this->getDefaultOdometryParameters(stereo);
+	if(!configPath.empty())
 	{
-		std::string group = uSplit(iter->first, '/').front();
-		if(uStrContains(group, "Odom") ||
-			group.compare("Stereo") ||
-			group.compare("SURF") == 0 ||
-			group.compare("SIFT") == 0 ||
-			group.compare("ORB") == 0 ||
-			group.compare("FAST") == 0 ||
-			group.compare("FREAK") == 0 ||
-			group.compare("BRIEF") == 0 ||
-			group.compare("GFTT") == 0 ||
-			group.compare("BRISK") == 0)
+		if(UFile::exists(configPath.c_str()))
 		{
-			parameters_.insert(*iter);
+			ROS_INFO("Odometry: Loading parameters from %s", configPath.c_str());
+			rtabmap::ParametersMap allParameters;
+			Rtabmap::readParameters(configPath.c_str(), allParameters);
+			// only update odometry parameters
+			for(ParametersMap::iterator iter=parameters_.begin(); iter!=parameters_.end(); ++iter)
+			{
+				ParametersMap::iterator jter = allParameters.find(iter->first);
+				if(jter!=allParameters.end())
+				{
+					iter->second = jter->second;
+				}
+			}
+		}
+		else
+		{
+			ROS_ERROR("Config file \"%s\" not found!", configPath.c_str());
 		}
 	}
-
 	for(rtabmap::ParametersMap::iterator iter=parameters_.begin(); iter!=parameters_.end(); ++iter)
 	{
 		std::string vStr;
@@ -255,35 +268,48 @@ OdometryROS::~OdometryROS()
 	delete odometry_;
 }
 
-void OdometryROS::processArguments(int argc, char * argv[])
+rtabmap::ParametersMap OdometryROS::getDefaultOdometryParameters(bool stereo)
+{
+	rtabmap::ParametersMap odomParameters;
+	rtabmap::ParametersMap defaultParameters = rtabmap::Parameters::getDefaultParameters();
+	for(rtabmap::ParametersMap::iterator iter=defaultParameters.begin(); iter!=defaultParameters.end(); ++iter)
+	{
+		std::string group = uSplit(iter->first, '/').front();
+		if(uStrContains(group, "Odom") ||
+			group.compare("Stereo") ||
+			group.compare("SURF") == 0 ||
+			group.compare("SIFT") == 0 ||
+			group.compare("ORB") == 0 ||
+			group.compare("FAST") == 0 ||
+			group.compare("FREAK") == 0 ||
+			group.compare("BRIEF") == 0 ||
+			group.compare("GFTT") == 0 ||
+			group.compare("BRISK") == 0)
+		{
+			if(stereo)
+			{
+				if(iter->first.compare(Parameters::kOdomMaxDepth()) == 0)
+				{
+					iter->second = "0"; // infinity
+				}
+				else if(iter->first.compare(Parameters::kOdomEstimationType()) == 0)
+				{
+					iter->second = "1"; // 3D->2D (PNP)
+				}
+			}
+			odomParameters.insert(*iter);
+		}
+	}
+	return odomParameters;
+}
+
+void OdometryROS::processArguments(int argc, char * argv[], bool stereo)
 {
 	for(int i=1;i<argc;++i)
 	{
 		if(strcmp(argv[i], "--params") == 0)
 		{
-			rtabmap::ParametersMap parameters = rtabmap::Parameters::getDefaultParameters();
-			rtabmap::ParametersMap parametersOdom;
-			if(strcmp(argv[i], "--params") == 0)
-			{
-				// show specific parameters
-				for(rtabmap::ParametersMap::iterator iter=parameters.begin(); iter!=parameters.end(); ++iter)
-				{
-					if(iter->first.find("Odom") == 0 ||
-						uSplit(iter->first, '/').front().compare("Stereo") == 0 ||
-						uSplit(iter->first, '/').front().compare("SURF") == 0 ||
-						uSplit(iter->first, '/').front().compare("SIFT") == 0 ||
-						uSplit(iter->first, '/').front().compare("ORB") == 0 ||
-						uSplit(iter->first, '/').front().compare("FAST") == 0 ||
-						uSplit(iter->first, '/').front().compare("FREAK") == 0 ||
-						uSplit(iter->first, '/').front().compare("BRIEF") == 0 ||
-						uSplit(iter->first, '/').front().compare("GFTT") == 0 ||
-						uSplit(iter->first, '/').front().compare("BRISK") == 0)
-					{
-						parametersOdom.insert(*iter);
-					}
-				}
-			}
-
+			rtabmap::ParametersMap parametersOdom = getDefaultOdometryParameters(stereo);
 			for(rtabmap::ParametersMap::iterator iter=parametersOdom.begin(); iter!=parametersOdom.end(); ++iter)
 			{
 				std::string str = "Param: " + iter->first + " = \"" + iter->second + "\"";
@@ -302,35 +328,51 @@ void OdometryROS::processArguments(int argc, char * argv[])
 	}
 }
 
+Transform OdometryROS::getTransform(const std::string & fromFrameId, const std::string & toFrameId, const ros::Time & stamp) const
+{
+	// TF ready?
+	Transform transform;
+	try
+	{
+		if(waitForTransform_ && !stamp.isZero() && waitForTransformDuration_ > 0.0)
+		{
+			//if(!tfBuffer_.canTransform(fromFrameId, toFrameId, stamp, ros::Duration(1)))
+			if(!tfListener_.waitForTransform(fromFrameId, toFrameId, stamp, ros::Duration(waitForTransformDuration_)))
+			{
+				ROS_WARN("odometry: Could not get transform from %s to %s (stamp=%f) after %f seconds (\"wait_for_transform_duration\"=%f)!",
+						fromFrameId.c_str(), toFrameId.c_str(), stamp.toSec(), waitForTransformDuration_, waitForTransformDuration_);
+				return transform;
+			}
+		}
+
+		tf::StampedTransform tmp;
+		tfListener_.lookupTransform(fromFrameId, toFrameId, stamp, tmp);
+		transform = rtabmap_ros::transformFromTF(tmp);
+	}
+	catch(tf::TransformException & ex)
+	{
+		ROS_WARN("%s",ex.what());
+	}
+	return transform;
+}
+
 void OdometryROS::processData(const SensorData & data, const ros::Time & stamp)
 {
 	if(odometry_->getPose().isNull() &&
 	   !groundTruthFrameId_.empty())
 	{
-		tf::StampedTransform initialPose; // sync with the first value of the ground truth
-		try
+		// sync with the first value of the ground truth
+		Transform initialPose = getTransform(groundTruthFrameId_, frameId_, stamp);
+		if(initialPose.isNull())
 		{
-			if(this->waitForTransform())
-			{
-				if(!this->tfListener().waitForTransform(groundTruthFrameId_, frameId_, stamp, ros::Duration(1)))
-				{
-					ROS_WARN("Could not get transform from %s to %s after 1 second!", groundTruthFrameId_.c_str(), frameId_.c_str());
-					return;
-				}
-			}
-			this->tfListener().lookupTransform(groundTruthFrameId_, frameId_, stamp, initialPose);
-		}
-		catch(tf::TransformException & ex)
-		{
-			ROS_WARN("%s",ex.what());
 			return;
 		}
-		rtabmap::Transform pose = rtabmap_ros::transformFromTF(initialPose);
+
 		ROS_INFO("Initializing odometry pose to %s (from \"%s\" -> \"%s\")",
-				pose.prettyPrint().c_str(),
+				initialPose.prettyPrint().c_str(),
 				groundTruthFrameId_.c_str(),
 				frameId_.c_str());
-		odometry_->reset(pose);
+		odometry_->reset(initialPose);
 	}
 
 	// process data
