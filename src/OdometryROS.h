@@ -49,10 +49,12 @@ namespace rtabmap_ros {
 class OdometryROS
 {
 public:
-	OdometryROS(int argc, char * argv[]);
-	~OdometryROS();
+	static rtabmap::ParametersMap getDefaultOdometryParameters(bool stereo = false);
+	static void processArguments(int argc, char * argv[], bool stereo = false);
 
-	void processArguments(int argc, char * argv[]);
+public:
+	OdometryROS(int argc, char * argv[], bool stereo = false);
+	~OdometryROS();
 	void processData(const rtabmap::SensorData & data, const ros::Time & stamp);
 
 	bool reset(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
@@ -66,7 +68,7 @@ public:
 	const tf::TransformListener & tfListener() const {return tfListener_;}
 	bool isPaused() const {return paused_;}
 	bool isOdometryBOW() const;
-	bool waitForTransform() const {return waitForTransform_;}
+	rtabmap::Transform getTransform(const std::string & fromFrameId, const std::string & toFrameId, const ros::Time & stamp) const;
 
 private:
 	rtabmap::Odometry * odometry_;
@@ -77,6 +79,7 @@ private:
 	std::string groundTruthFrameId_;
 	bool publishTf_;
 	bool waitForTransform_;
+	double waitForTransformDuration_;
 	rtabmap::ParametersMap parameters_;
 
 	ros::Publisher odomPub_;
