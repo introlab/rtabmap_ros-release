@@ -66,6 +66,7 @@ namespace rtabmap_ros
 MapCloudDisplay::CloudInfo::CloudInfo() :
 		manager_(0),
 		pose_(rtabmap::Transform::getIdentity()),
+		id_(0),
 		scene_node_(0)
 {}
 
@@ -85,6 +86,9 @@ void MapCloudDisplay::CloudInfo::clear()
 
 MapCloudDisplay::MapCloudDisplay()
   : spinner_(1, &cbqueue_),
+    new_xyz_transformer_(false),
+    new_color_transformer_(false),
+    needs_retransform_(false),
     transformer_class_loader_(NULL)
 {
 	//QIcon icon;
@@ -299,9 +303,9 @@ void MapCloudDisplay::processMapData(const rtabmap_ros::MapData& map)
 
 	// Update graph
 	std::map<int, rtabmap::Transform> poses;
-	for(unsigned int i=0; i<map.posesId.size() && i<map.poses.size(); ++i)
+	for(unsigned int i=0; i<map.graph.posesId.size() && i<map.graph.poses.size(); ++i)
 	{
-		poses.insert(std::make_pair(map.posesId[i], rtabmap_ros::transformFromPoseMsg(map.poses[i])));
+		poses.insert(std::make_pair(map.graph.posesId[i], rtabmap_ros::transformFromPoseMsg(map.graph.poses[i])));
 	}
 
 	if(node_filtering_angle_->getFloat() > 0.0f && node_filtering_radius_->getFloat() > 0.0f)
@@ -482,12 +486,12 @@ void MapCloudDisplay::downloadMap()
 		else
 		{
 			messageBox->setText(tr("Creating all clouds (%1 poses and %2 clouds downloaded)...")
-					.arg(getMapSrv.response.data.poses.size()).arg(getMapSrv.response.data.nodes.size()));
+					.arg(getMapSrv.response.data.graph.poses.size()).arg(getMapSrv.response.data.nodes.size()));
 			QApplication::processEvents();
 			this->reset();
 			processMapData(getMapSrv.response.data);
 			messageBox->setText(tr("Creating all clouds (%1 poses and %2 clouds downloaded)... done!")
-					.arg(getMapSrv.response.data.poses.size()).arg(getMapSrv.response.data.nodes.size()));
+					.arg(getMapSrv.response.data.graph.poses.size()).arg(getMapSrv.response.data.nodes.size()));
 
 			QTimer::singleShot(1000, messageBox, SLOT(close()));
 		}
@@ -539,10 +543,10 @@ void MapCloudDisplay::downloadGraph()
 		}
 		else
 		{
-			messageBox->setText(tr("Updating the map (%1 nodes downloaded)...").arg(getMapSrv.response.data.poses.size()));
+			messageBox->setText(tr("Updating the map (%1 nodes downloaded)...").arg(getMapSrv.response.data.graph.poses.size()));
 			QApplication::processEvents();
 			processMapData(getMapSrv.response.data);
-			messageBox->setText(tr("Updating the map (%1 nodes downloaded)... done!").arg(getMapSrv.response.data.poses.size()));
+			messageBox->setText(tr("Updating the map (%1 nodes downloaded)... done!").arg(getMapSrv.response.data.graph.poses.size()));
 
 			QTimer::singleShot(1000, messageBox, SLOT(close()));
 		}
@@ -697,7 +701,6 @@ void MapCloudDisplay::update( float wall_dt, float ros_dt )
 
 void MapCloudDisplay::reset()
 {
-	MFDClass::reset();
 	{
 		boost::mutex::scoped_lock lock(new_clouds_mutex_);
 		cloud_infos_.clear();
@@ -707,6 +710,7 @@ void MapCloudDisplay::reset()
 		boost::mutex::scoped_lock lock(current_map_mutex_);
 		current_map_.clear();
 	}
+	MFDClass::reset();
 }
 
 void MapCloudDisplay::updateXyzTransformer()
