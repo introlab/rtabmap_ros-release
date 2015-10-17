@@ -52,7 +52,7 @@ class StereoOdometry : public rtabmap_ros::OdometryROS
 {
 public:
 	StereoOdometry(int argc, char * argv[]) :
-		rtabmap_ros::OdometryROS(argc, argv),
+		rtabmap_ros::OdometryROS(argc, argv, true),
 		approxSync_(0),
 		exactSync_(0)
 	{
@@ -134,23 +134,9 @@ public:
 
 			ros::Time stamp = imageRectLeft->header.stamp>imageRectRight->header.stamp?imageRectLeft->header.stamp:imageRectRight->header.stamp;
 
-			tf::StampedTransform localTransform;
-			try
+			Transform localTransform = getTransform(this->frameId(), imageRectLeft->header.frame_id, stamp);
+			if(localTransform.isNull())
 			{
-				if(this->waitForTransform())
-				{
-					if(!this->tfListener().waitForTransform(this->frameId(), imageRectLeft->header.frame_id, stamp, ros::Duration(1)))
-					{
-						ROS_WARN("Could not get transform from %s to %s after 1 second!", this->frameId().c_str(), imageRectLeft->header.frame_id.c_str());
-						return;
-					}
-				}
-
-				this->tfListener().lookupTransform(this->frameId(), imageRectLeft->header.frame_id, stamp, localTransform);
-			}
-			catch(tf::TransformException & ex)
-			{
-				ROS_WARN("%s",ex.what());
 				return;
 			}
 
@@ -174,14 +160,27 @@ public:
 						model.left().cx(),
 						model.left().cy(),
 						model.baseline(),
-						rtabmap_ros::transformFromTF(localTransform));
+						localTransform);
+
+				if(model.baseline() > 10.0)
+				{
+					static bool shown = false;
+					if(!shown)
+					{
+						ROS_WARN("Detected baseline (%f m) is quite large! Is your "
+								 "right camera_info P(0,3) correctly set? Note that "
+								 "baseline=-P(0,3)/P(0,0). This warning is printed only once.",
+								 model.baseline());
+						shown = true;
+					}
+				}
 
 				cv_bridge::CvImageConstPtr ptrImageLeft = cv_bridge::toCvShare(imageRectLeft, "mono8");
 				cv_bridge::CvImageConstPtr ptrImageRight = cv_bridge::toCvShare(imageRectRight, "mono8");
 
 				UTimer stepTimer;
 				//
-				UDEBUG("localTransform = %s", rtabmap_ros::transformFromTF(localTransform).prettyPrint().c_str());
+				UDEBUG("localTransform = %s", localTransform.prettyPrint().c_str());
 				rtabmap::SensorData data(
 						ptrImageLeft->image,
 						ptrImageRight->image,
@@ -215,6 +214,9 @@ int main(int argc, char *argv[])
 	ULogger::setLevel(ULogger::kWarning);
 	//pcl::console::setVerbosityLevel(pcl::console::L_DEBUG);
 	ros::init(argc, argv, "stereo_odometry");
+
+	// process "--params" argument
+	rtabmap_ros::OdometryROS::processArguments(argc, argv, true);
 
 	StereoOdometry odom(argc, argv);
 	ros::spin();

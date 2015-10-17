@@ -53,6 +53,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rtabmap_ros/PublishMap.h"
 #include "rtabmap_ros/SetGoal.h"
 #include "rtabmap_ros/SetLabel.h"
+#include "rtabmap_ros/Goal.h"
 
 #include "MapsManager.h"
 
@@ -172,8 +173,9 @@ private:
 			const sensor_msgs::CameraInfoConstPtr& rightCamInfoMsg,
 			const sensor_msgs::LaserScanConstPtr& scanMsg);
 
-	void goalCommonCallback(const std::vector<std::pair<int, rtabmap::Transform> > & poses);
+	void goalCommonCallback(int id, const std::string & label, const rtabmap::Transform & pose, const ros::Time & stamp);
 	void goalCallback(const geometry_msgs::PoseStampedConstPtr & msg);
+	void goalNodeCallback(const rtabmap_ros::GoalConstPtr & msg);
 	void updateGoal(const ros::Time & stamp);
 
 	void process(
@@ -216,6 +218,7 @@ private:
 	void goalActiveCb();
 	void goalFeedbackCb(const move_base_msgs::MoveBaseFeedbackConstPtr& feedback);
 	void publishLocalPath(const ros::Time & stamp);
+	void publishGlobalPath(const ros::Time & stamp);
 
 private:
 	rtabmap::Rtabmap rtabmap_;
@@ -234,6 +237,7 @@ private:
 	std::string configPath_;
 	std::string databasePath_;
 	bool waitForTransform_;
+	double waitForTransformDuration_;
 	bool useActionForGoal_;
 	bool genScan_;
 	double genScanMaxDepth_;
@@ -245,10 +249,12 @@ private:
 
 	ros::Publisher infoPub_;
 	ros::Publisher mapDataPub_;
+	ros::Publisher mapGraphPub_;
 	ros::Publisher labelsPub_;
 
 	//Planning stuff
 	ros::Subscriber goalSub_;
+	ros::Subscriber goalNodeSub_;
 	ros::Publisher nextMetricGoalPub_;
 	ros::Publisher goalReachedPub_;
 	ros::Publisher globalPathPub_;

@@ -43,6 +43,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rtabmap_ros/MsgConversion.h"
 
 #include <rtabmap/core/util3d.h>
+#include <rtabmap/core/util2d.h>
 #include <rtabmap/utilite/ULogger.h>
 
 using namespace rtabmap;
@@ -177,35 +178,12 @@ public:
 						image->encoding.c_str(), depth->encoding.c_str());
 				return;
 			}
-			else if(depth->encoding.compare(sensor_msgs::image_encodings::TYPE_32FC1)==0)
-			{
-				static bool warned = false;
-				if(!warned)
-				{
-					ROS_WARN("Input depth type is 32FC1, please use type 16UC1 or mono16 for depth. The depth images "
-							 "will be processed anyway but with a conversion. This warning is only be printed once...");
-					warned = true;
-				}
-			}
 
 			ros::Time stamp = image->header.stamp>depth->header.stamp?image->header.stamp:depth->header.stamp;
 
-			tf::StampedTransform localTransform;
-			try
+			Transform localTransform = getTransform(this->frameId(), image->header.frame_id, stamp);
+			if(localTransform.isNull())
 			{
-				if(this->waitForTransform())
-				{
-					if(!this->tfListener().waitForTransform(this->frameId(), image->header.frame_id, stamp, ros::Duration(1)))
-					{
-						ROS_WARN("Could not get transform from %s to %s after 1 second!", this->frameId().c_str(), image->header.frame_id.c_str());
-						return;
-					}
-				}
-				this->tfListener().lookupTransform(this->frameId(), image->header.frame_id, stamp, localTransform);
-			}
-			catch(tf::TransformException & ex)
-			{
-				ROS_WARN("%s",ex.what());
 				return;
 			}
 
@@ -218,7 +196,7 @@ public:
 						model.fy(),
 						model.cx(),
 						model.cy(),
-						rtabmap_ros::transformFromTF(localTransform));
+						localTransform);
 				cv_bridge::CvImageConstPtr ptrImage = cv_bridge::toCvShare(image, image->encoding.compare(sensor_msgs::image_encodings::TYPE_8UC1)==0?"":"mono8");
 				cv_bridge::CvImageConstPtr ptrDepth = cv_bridge::toCvShare(depth);
 
@@ -290,22 +268,9 @@ public:
 					higherStamp = stamp;
 				}
 
-				tf::StampedTransform localTransform;
-				try
+				Transform localTransform = getTransform(this->frameId(), imageMsgs[i]->header.frame_id, stamp);
+				if(localTransform.isNull())
 				{
-					if(this->waitForTransform())
-					{
-						if(!this->tfListener().waitForTransform(this->frameId(), imageMsgs[i]->header.frame_id, stamp, ros::Duration(1)))
-						{
-							ROS_WARN("Could not get transform from %s to %s after 1 second!", this->frameId().c_str(), imageMsgs[i]->header.frame_id.c_str());
-							return;
-						}
-					}
-					this->tfListener().lookupTransform(this->frameId(), imageMsgs[i]->header.frame_id, stamp, localTransform);
-				}
-				catch(tf::TransformException & ex)
-				{
-					ROS_WARN("%s",ex.what());
 					return;
 				}
 
@@ -325,17 +290,6 @@ public:
 				}
 				cv_bridge::CvImageConstPtr ptrDepth = cv_bridge::toCvShare(depthMsgs[i]);
 				cv::Mat subDepth = ptrDepth->image;
-				if(subDepth.type() == CV_32FC1)
-				{
-					subDepth = rtabmap::util3d::cvtDepthFromFloat(subDepth);
-					static bool shown = false;
-					if(!shown)
-					{
-						ROS_WARN("Use depth image with \"unsigned short\" type to "
-								 "avoid conversion. This message is only printed once...");
-						shown = true;
-					}
-				}
 
 				// initialize
 				if(rgb.empty())
@@ -374,7 +328,7 @@ public:
 						model.fy(),
 						model.cx(),
 						model.cy(),
-						rtabmap_ros::transformFromTF(localTransform)));
+						localTransform));
 			}
 
 			rtabmap::SensorData data(
@@ -406,6 +360,9 @@ int main(int argc, char *argv[])
 	ULogger::setType(ULogger::kTypeConsole);
 	ULogger::setLevel(ULogger::kWarning);
 	ros::init(argc, argv, "rgbd_odometry");
+
+	// process "--params" argument
+	rtabmap_ros::OdometryROS::processArguments(argc, argv);
 
 	RGBDOdometry odom(argc, argv);
 	ros::spin();
