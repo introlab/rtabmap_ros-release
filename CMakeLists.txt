@@ -7,23 +7,32 @@ project(rtabmap_ros)
 find_package(catkin REQUIRED COMPONENTS 
              cv_bridge roscpp rospy sensor_msgs std_msgs std_srvs nav_msgs geometry_msgs visualization_msgs
              image_transport tf tf_conversions tf2_ros eigen_conversions laser_geometry pcl_conversions 
-             pcl_ros nodelet dynamic_reconfigure rviz message_filters class_loader
+             pcl_ros nodelet dynamic_reconfigure message_filters class_loader
              genmsg stereo_msgs move_base_msgs
 )
 
 # Optional components
 find_package(costmap_2d)
 find_package(octomap_ros)
+find_package(rviz)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(RTABMap 0.10.10 REQUIRED)
+find_package(RTABMap 0.11.4 REQUIRED)
 
 find_package(OpenCV REQUIRED)
 
 #Qt stuff
-FIND_PACKAGE(Qt4 COMPONENTS QtCore QtGui REQUIRED)
-INCLUDE(${QT_USE_FILE})
+# If Qt is here, rtabmapviz will be built
+# look for Qt5 before Qt4
+FIND_PACKAGE(Qt5 COMPONENTS Widgets Core Gui QUIET)
+IF(Qt5_FOUND)
+  FIND_PACKAGE(Qt4 COMPONENTS QtCore QtGui)
+ENDIF(Qt5_FOUND)
+
+IF(QT4_FOUND)
+    INCLUDE(${QT_USE_FILE})
+ENDIF(QT4_FOUND)
 
 ## We also use Ogre
 include($ENV{ROS_ROOT}/core/rosbuild/FindPkgConfig.cmake)
@@ -52,6 +61,7 @@ add_message_files(
    Link.msg
    OdomInfo.msg
    Point2f.msg
+   Point3f.msg
    Goal.msg
 )
 
@@ -86,13 +96,26 @@ generate_dynamic_reconfigure_options(cfg/Camera.cfg)
 ## LIBRARIES: libraries you create in this project that dependent projects also need
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
+
+SET(optional_dependencies "")
+IF(costmap_2d_FOUND)
+SET(optional_dependencies ${optional_dependencies} costmap_2d )
+ENDIF(costmap_2d_FOUND)
+IF(octomap_ros_FOUND)
+SET(optional_dependencies ${optional_dependencies} octomap_ros)
+ENDIF(octomap_ros_FOUND)
+IF(rviz_FOUND)
+SET(optional_dependencies ${optional_dependencies} rviz)
+ENDIF(rviz_FOUND)
+
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES rtabmap_ros
   CATKIN_DEPENDS cv_bridge roscpp rospy sensor_msgs std_msgs std_srvs nav_msgs geometry_msgs visualization_msgs
                  image_transport tf tf_conversions tf2_ros eigen_conversions laser_geometry pcl_conversions 
-                 pcl_ros nodelet dynamic_reconfigure rviz message_filters class_loader
-                 stereo_msgs move_base_msgs 
+                 pcl_ros nodelet dynamic_reconfigure message_filters class_loader
+                 stereo_msgs move_base_msgs ${optional_dependencies}
+  DEPENDS RTABMap OpenCV
 )
 
 ###########
@@ -114,23 +137,8 @@ SET(Libraries
    ${OpenCV_LIBRARIES}
    ${catkin_LIBRARIES}
    ${RTABMap_LIBRARIES}
-   ${rviz_DEFAULT_PLUGIN_LIBRARIES}
 )
-
-## RVIZ plugin
-qt4_wrap_cpp(MOC_FILES
-  src/rviz/MapCloudDisplay.h
-  src/rviz/MapGraphDisplay.h
-  src/rviz/InfoDisplay.h
-  src/rviz/OrbitOrientedViewController.h
-)
-
-# tf:message_filters, mixing boost and Qt signals
-set_property(
-   SOURCE src/rviz/MapCloudDisplay.cpp src/rviz/MapGraphDisplay.cpp src/rviz/InfoDisplay.cpp src/rviz/OrbitOrientedViewController.cpp
-   PROPERTY COMPILE_DEFINITIONS QT_NO_KEYWORDS
-   )
-   
+  
 SET(rtabmap_ros_lib_src
    src/nodelets/data_throttle.cpp
    src/nodelets/stereo_throttle.cpp
@@ -142,11 +150,7 @@ SET(rtabmap_ros_lib_src
    src/nodelets/point_cloud_aggregator.cpp
    src/MsgConversion.cpp
    src/OdometryROS.cpp
-   src/rviz/MapCloudDisplay.cpp
-   src/rviz/MapGraphDisplay.cpp
-   src/rviz/InfoDisplay.cpp
-   src/rviz/OrbitOrientedViewController.cpp
-   ${MOC_FILES}
+   src/MapsManager.cpp
 )   
 
 # If costmap_2d is found, add the plugin
@@ -163,15 +167,72 @@ SET(rtabmap_ros_lib_src
   )
 ENDIF(costmap_2d_FOUND)
 
+IF(QT4_FOUND OR Qt5_FOUND)
+SET(Libraries 
+   ${Libraries}
+   ${QT_LIBRARIES}
+)
+ENDIF(QT4_FOUND OR Qt5_FOUND)
+
+# If rviz is found, add plugins
+IF(rviz_FOUND)
+MESSAGE(STATUS "WITH rviz")
+include_directories(
+  ${rviz_INCLUDE_DIRS}
+)
+SET(Libraries
+  ${Libraries}
+  ${rviz_LIBRARIES}
+  ${rviz_DEFAULT_PLUGIN_LIBRARIES}
+)
+
+## RVIZ plugin
+IF(QT4_FOUND)
+qt4_wrap_cpp(MOC_FILES
+  src/rviz/MapCloudDisplay.h
+  src/rviz/MapGraphDisplay.h
+  src/rviz/InfoDisplay.h
+  src/rviz/OrbitOrientedViewController.h
+)
+ELSE()
+qt5_wrap_cpp(MOC_FILES
+  src/rviz/MapCloudDisplay.h
+  src/rviz/MapGraphDisplay.h
+  src/rviz/InfoDisplay.h
+  src/rviz/OrbitOrientedViewController.h
+)
+ENDIF()
+
+# tf:message_filters, mixing boost and Qt signals
+set_property(
+   SOURCE src/rviz/MapCloudDisplay.cpp src/rviz/MapGraphDisplay.cpp src/rviz/InfoDisplay.cpp src/rviz/OrbitOrientedViewController.cpp
+   PROPERTY COMPILE_DEFINITIONS QT_NO_KEYWORDS
+)
+
+SET(rtabmap_ros_lib_src
+   ${rtabmap_ros_lib_src}
+   src/rviz/MapCloudDisplay.cpp
+   src/rviz/MapGraphDisplay.cpp
+   src/rviz/InfoDisplay.cpp
+   src/rviz/OrbitOrientedViewController.cpp
+   ${MOC_FILES}
+)
+ENDIF(rviz_FOUND)
+
+############################
 ## Declare a cpp library
+############################
 add_library(rtabmap_ros
    ${rtabmap_ros_lib_src}
 )
+
 target_link_libraries(rtabmap_ros
   ${Libraries}
-  ${QT_LIBRARIES}
   ${OGRE_LIBRARIES}
 )
+IF(Qt5_FOUND)
+    QT5_USE_MODULES(rtabmap_ros Widgets Core Gui)
+ENDIF(Qt5_FOUND)
 add_dependencies(rtabmap_ros ${${PROJECT_NAME}_EXPORTED_TARGETS})
 
 # If octomap is found, add definition
@@ -187,7 +248,7 @@ SET(Libraries
 add_definitions(-DWITH_OCTOMAP)
 ENDIF(octomap_ros_FOUND)
 
-add_executable(rtabmap src/CoreNode.cpp src/CoreWrapper.cpp src/MapsManager.cpp)
+add_executable(rtabmap src/CoreNode.cpp src/CoreWrapper.cpp)
 target_link_libraries(rtabmap rtabmap_ros ${Libraries})
 
 add_executable(rgbd_odometry src/RGBDOdometryNode.cpp)
@@ -202,9 +263,6 @@ target_link_libraries(map_optimizer rtabmap_ros ${Libraries})
 add_executable(map_assembler src/MapAssemblerNode.cpp)
 target_link_libraries(map_assembler rtabmap_ros ${Libraries})
 
-add_executable(grid_map_assembler src/GridMapAssemblerNode.cpp)
-target_link_libraries(grid_map_assembler rtabmap_ros ${Libraries})
-
 add_executable(camera src/CameraNode.cpp)
 add_dependencies(camera ${${PROJECT_NAME}_EXPORTED_TARGETS})
 target_link_libraries(camera ${Libraries})
@@ -212,6 +270,9 @@ target_link_libraries(camera ${Libraries})
 IF(RTABMAP_GUI)
     add_executable(rtabmapviz src/GuiNode.cpp src/GuiWrapper.cpp src/PreferencesDialogROS.cpp)
     target_link_libraries(rtabmapviz rtabmap_ros ${QT_LIBRARIES} ${Libraries})
+    IF(Qt5_FOUND)
+        QT5_USE_MODULES(rtabmapviz Widgets Core Gui)
+    ENDIF()
 ELSE()
     MESSAGE(WARNING "Found RTAB-Map built without its GUI library. Node rtabmapviz will not be built!")
 ENDIF()
@@ -245,7 +306,6 @@ install(TARGETS
    rgbd_odometry 
    stereo_odometry
    map_assembler
-   grid_map_assembler
    map_optimizer
    data_player
    camera
@@ -260,7 +320,6 @@ install(TARGETS
    rgbd_odometry 
    stereo_odometry
    map_assembler
-   grid_map_assembler
    map_optimizer
    data_player
    camera
@@ -279,6 +338,7 @@ install(DIRECTORY include/${PROJECT_NAME}/
 
 ## Mark other files for installation (e.g. launch and bag files, etc.)
 install(FILES
+   launch/rtabmap.launch
    launch/rgbd_mapping.launch
    launch/stereo_mapping.launch
    launch/data_recorder.launch
@@ -299,6 +359,12 @@ install(FILES
    costmap_plugins.xml
    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
+IF(costmap_2d_FOUND)
+install(FILES
+   costmap_plugins.xml
+   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+ENDIF(costmap_2d_FOUND)
 
 #############
 ## Testing ##

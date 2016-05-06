@@ -106,8 +106,10 @@ public:
 	rviz::EnumProperty* style_property_;
 	rviz::IntProperty* cloud_decimation_;
 	rviz::FloatProperty* cloud_max_depth_;
+	rviz::FloatProperty* cloud_min_depth_;
 	rviz::FloatProperty* cloud_voxel_size_;
 	rviz::FloatProperty* cloud_filter_floor_height_;
+	rviz::FloatProperty* cloud_filter_ceiling_height_;
 	rviz::FloatProperty* node_filtering_radius_;
 	rviz::FloatProperty* node_filtering_angle_;
 	rviz::BoolProperty* download_map_;
