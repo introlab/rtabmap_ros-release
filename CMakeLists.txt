@@ -18,7 +18,7 @@ find_package(rviz)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(RTABMap 0.11.5 REQUIRED)
+find_package(RTABMap 0.11.7 REQUIRED)
 
 find_package(OpenCV REQUIRED)
 
@@ -106,15 +106,15 @@ generate_dynamic_reconfigure_options(cfg/Camera.cfg)
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 
-SET(optional_dependencies "")
-IF(costmap_2d_FOUND)
-SET(optional_dependencies ${optional_dependencies} costmap_2d )
-ENDIF(costmap_2d_FOUND)
-IF(octomap_ros_FOUND)
-SET(optional_dependencies ${optional_dependencies} octomap_ros)
-ENDIF(octomap_ros_FOUND)
-IF(rviz_FOUND)
-SET(optional_dependencies ${optional_dependencies} rviz)
+SET(optional_dependencies "")		
+IF(costmap_2d_FOUND)		
+   SET(optional_dependencies ${optional_dependencies} costmap_2d)		
+ENDIF(costmap_2d_FOUND)		
+IF(octomap_ros_FOUND)		
+   SET(optional_dependencies ${optional_dependencies} octomap_ros)		
+ENDIF(octomap_ros_FOUND)		
+IF(rviz_FOUND)		
+   SET(optional_dependencies ${optional_dependencies} rviz)		
 ENDIF(rviz_FOUND)
 
 catkin_package(
