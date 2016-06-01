@@ -276,6 +276,8 @@ private:
 	bool genScan_;
 	double genScanMaxDepth_;
 	double genScanMinDepth_;
+	int scanCloudMaxPoints_;
+	int scanCloudNormalK_;
 
 	rtabmap::Transform mapToOdom_;
 	boost::mutex mapToOdomMutex_;
