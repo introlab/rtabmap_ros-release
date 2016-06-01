@@ -48,6 +48,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/core/util2d.h>
 #include <rtabmap/core/util3d.h>
 #include <rtabmap/core/util3d_transforms.h>
+#include <rtabmap/core/util3d_surface.h>
 #include <rtabmap/core/Memory.h>
 #include <rtabmap/core/OdometryEvent.h>
 
@@ -91,6 +92,8 @@ CoreWrapper::CoreWrapper(bool deleteDbOnStart, const ParametersMap & parameters)
 		genScan_(false),
 		genScanMaxDepth_(4.0),
 		genScanMinDepth_(0.0),
+		scanCloudMaxPoints_(0),
+		scanCloudNormalK_(0),
 		mapToOdom_(rtabmap::Transform::getIdentity()),
 		mapsManager_(true),
 		depthSync_(0),
@@ -173,6 +176,8 @@ CoreWrapper::CoreWrapper(bool deleteDbOnStart, const ParametersMap & parameters)
 	pnh.param("gen_scan",            genScan_, genScan_);
 	pnh.param("gen_scan_max_depth",  genScanMaxDepth_, genScanMaxDepth_);
 	pnh.param("gen_scan_min_depth",  genScanMinDepth_, genScanMinDepth_);
+	pnh.param("scan_cloud_max_points",  scanCloudMaxPoints_, scanCloudMaxPoints_);
+	pnh.param("scan_cloud_normal_k", scanCloudNormalK_, scanCloudNormalK_);
 
 	if(!tfPrefix.empty())
 	{
@@ -610,9 +615,9 @@ bool CoreWrapper::commonOdomUpdate(const nav_msgs::OdometryConstPtr & odomMsg)
 	if(!paused_)
 	{
 		Transform odom = rtabmap_ros::transformFromPoseMsg(odomMsg->pose.pose);
-		if(!lastPose_.isIdentity() && !odom.isNull() && (odom.isIdentity() || odomMsg->twist.covariance[0] >= BAD_COVARIANCE))
+		if(!lastPose_.isIdentity() && !odom.isNull() && (odom.isIdentity() || (odomMsg->pose.covariance[0] >= BAD_COVARIANCE && odomMsg->twist.covariance[0] >= BAD_COVARIANCE)))
 		{
-			UWARN("Odometry is reset (identity pose or high variance (%f) detected). Increment map id!", odomMsg->twist.covariance[0]);
+			UWARN("Odometry is reset (identity pose or high variance (%f) detected). Increment map id!", MAX(odomMsg->pose.covariance[0], odomMsg->twist.covariance[0]));
 			rtabmap_.triggerNewMap();
 			rotVariance_ = 0;
 			transVariance_ = 0;
@@ -621,15 +626,21 @@ bool CoreWrapper::commonOdomUpdate(const nav_msgs::OdometryConstPtr & odomMsg)
 		lastPoseIntermediate_ = false;
 		lastPose_ = odom;
 		lastPoseStamp_ = odomMsg->header.stamp;
-		float transVariance = uMax3(odomMsg->twist.covariance[0], odomMsg->twist.covariance[7], odomMsg->twist.covariance[14]);
-		float rotVariance = uMax3(odomMsg->twist.covariance[21], odomMsg->twist.covariance[28], odomMsg->twist.covariance[35]);
-		if(uIsFinite(rotVariance) && rotVariance > rotVariance_)
+
+		// Only update variance if odom is not null
+		if(!odom.isNull())
 		{
-			rotVariance_ = rotVariance;
-		}
-		if(uIsFinite(transVariance) && transVariance > transVariance_)
-		{
-			transVariance_ = transVariance;
+			// using MIN in case of 3DoF mapping (maybe not parameters are set, except x and yaw for the twist)
+			float transVariance = uMax3(odomMsg->twist.covariance[0], MIN(odomMsg->twist.covariance[7], BAD_COVARIANCE), MIN(odomMsg->twist.covariance[14], BAD_COVARIANCE));
+			float rotVariance = uMax3(MIN(odomMsg->twist.covariance[21],BAD_COVARIANCE), MIN(odomMsg->twist.covariance[28], BAD_COVARIANCE), odomMsg->twist.covariance[35]);
+			if(uIsFinite(rotVariance) && rotVariance > rotVariance_)
+			{
+				rotVariance_ = rotVariance;
+			}
+			if(uIsFinite(transVariance) && transVariance > transVariance_)
+			{
+				transVariance_ = transVariance;
+			}
 		}
 
 		// Throttle
@@ -951,9 +962,37 @@ void CoreWrapper::commonDepthCallback(
 	}
 	else if(scan3dMsg.get() != 0)
 	{
-		pcl::PointCloud<pcl::PointXYZ>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZ>);
-		pcl::fromROSMsg(*scan3dMsg, *pclScan);
-		scan = util3d::laserScanFromPointCloud(*pclScan);
+		bool containNormals = false;
+		for(unsigned int i=0; i<scan3dMsg->fields.size(); ++i)
+		{
+			if(scan3dMsg->fields[i].name.compare("normal_x") == 0)
+			{
+				containNormals = true;
+				break;
+			}
+		}
+		if(containNormals)
+		{
+			pcl::PointCloud<pcl::PointNormal>::Ptr pclScan(new pcl::PointCloud<pcl::PointNormal>);
+			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+			scan = util3d::laserScanFromPointCloud(*pclScan);
+		}
+		else
+		{
+			pcl::PointCloud<pcl::PointXYZ>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZ>);
+			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+
+			if(scanCloudNormalK_ > 0)
+			{
+				//compute normals
+				pcl::PointCloud<pcl::PointNormal>::Ptr pclScanNormal = util3d::computeNormals(pclScan, scanCloudNormalK_);
+				scan = util3d::laserScanFromPointCloud(*pclScanNormal);
+			}
+			else
+			{
+				scan = util3d::laserScanFromPointCloud(*pclScan);
+			}
+		}
 	}
 	else if(scanCloud2d.size())
 	{
@@ -971,7 +1010,7 @@ void CoreWrapper::commonDepthCallback(
 	}
 
 	SensorData data(scan,
-			scan2dMsg.get() != 0?(int)scan2dMsg->ranges.size():genMaxScanPts,
+			scan2dMsg.get() != 0?(int)scan2dMsg->ranges.size():(genScan_?genMaxScanPts:scan3dMsg.get() != 0?scanCloudMaxPoints_:0),
 			scan2dMsg.get() != 0?scan2dMsg->range_max:(genScan_?genScanMaxDepth_:0.0f),
 			rgb,
 			depth,
@@ -1080,9 +1119,37 @@ void CoreWrapper::commonStereoCallback(
 	}
 	else if(scan3dMsg.get() != 0)
 	{
-		pcl::PointCloud<pcl::PointXYZ>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZ>);
-		pcl::fromROSMsg(*scan3dMsg, *pclScan);
-		scan = util3d::laserScanFromPointCloud(*pclScan);
+		bool containNormals = false;
+		for(unsigned int i=0; i<scan3dMsg->fields.size(); ++i)
+		{
+			if(scan3dMsg->fields[i].name.compare("normal_x") == 0)
+			{
+				containNormals = true;
+				break;
+			}
+		}
+		if(containNormals)
+		{
+			pcl::PointCloud<pcl::PointNormal>::Ptr pclScan(new pcl::PointCloud<pcl::PointNormal>);
+			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+			scan = util3d::laserScanFromPointCloud(*pclScan);
+		}
+		else
+		{
+			pcl::PointCloud<pcl::PointXYZ>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZ>);
+			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+
+			if(scanCloudNormalK_ > 0)
+			{
+				//compute normals
+				pcl::PointCloud<pcl::PointNormal>::Ptr pclScanNormal = util3d::computeNormals(pclScan, scanCloudNormalK_);
+				scan = util3d::laserScanFromPointCloud(*pclScanNormal);
+			}
+			else
+			{
+				scan = util3d::laserScanFromPointCloud(*pclScan);
+			}
+		}
 	}
 
 	cv_bridge::CvImagePtr ptrLeftImage, ptrRightImage;
@@ -1123,7 +1190,7 @@ void CoreWrapper::commonStereoCallback(
 	}
 
 	SensorData data(scan,
-			scan2dMsg.get() != 0?(int)scan2dMsg->ranges.size():0,
+			scan2dMsg.get() != 0?(int)scan2dMsg->ranges.size():scan3dMsg.get() != 0?scanCloudMaxPoints_:0,
 			scan2dMsg.get() != 0?scan2dMsg->range_max:0,
 			ptrLeftImage->image,
 			ptrRightImage->image,
