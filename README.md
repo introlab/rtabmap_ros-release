@@ -29,7 +29,10 @@ $ sudo apt-get install ros-hydro-rtabmap-ros
 ```
    * Note that rtabmap_ros Hydro binaries are stuck at version 0.8.12. To use the latest version, see [Build from source](https://github.com/introlab/rtabmap_ros#build-from-source) below.
 
-
+When launching `rtabmap_ros`'s nodes, if you have the error `error while loading shared libraries...`, add the next line at the end of your `~/.bashrc` to fix it:
+```bash
+$ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/ros/kinetic/lib/x86_64-linux-gnu
+```
 
 ### Build from source
 This section shows how to install RTAB-Map ros-pkg on **ROS Hydro/Indigo/Jade/Kinetic** (Catkin build). RTAB-Map works only with the PCL 1.7, which is the default version installed with ROS Hydro/Indigo/Jade/Kinetic (**Fuerte and Groovy are not supported**).
@@ -64,15 +67,15 @@ $ mv /usr/local/lib/cmake/Findcvsba.cmake /usr/local/lib/cmake/cvsba/cvsbaConfig
 
   * [Freenect2](https://github.com/OpenKinect/libfreenect2): Follow installation instructions from [here](https://github.com/OpenKinect/libfreenect2#debianubuntu-1404-perhaps-earlier).
 
- 1. Install RTAB-Map standalone libraries (**don't checkout in the Catkin workspace** but install in your Catkin's devel folder).
+ 1. Install RTAB-Map standalone libraries. Add `-DCMAKE_INSTALL_PREFIX=~/catkin_ws/devel` to `cmake` command below if you want to install in your Catkin's devel folder without `sudo`. **Do not clone in your Catkin workspace**.
  
  ```bash
 $ cd ~
 $ git clone https://github.com/introlab/rtabmap.git rtabmap
 $ cd rtabmap/build
-$ cmake -DCMAKE_INSTALL_PREFIX=~/catkin_ws/devel ..  [<---double dots included]
+$ cmake ..  [<---double dots included]
 $ make -j4
-$ make install
+$ sudo make install
 ```
 
  2. Install RTAB-Map ros-pkg in your src folder of your Catkin workspace.
