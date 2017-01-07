@@ -1,3 +1,26 @@
+## rtabmap_ros (kinetic) - 0.11.13-0
+
+The packages in the `rtabmap_ros` repository were released into the `kinetic` distro by running `/usr/bin/bloom-release rtabmap_ros --track kinetic --rosdistro kinetic` on `Sat, 07 Jan 2017 19:23:01 -0000`
+
+The `rtabmap_ros` package was released.
+
+Version of package(s) in repository `rtabmap_ros`:
+
+- upstream repository: https://github.com/introlab/rtabmap_ros.git
+- release repository: https://github.com/introlab/rtabmap_ros-release.git
+- rosdistro version: `0.11.8-1`
+- old version: `0.11.8-1`
+- new version: `0.11.13-0`
+
+Versions of tools used:
+
+- bloom version: `0.5.23`
+- catkin_pkg version: `0.2.10`
+- rosdep version: `0.11.5`
+- rosdistro version: `0.5.0`
+- vcstools version: `0.1.39`
+
+
 ## rtabmap_ros (kinetic) - 0.11.8-1
 
 The packages in the `rtabmap_ros` repository were released into the `kinetic` distro by running `/usr/bin/bloom-release rtabmap_ros --track kinetic --rosdistro kinetic` on `Sat, 22 Oct 2016 00:51:57 -0000`
