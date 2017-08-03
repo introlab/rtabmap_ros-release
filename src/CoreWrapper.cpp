@@ -55,6 +55,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/core/Version.h>
 #include <rtabmap/core/OccupancyGrid.h>
 #include <rtabmap/core/DBDriver.h>
+#include <rtabmap/core/Registration.h>
 
 #ifdef WITH_OCTOMAP_ROS
 #ifdef RTABMAP_OCTOMAP
@@ -83,8 +84,6 @@ CoreWrapper::CoreWrapper() :
 		paused_(false),
 		lastPose_(Transform::getIdentity()),
 		lastPoseIntermediate_(false),
-		rotVariance_(0),
-		transVariance_(0),
 		latestNodeWasReached_(false),
 		frameId_("base_link"),
 		odomFrameId_(""),
@@ -93,6 +92,8 @@ CoreWrapper::CoreWrapper() :
 		groundTruthBaseFrameId_(""), // e.g., "base_link_gt"
 		configPath_(""),
 		databasePath_(UDirectory::homeDir()+"/.ros/"+rtabmap::Parameters::getDefaultDatabaseName()),
+		odomDefaultAngVariance_(1.0),
+		odomDefaultLinVariance_(1.0),
 		waitForTransform_(true),
 		waitForTransformDuration_(0.2), // 200 ms
 		useActionForGoal_(false),
@@ -104,6 +105,8 @@ CoreWrapper::CoreWrapper() :
 		mapToOdom_(rtabmap::Transform::getIdentity()),
 		transformThread_(0),
 		tfThreadRunning_(false),
+		SYNC_INIT(rgb),
+		SYNC_INIT(rgbOdom),
 		stereoToDepth_(false),
 		odomSensorSync_(false),
 		rate_(Parameters::defaultRtabmapDetectionRate()),
@@ -112,6 +115,7 @@ CoreWrapper::CoreWrapper() :
 		previousStamp_(0),
 		mbClient_("move_base", true)
 {
+	globalPose_.header.stamp = ros::Time(0);
 }
 
 void CoreWrapper::onInit()
@@ -124,7 +128,6 @@ void CoreWrapper::onInit()
 	bool publishTf = true;
 	double tfDelay = 0.05; // 20 Hz
 	double tfTolerance = 0.1; // 100 ms
-	std::string tfPrefix = "";
 
 	pnh.param("config_path",         configPath_, configPath_);
 	pnh.param("database_path",       databasePath_, databasePath_);
@@ -143,8 +146,13 @@ void CoreWrapper::onInit()
 
 	pnh.param("publish_tf",          publishTf, publishTf);
 	pnh.param("tf_delay",            tfDelay, tfDelay);
-	pnh.param("tf_prefix",           tfPrefix, tfPrefix);
+	if(pnh.hasParam("tf_prefix"))
+	{
+		ROS_ERROR("tf_prefix parameter has been removed, use directly map_frame_id, odom_frame_id and frame_id parameters.");
+	}
 	pnh.param("tf_tolerance",        tfTolerance, tfTolerance);
+	pnh.param("odom_tf_angular_variance", odomDefaultAngVariance_, odomDefaultAngVariance_);
+	pnh.param("odom_tf_linear_variance", odomDefaultLinVariance_, odomDefaultLinVariance_);
 	pnh.param("wait_for_transform",  waitForTransform_, waitForTransform_);
 	pnh.param("wait_for_transform_duration",  waitForTransformDuration_, waitForTransformDuration_);
 	pnh.param("use_action_for_goal", useActionForGoal_, useActionForGoal_);
@@ -160,31 +168,6 @@ void CoreWrapper::onInit()
 		NODELET_WARN("Parameter \"flip_scan\" doesn't exist anymore. Rtabmap now "
 				"detects automatically if the laser is upside down with /tf, then if so, it "
 				"switches scan values.");
-	}
-
-	if(!tfPrefix.empty())
-	{
-		if(!frameId_.empty())
-		{
-			frameId_ = tfPrefix+"/"+frameId_;
-		}
-		if(!mapFrameId_.empty())
-		{
-			mapFrameId_ = tfPrefix+"/"+mapFrameId_;
-		}
-		if(!odomFrameId_.empty())
-		{
-			odomFrameId_ = tfPrefix+"/"+odomFrameId_;
-		}
-		if(!groundTruthFrameId_.empty())
-		{
-			groundTruthFrameId_ = tfPrefix+"/"+groundTruthFrameId_;
-		}
-		if(!groundTruthBaseFrameId_.empty())
-		{
-			groundTruthBaseFrameId_ = tfPrefix+"/"+groundTruthBaseFrameId_;
-		}
-		// keep worldFrameId_ without prefix as it should be global
 	}
 
 	NODELET_INFO("rtabmap: frame_id      = %s", frameId_.c_str());
@@ -289,7 +272,7 @@ void CoreWrapper::onInit()
 	for(unsigned int i=0; i<argList.size(); ++i)
 	{
 		argv[i] = &argList[i].at(0);
-		if(strcmp(argv[i], "--delete_db_on_start") == 0)
+		if(strcmp(argv[i], "--delete_db_on_start") == 0 || strcmp(argv[i], "-d") == 0)
 		{
 			deleteDbOnStart = true;
 		}
@@ -351,6 +334,22 @@ void CoreWrapper::onInit()
 				Parameters::kGridFromDepth().c_str());
 		parameters_.insert(ParametersPair(Parameters::kGridFromDepth(), "false"));
 	}
+	int regStrategy = 0;
+	Parameters::parse(parameters_, Parameters::kRegStrategy(), regStrategy);
+	if(subscribeScan2d &&
+		parameters_.find(Parameters::kRGBDProximityPathMaxNeighbors()) == parameters_.end() &&
+		(regStrategy == Registration::kTypeIcp || regStrategy == Registration::kTypeVisIcp))
+	{
+		NODELET_WARN("Setting \"%s\" parameter to 10 (default 0) as \"subscribe_scan\" is "
+				"true and \"%s\" uses ICP. Proximity detection by space will be also done by merging close "
+				"scans. To disable, set \"%s\" to 0. To suppress this warning, "
+				"add <param name=\"%s\" type=\"string\" value=\"10\"/>",
+				Parameters::kRGBDProximityPathMaxNeighbors().c_str(),
+				Parameters::kRegStrategy().c_str(),
+				Parameters::kRGBDProximityPathMaxNeighbors().c_str(),
+				Parameters::kRGBDProximityPathMaxNeighbors().c_str());
+		parameters_.insert(ParametersPair(Parameters::kRGBDProximityPathMaxNeighbors(), "10"));
+	}
 
 	// modify default parameters with those in the database
 	if(!deleteDbOnStart)
@@ -411,7 +410,7 @@ void CoreWrapper::onInit()
 	{
 		if(UFile::erase(databasePath_) == 0)
 		{
-			NODELET_INFO("rtabmap: Deleted database \"%s\" (--delete_db_on_start is set).", databasePath_.c_str());
+			NODELET_INFO("rtabmap: Deleted database \"%s\" (--delete_db_on_start or -d are set).", databasePath_.c_str());
 		}
 	}
 
@@ -481,22 +480,88 @@ void CoreWrapper::onInit()
 	if(!this->isDataSubscribed())
 	{
 		bool isRGBD = uStr2Bool(parameters_.at(Parameters::kRGBDEnabled()).c_str());
-		if(isRGBD)
+		bool incremental = uStr2Bool(parameters_.at(Parameters::kMemIncrementalMemory()).c_str());
+		if(isRGBD && !incremental)
 		{
-			NODELET_WARN("ROS param subscribe_depth, subscribe_stereo and subscribe_rgbd are false, but RTAB-Map "
-					  "parameter \"%s\" is true! Please set subscribe_depth, subscribe_stereo or subscribe_rgbd "
-					  "to true to use rtabmap node for RGB-D SLAM, or set \"%s\" to false for loop closure "
-					  "detection on images-only.", Parameters::kRGBDEnabled().c_str(), Parameters::kRGBDEnabled().c_str());
+			NODELET_INFO("\"%s\" is true and \"%s\" is false, subscribing to RGB + camera info...",
+					Parameters::kRGBDEnabled().c_str(),
+					Parameters::kMemIncrementalMemory().c_str());
+			ros::NodeHandle rgb_nh(nh, "rgb");
+			ros::NodeHandle rgb_pnh(pnh, "rgb");
+			image_transport::ImageTransport rgb_it(rgb_nh);
+			image_transport::TransportHints hintsRgb("raw", ros::TransportHints(), rgb_pnh);
+			rgbSub_.subscribe(rgb_it, rgb_nh.resolveName("image"), 1, hintsRgb);
+			rgbCameraInfoSub_.subscribe(rgb_nh, "camera_info", 1);
+
+			std::string odomFrameId;
+			pnh.getParam("odom_frame_id", odomFrameId);
+			if(!odomFrameId.empty())
+			{
+				// odom from TF
+				if(isApproxSync())
+				{
+					rgbApproximateSync_ = new message_filters::Synchronizer<rgbApproximateSyncPolicy>(
+							rgbApproximateSyncPolicy(getQueueSize()), rgbSub_, rgbCameraInfoSub_);
+					rgbApproximateSync_->registerCallback(boost::bind(&CoreWrapper::rgbCallback, this, _1, _2));
+				}
+				else
+				{
+					rgbExactSync_ = new message_filters::Synchronizer<rgbExactSyncPolicy>(
+							rgbExactSyncPolicy(getQueueSize()), rgbSub_, rgbCameraInfoSub_);
+					rgbExactSync_->registerCallback(boost::bind(&CoreWrapper::rgbCallback, this, _1, _2));
+				}
+				NODELET_INFO("\n%s subscribed to:\n   %s\n   %s",
+						getName().c_str(),
+						rgbSub_.getTopic().c_str(),
+						rgbCameraInfoSub_.getTopic().c_str());
+			}
+			else
+			{
+				rgbOdomSub_.subscribe(nh, "odom", 1);
+				if(isApproxSync())
+				{
+					rgbOdomApproximateSync_ = new message_filters::Synchronizer<rgbOdomApproximateSyncPolicy>(
+							rgbOdomApproximateSyncPolicy(getQueueSize()), rgbSub_, rgbCameraInfoSub_, rgbOdomSub_);
+					rgbOdomApproximateSync_->registerCallback(boost::bind(&CoreWrapper::rgbOdomCallback, this, _1, _2, _3));
+				}
+				else
+				{
+					rgbOdomExactSync_ = new message_filters::Synchronizer<rgbOdomExactSyncPolicy>(
+							rgbOdomExactSyncPolicy(getQueueSize()), rgbSub_, rgbCameraInfoSub_, rgbOdomSub_);
+					rgbOdomExactSync_->registerCallback(boost::bind(&CoreWrapper::rgbOdomCallback, this, _1, _2, _3));
+				}
+				NODELET_INFO("\n%s subscribed to:\n   %s\n   %s\n   %s",
+						getName().c_str(),
+						rgbSub_.getTopic().c_str(),
+						rgbCameraInfoSub_.getTopic().c_str(),
+						rgbOdomSub_.getTopic().c_str());
+			}
 		}
+		else
+		{
+			if(isRGBD)
+			{
+				NODELET_WARN("ROS param subscribe_depth, subscribe_stereo and subscribe_rgbd are false, but RTAB-Map "
+						  "parameter \"%s\" and \"%s\" are true! Please set subscribe_depth, subscribe_stereo or subscribe_rgbd "
+						  "to true to use rtabmap node for RGB-D SLAM, set \"%s\" to false for loop closure "
+						  "detection on images-only or set \"%s\" to false to localize a single RGB camera against pre-built 3D map.",
+						  Parameters::kRGBDEnabled().c_str(),
+						  Parameters::kMemIncrementalMemory().c_str(),
+						  Parameters::kRGBDEnabled().c_str(),
+						  Parameters::kMemIncrementalMemory().c_str());
+			}
+			ros::NodeHandle rgb_nh(nh, "rgb");
+			ros::NodeHandle rgb_pnh(pnh, "rgb");
+			image_transport::ImageTransport rgb_it(rgb_nh);
+			image_transport::TransportHints hintsRgb("raw", ros::TransportHints(), rgb_pnh);
+			defaultSub_ = rgb_it.subscribe("image", 1, &CoreWrapper::defaultCallback, this);
 
-		ros::NodeHandle rgb_nh(nh, "rgb");
-		ros::NodeHandle rgb_pnh(pnh, "rgb");
-		image_transport::ImageTransport rgb_it(rgb_nh);
-		image_transport::TransportHints hintsRgb("raw", ros::TransportHints(), rgb_pnh);
-		defaultSub_ = rgb_it.subscribe("image", 1, &CoreWrapper::defaultCallback, this);
-
-		NODELET_INFO("\n%s subscribed to:\n   %s", getName().c_str(), defaultSub_.getTopic().c_str());
+			NODELET_INFO("\n%s subscribed to:\n   %s", getName().c_str(), defaultSub_.getTopic().c_str());
+		}
 	}
+
+	userDataAsyncSub_ = nh.subscribe("user_data_async", 1, &CoreWrapper::userDataAsyncCallback, this);
+	globalPoseAsyncSub_ = nh.subscribe("global_pose", 1, &CoreWrapper::globalPoseAsyncCallback, this);
 }
 
 CoreWrapper::~CoreWrapper()
@@ -507,6 +572,9 @@ CoreWrapper::~CoreWrapper()
 		transformThread_->join();
 		delete transformThread_;
 	}
+
+	SYNC_DEL(rgb);
+	SYNC_DEL(rgbOdom);
 
 	this->saveParameters(configPath_);
 
@@ -636,6 +704,33 @@ void CoreWrapper::defaultCallback(const sensor_msgs::ImageConstPtr & imageMsg)
 	}
 }
 
+
+void CoreWrapper::rgbCallback(
+		const sensor_msgs::ImageConstPtr& imageMsg,
+		const sensor_msgs::CameraInfoConstPtr& cameraInfoMsg)
+{
+	rtabmap_ros::UserDataConstPtr userDataMsg; // Null
+	nav_msgs::OdometryConstPtr odomMsg; // Null
+	sensor_msgs::LaserScanConstPtr scanMsg; // Null
+	sensor_msgs::PointCloud2ConstPtr scan3dMsg; // Null
+	rtabmap_ros::OdomInfoConstPtr odomInfoMsg; // null
+	cv_bridge::CvImageConstPtr depthMsg;// Null
+	commonSingleDepthCallback(odomMsg, userDataMsg, cv_bridge::toCvShare(imageMsg), depthMsg, *cameraInfoMsg, scanMsg, scan3dMsg, odomInfoMsg);
+}
+
+void CoreWrapper::rgbOdomCallback(
+		const sensor_msgs::ImageConstPtr& imageMsg,
+		const sensor_msgs::CameraInfoConstPtr& cameraInfoMsg,
+		const nav_msgs::OdometryConstPtr & odomMsg)
+{
+	rtabmap_ros::UserDataConstPtr userDataMsg; // Null
+	sensor_msgs::LaserScanConstPtr scanMsg; // Null
+	sensor_msgs::PointCloud2ConstPtr scan3dMsg; // null
+	rtabmap_ros::OdomInfoConstPtr odomInfoMsg; // null
+	cv_bridge::CvImageConstPtr depthMsg;// Null
+	commonSingleDepthCallback(odomMsg, userDataMsg, cv_bridge::toCvShare(imageMsg), depthMsg, *cameraInfoMsg, scanMsg, scan3dMsg, odomInfoMsg);
+}
+
 bool CoreWrapper::odomUpdate(const nav_msgs::OdometryConstPtr & odomMsg)
 {
 	if(!paused_)
@@ -645,8 +740,7 @@ bool CoreWrapper::odomUpdate(const nav_msgs::OdometryConstPtr & odomMsg)
 		{
 			UWARN("Odometry is reset (identity pose or high variance (%f) detected). Increment map id!", MAX(odomMsg->pose.covariance[0], odomMsg->twist.covariance[0]));
 			rtabmap_.triggerNewMap();
-			rotVariance_ = 0;
-			transVariance_ = 0;
+			covariance_ = cv::Mat();
 		}
 
 		lastPoseIntermediate_ = false;
@@ -656,28 +750,28 @@ bool CoreWrapper::odomUpdate(const nav_msgs::OdometryConstPtr & odomMsg)
 		// Only update variance if odom is not null
 		if(!odom.isNull())
 		{
-			// using MIN in case of 3DoF mapping (maybe no parameters are set, except x and yaw for the twist)
-			float transVariance = uMax3(odomMsg->twist.covariance[0], MIN(odomMsg->twist.covariance[7], BAD_COVARIANCE), MIN(odomMsg->twist.covariance[14], BAD_COVARIANCE));
-			float rotVariance = uMax3(MIN(odomMsg->twist.covariance[21],BAD_COVARIANCE), MIN(odomMsg->twist.covariance[28], BAD_COVARIANCE), odomMsg->twist.covariance[35]);
-
-			if(transVariance == BAD_COVARIANCE)
+			cv::Mat covariance;
+			float variance = odomMsg->twist.covariance[0];
+			if(variance == BAD_COVARIANCE)
 			{
 				//use the one of the pose
-				transVariance = uMax3(odomMsg->pose.covariance[0]/2.0, MIN(odomMsg->pose.covariance[7]/2.0, BAD_COVARIANCE), MIN(odomMsg->pose.covariance[14]/2.0, BAD_COVARIANCE));
+				covariance = cv::Mat(6,6,CV_64FC1, (void*)odomMsg->pose.covariance.data()).clone();
+				covariance /= 2.0;
 			}
-			if(rotVariance == BAD_COVARIANCE)
+			else
 			{
-				//use the one of the pose
-				rotVariance = uMax3(MIN(odomMsg->pose.covariance[21]/2.0,BAD_COVARIANCE), MIN(odomMsg->pose.covariance[28]/2.0, BAD_COVARIANCE), odomMsg->pose.covariance[35]/2.0);
+				covariance = cv::Mat(6,6,CV_64FC1, (void*)odomMsg->twist.covariance.data()).clone();
 			}
 
-			if(uIsFinite(rotVariance) && rotVariance != 1.0f)
+			if(uIsFinite(covariance.at<double>(0,0)) &&
+				covariance.at<double>(0,0) != 1.0 &&
+				covariance.at<double>(0,0)>0.0)
 			{
-				rotVariance_ += rotVariance;
-			}
-			if(uIsFinite(transVariance) && transVariance != 1.0f)
-			{
-				transVariance_ += transVariance;
+				// Use largest covariance error (to be independent of the odometry frame rate)
+				if(covariance_.empty() || covariance.at<double>(0,0) > covariance_.at<double>(0,0))
+				{
+					covariance_ = covariance;
+				}
 			}
 		}
 
@@ -728,8 +822,7 @@ bool CoreWrapper::odomTFUpdate(const ros::Time & stamp)
 		{
 			UWARN("Odometry is reset (identity pose detected). Increment map id!");
 			rtabmap_.triggerNewMap();
-			rotVariance_ = 0;
-			transVariance_ = 0;
+			covariance_ = cv::Mat();
 		}
 
 		lastPoseIntermediate_ = false;
@@ -848,7 +941,7 @@ void CoreWrapper::commonDepthCallbackImpl(
 	}
 
 	UASSERT(uContains(parameters_, rtabmap::Parameters::kMemSaveDepth16Format()));
-	if(depth.type() == CV_32FC1 && uStr2Bool(parameters_.at(Parameters::kMemSaveDepth16Format())))
+	if(!depth.empty() && depth.type() == CV_32FC1 && uStr2Bool(parameters_.at(Parameters::kMemSaveDepth16Format())))
 	{
 		depth = rtabmap::util2d::cvtDepthFromFloat(depth);
 		static bool shown = false;
@@ -866,7 +959,7 @@ void CoreWrapper::commonDepthCallbackImpl(
 	Transform scanLocalTransform = Transform::getIdentity();
 	pcl::PointCloud<pcl::PointXYZ> scanCloud2d;
 	bool genMaxScanPts = 0;
-	if(scan2dMsg.get() == 0 && scan3dMsg.get() == 0 && genScan_)
+	if(scan2dMsg.get() == 0 && scan3dMsg.get() == 0 && !depth.empty() && genScan_)
 	{
 		scanCloud2d = util3d::laserScanFromDepthImages(
 				depth,
@@ -933,7 +1026,20 @@ void CoreWrapper::commonDepthCallbackImpl(
 	if(userDataMsg.get())
 	{
 		userData = rtabmap_ros::userDataFromROS(*userDataMsg);
+		if(!userData_.empty())
+		{
+			NODELET_WARN("Synchronized and asynchronized user data topics cannot be used at the same time. Async user data dropped!");
+			userData_ = cv::Mat();
+		}
 	}
+	else
+	{
+		userData = userData_;
+		userData_ = cv::Mat();
+	}
+
+
+
 	SensorData data(scan,
 			LaserScanInfo(
 					scan2dMsg.get() != 0?(int)scan2dMsg->ranges.size():(genScan_?genMaxScanPts:scan3dMsg.get() != 0?scanCloudMaxPoints_:0),
@@ -947,14 +1053,51 @@ void CoreWrapper::commonDepthCallbackImpl(
 			userData);
 	data.setGroundTruth(groundTruthPose);
 
+	//global pose
+	if(!globalPose_.header.stamp.isZero())
+	{
+		// assume sensor is fixed
+		Transform sensorToBase = rtabmap_ros::getTransform(
+				globalPose_.header.frame_id,
+				frameId_,
+				lastPoseStamp_,
+				tfListener_,
+				waitForTransform_?waitForTransformDuration_:0.0);
+		if(!sensorToBase.isNull())
+		{
+			Transform globalPose = rtabmap_ros::transformFromPoseMsg(globalPose_.pose.pose);
+			globalPose *= sensorToBase; // transform global pose from sensor frame to robot base frame
+
+			// Correction of the global pose accounting the odometry movement since we received it
+			Transform correction = rtabmap_ros::getTransform(
+					frameId_,
+					odomFrameId,
+					globalPose_.header.stamp,
+					lastPoseStamp_,
+					tfListener_,
+					waitForTransform_?waitForTransformDuration_:0.0);
+			if(!correction.isNull())
+			{
+				globalPose *= correction;
+			}
+			else
+			{
+				NODELET_WARN("Could not adjust global pose accordingly to latest odometry pose. "
+						"If odometry is small since it received the global pose and "
+						"covariance is large, this should not be a problem.");
+			}
+			cv::Mat globalPoseCovariance = cv::Mat(6,6, CV_64FC1, (void*)globalPose_.pose.covariance.data()).clone();
+			data.setGlobalPose(globalPose, globalPoseCovariance);
+		}
+	}
+	globalPose_.header.stamp = ros::Time(0);
+
 	process(lastPoseStamp_,
 			data,
 			lastPose_,
 			odomFrameId,
-			uIsFinite(rotVariance_) && rotVariance_>0?rotVariance_:1.0,
-			uIsFinite(transVariance_) && transVariance_>0?transVariance_:1.0);
-	rotVariance_ = 0;
-	transVariance_ = 0;
+			covariance_);
+	covariance_ = cv::Mat();
 }
 
 void CoreWrapper::commonStereoCallback(
@@ -1115,6 +1258,9 @@ void CoreWrapper::commonStereoCallback(
 		}
 	}
 
+	cv::Mat userData = userData_;
+	userData_ = cv::Mat();
+
 	Transform groundTruthPose;
 	if(!groundTruthFrameId_.empty())
 	{
@@ -1130,18 +1276,17 @@ void CoreWrapper::commonStereoCallback(
 			right,
 			stereoModel,
 			lastPoseIntermediate_?-1:leftImageMsg->header.seq,
-			rtabmap_ros::timestampFromROS(lastPoseStamp_));
+			rtabmap_ros::timestampFromROS(lastPoseStamp_),
+			userData);
 	data.setGroundTruth(groundTruthPose);
 
 	process(lastPoseStamp_,
 			data,
 			lastPose_,
 			odomFrameId,
-			uIsFinite(rotVariance_) && rotVariance_>0?rotVariance_:1.0,
-			uIsFinite(transVariance_) && transVariance_>0?transVariance_:1.0);
+			covariance_);
 
-	rotVariance_ = 0;
-	transVariance_ = 0;
+	covariance_ = cv::Mat();
 }
 
 void CoreWrapper::process(
@@ -1149,8 +1294,7 @@ void CoreWrapper::process(
 		const SensorData & data,
 		const Transform & odom,
 		const std::string & odomFrameId,
-		float odomRotationalVariance,
-		float odomTransitionalVariance)
+		const cv::Mat & odomCovariance)
 {
 	UTimer timer;
 	if(rtabmap_.isIDsGenerated() || data.id() > 0)
@@ -1158,7 +1302,26 @@ void CoreWrapper::process(
 		double timeRtabmap = 0.0;
 		double timeUpdateMaps = 0.0;
 		double timePublishMaps = 0.0;
-		if(rtabmap_.process(data, odom, OdometryEvent::generateCovarianceMatrix(odomRotationalVariance, odomTransitionalVariance)))
+
+		cv::Mat covariance = odomCovariance;
+		if(covariance.empty() || !uIsFinite(covariance.at<double>(0,0)) || covariance.at<double>(0,0)<=0.0f)
+		{
+			covariance = cv::Mat::eye(6,6,CV_64FC1);
+			if(odomDefaultLinVariance_ > 0.0f)
+			{
+				covariance.at<double>(0,0) = odomDefaultLinVariance_;
+				covariance.at<double>(1,1) = odomDefaultLinVariance_;
+				covariance.at<double>(2,2) = odomDefaultLinVariance_;
+			}
+			if(odomDefaultAngVariance_ > 0.0f)
+			{
+				covariance.at<double>(3,3) = odomDefaultAngVariance_;
+				covariance.at<double>(4,4) = odomDefaultAngVariance_;
+				covariance.at<double>(5,5) = odomDefaultAngVariance_;
+			}
+		}
+
+		if(rtabmap_.process(data, odom, covariance))
 		{
 			timeRtabmap = timer.ticks();
 			mapToOdomMutex_.lock();
@@ -1228,6 +1391,7 @@ void CoreWrapper::process(
 							goalReachedPub_.publish(result);
 						}
 						currentMetricGoal_.setNull();
+						lastPublishedMetricGoal_.setNull();
 						latestNodeWasReached_ = false;
 					}
 					else
@@ -1267,6 +1431,7 @@ void CoreWrapper::process(
 								goalReachedPub_.publish(result);
 							}
 							currentMetricGoal_.setNull();
+							lastPublishedMetricGoal_.setNull();
 							latestNodeWasReached_ = false;
 						}
 					}
@@ -1294,8 +1459,34 @@ void CoreWrapper::process(
 		NODELET_WARN("Ignoring received image because its sequence ID=0. Please "
 				 "set \"Mem/GenerateIds\"=\"true\" to ignore ros generated sequence id. "
 				 "Use only \"Mem/GenerateIds\"=\"false\" for once-time run of RTAB-Map and "
-				 "when you need to have IDs output of RTAB-map synchronised with the source "
+				 "when you need to have IDs output of RTAB-map synchronized with the source "
 				 "image sequence ID.");
+	}
+}
+
+void CoreWrapper::userDataAsyncCallback(const rtabmap_ros::UserDataConstPtr & dataMsg)
+{
+	if(!paused_)
+	{
+		if(!userData_.empty())
+		{
+			ROS_WARN("Overwriting previous user data set. Asynchronous user "
+					"data input topic should be used with user data published at "
+					"lower rate than map update rate (current %s=%f).",
+					Parameters::kRtabmapDetectionRate().c_str(), rate_);
+		}
+		else
+		{
+			userData_ = rtabmap_ros::userDataFromROS(*dataMsg);
+		}
+	}
+}
+
+void CoreWrapper::globalPoseAsyncCallback(const geometry_msgs::PoseWithCovarianceStampedConstPtr & globalPoseMsg)
+{
+	if(!paused_)
+	{
+		globalPose_ = *globalPoseMsg;
 	}
 }
 
@@ -1339,6 +1530,7 @@ void CoreWrapper::goalCommonCallback(
 		const std::vector<std::pair<int, Transform> > & poses = rtabmap_.getPath();
 
 		currentMetricGoal_.setNull();
+		lastPublishedMetricGoal_.setNull();
 		latestNodeWasReached_ = false;
 		if(poses.size() == 0)
 		{
@@ -1505,14 +1697,16 @@ bool CoreWrapper::resetRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empt
 {
 	NODELET_INFO("rtabmap: Reset");
 	rtabmap_.resetMemory();
-	rotVariance_ = 0;
-	transVariance_ = 0;
+	covariance_ = cv::Mat();
 	lastPose_.setIdentity();
 	lastPoseIntermediate_ = false;
 	currentMetricGoal_.setNull();
+	lastPublishedMetricGoal_.setNull();
 	latestNodeWasReached_ = false;
 	mapsManager_.clear();
 	previousStamp_ = ros::Time(0);
+	userData_ = cv::Mat();
+	globalPose_.header.stamp = ros::Time(0);
 	return true;
 }
 
@@ -1561,11 +1755,13 @@ bool CoreWrapper::backupDatabaseCallback(std_srvs::Empty::Request&, std_srvs::Em
 	rtabmap_.close();
 	NODELET_INFO("Backup: Saving memory... done!");
 
-	rotVariance_ = 0;
-	transVariance_ = 0;
+	covariance_ = cv::Mat();
 	lastPose_.setIdentity();
 	currentMetricGoal_.setNull();
+	lastPublishedMetricGoal_.setNull();
 	latestNodeWasReached_ = false;
+	userData_ = cv::Mat();
+	globalPose_.header.stamp = ros::Time(0);
 
 	NODELET_INFO("Backup: Saving \"%s\" to \"%s\"...", databasePath_.c_str(), (databasePath_+".back").c_str());
 	UFile::copy(databasePath_, databasePath_+".back");
@@ -1927,6 +2123,7 @@ bool CoreWrapper::cancelGoalCallback(std_srvs::Empty::Request& req, std_srvs::Em
 		NODELET_WARN("Goal cancelled!");
 		rtabmap_.clearPath(0);
 		currentMetricGoal_.setNull();
+		lastPublishedMetricGoal_.setNull();
 		latestNodeWasReached_ = false;
 		if(goalReachedPub_.getNumSubscribers())
 		{
@@ -1936,9 +2133,9 @@ bool CoreWrapper::cancelGoalCallback(std_srvs::Empty::Request& req, std_srvs::Em
 		}
 	}
 	if(mbClient_.isServerConnected())
-        {
-        	mbClient_.cancelGoal();
-        }
+	{
+		mbClient_.cancelGoal();
+	}
 
 	return true;
 }
@@ -2109,7 +2306,7 @@ void CoreWrapper::publishStats(const ros::Time & stamp)
 
 void CoreWrapper::publishCurrentGoal(const ros::Time & stamp)
 {
-	if(!currentMetricGoal_.isNull())
+	if(!currentMetricGoal_.isNull() && currentMetricGoal_ != lastPublishedMetricGoal_)
 	{
 		NODELET_INFO("Publishing next goal: %d -> %s",
 				rtabmap_.getPathCurrentGoalId(), currentMetricGoal_.prettyPrint().c_str());
@@ -2135,6 +2332,7 @@ void CoreWrapper::publishCurrentGoal(const ros::Time & stamp)
 						boost::bind(&CoreWrapper::goalDoneCb, this, _1, _2),
 						boost::bind(&CoreWrapper::goalActiveCb, this),
 						boost::bind(&CoreWrapper::goalFeedbackCb, this, _1));
+				lastPublishedMetricGoal_ = currentMetricGoal_;
 			}
 			else
 			{
@@ -2144,6 +2342,10 @@ void CoreWrapper::publishCurrentGoal(const ros::Time & stamp)
 		if(nextMetricGoalPub_.getNumSubscribers())
 		{
 			nextMetricGoalPub_.publish(poseMsg);
+			if(!useActionForGoal_)
+			{
+				lastPublishedMetricGoal_ = currentMetricGoal_;
+			}
 		}
 	}
 }
@@ -2188,6 +2390,7 @@ void CoreWrapper::goalDoneCb(const actionlib::SimpleClientGoalState& state,
 	{
 		rtabmap_.clearPath(1);
 		currentMetricGoal_.setNull();
+		lastPublishedMetricGoal_.setNull();
 		latestNodeWasReached_ = false;
 	}
 }

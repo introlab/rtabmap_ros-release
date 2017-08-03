@@ -18,7 +18,7 @@ find_package(rviz)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(RTABMap 0.11.13 REQUIRED)
+find_package(RTABMap 0.13.2 REQUIRED)
 
 find_package(OpenCV REQUIRED)
 
@@ -161,6 +161,7 @@ SET(rtabmap_ros_lib_src
    src/nodelets/point_cloud_xyzrgb.cpp 
    src/nodelets/point_cloud_xyz.cpp
    src/nodelets/disparity_to_depth.cpp 
+   src/nodelets/pointcloud_to_depthimage.cpp 
    src/nodelets/obstacles_detection.cpp
    src/nodelets/obstacles_detection_old.cpp
    src/nodelets/point_cloud_aggregator.cpp
@@ -175,6 +176,8 @@ SET(rtabmap_ros_lib_src
    src/impl/CommonDataSubscriberStereo.cpp
    src/impl/CommonDataSubscriberRGBD.cpp
    src/impl/CommonDataSubscriberRGBD2.cpp
+   src/impl/CommonDataSubscriberRGBD3.cpp
+   src/impl/CommonDataSubscriberRGBD4.cpp
 )   
 
 # If costmap_2d is found, add the plugin
@@ -293,6 +296,11 @@ target_link_libraries(map_optimizer rtabmap_ros ${Libraries})
 add_executable(map_assembler src/MapAssemblerNode.cpp)
 target_link_libraries(map_assembler rtabmap_ros ${Libraries})
 
+add_executable(wifi_signal_pub src/WifiSignalPubNode.cpp)
+target_link_libraries(wifi_signal_pub rtabmap_ros ${Libraries})
+add_executable(wifi_signal_sub src/WifiSignalSubNode.cpp)
+target_link_libraries(wifi_signal_sub rtabmap_ros ${Libraries})
+
 add_executable(camera src/CameraNode.cpp)
 add_dependencies(camera ${${PROJECT_NAME}_EXPORTED_TARGETS})
 target_link_libraries(camera ${Libraries})
@@ -315,6 +323,9 @@ target_link_libraries(data_player rtabmap_ros ${QT_LIBRARIES} ${Libraries})
 
 add_executable(odom_msg_to_tf src/OdomMsgToTFNode.cpp)
 target_link_libraries(odom_msg_to_tf rtabmap_ros ${Libraries})
+
+add_executable(pointcloud_to_depthimage src/PointCloudToDepthImageNode.cpp)
+target_link_libraries(pointcloud_to_depthimage rtabmap_ros ${Libraries})
 
 #############
 ## Install ##

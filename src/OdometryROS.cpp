@@ -63,6 +63,7 @@ OdometryROS::OdometryROS(bool stereoParams, bool visParams, bool icpParams) :
 	frameId_("base_link"),
 	odomFrameId_("odom"),
 	groundTruthFrameId_(""),
+	groundTruthBaseFrameId_(""),
 	guessFrameId_(""),
 	publishTf_(true),
 	waitForTransform_(true),
@@ -112,16 +113,19 @@ void OdometryROS::onInit()
 
 	Transform initialPose = Transform::getIdentity();
 	std::string initialPoseStr;
-	std::string tfPrefix;
 	std::string configPath;
 	pnh.param("frame_id", frameId_, frameId_);
 	pnh.param("odom_frame_id", odomFrameId_, odomFrameId_);
 	pnh.param("publish_tf", publishTf_, publishTf_);
-	pnh.param("tf_prefix", tfPrefix, tfPrefix);
+	if(pnh.hasParam("tf_prefix"))
+	{
+		ROS_ERROR("tf_prefix parameter has been removed, use directly odom_frame_id and frame_id parameters.");
+	}
 	pnh.param("wait_for_transform", waitForTransform_, waitForTransform_);
 	pnh.param("wait_for_transform_duration",  waitForTransformDuration_, waitForTransformDuration_);
 	pnh.param("initial_pose", initialPoseStr, initialPoseStr); // "x y z roll pitch yaw"
 	pnh.param("ground_truth_frame_id", groundTruthFrameId_, groundTruthFrameId_);
+	pnh.param("ground_truth_base_frame_id", groundTruthBaseFrameId_, frameId_);
 	pnh.param("config_path", configPath, configPath);
 	pnh.param("publish_null_when_lost", publishNullWhenLost_, publishNullWhenLost_);
 	pnh.param("guess_from_tf", guessFromTf_, guessFromTf_);
@@ -139,22 +143,6 @@ void OdometryROS::onInit()
 	if(configPath.size() && configPath.at(0) != '/')
 	{
 		configPath = UDirectory::currentDir(true) + configPath;
-	}
-
-	if(!tfPrefix.empty())
-	{
-		if(!frameId_.empty())
-		{
-			frameId_ = tfPrefix + "/" + frameId_;
-		}
-		if(!odomFrameId_.empty())
-		{
-			odomFrameId_ = tfPrefix + "/" + odomFrameId_;
-		}
-		if(!groundTruthFrameId_.empty())
-		{
-			groundTruthFrameId_ = tfPrefix + "/" + groundTruthFrameId_;
-		}
 	}
 
 	if(initialPoseStr.size())
@@ -258,7 +246,7 @@ void OdometryROS::onInit()
 		std::string vStr;
 		if(pnh.getParam(iter->first, vStr))
 		{
-			if(iter->second.first)
+			if(iter->second.first && parameters_.find(iter->second.second) != parameters_.end())
 			{
 				// can be migrated
 				parameters_.at(iter->second.second)= vStr;
@@ -365,17 +353,21 @@ void OdometryROS::processData(const SensorData & data, const ros::Time & stamp)
 	   !groundTruthFrameId_.empty())
 	{
 		// sync with the first value of the ground truth
-		Transform initialPose = getTransform(groundTruthFrameId_, frameId_, stamp);
+		Transform initialPose = getTransform(groundTruthFrameId_, groundTruthBaseFrameId_, stamp);
 		if(initialPose.isNull())
 		{
-			return;
+			NODELET_WARN("Ground truth frames \"%s\" -> \"%s\" are set but failed to "
+					"get them, odometry won't be synchronized with ground truth.",
+					groundTruthFrameId_.c_str(), groundTruthBaseFrameId_.c_str());
 		}
-
-		NODELET_INFO( "Initializing odometry pose to %s (from \"%s\" -> \"%s\")",
-				initialPose.prettyPrint().c_str(),
-				groundTruthFrameId_.c_str(),
-				frameId_.c_str());
-		odometry_->reset(initialPose);
+		else
+		{
+			NODELET_INFO( "Initializing odometry pose to %s (from \"%s\" -> \"%s\")",
+					initialPose.prettyPrint().c_str(),
+					groundTruthFrameId_.c_str(),
+					groundTruthBaseFrameId_.c_str());
+			odometry_->reset(initialPose);
+		}
 	}
 
 	Transform guess;
@@ -443,12 +435,12 @@ void OdometryROS::processData(const SensorData & data, const ros::Time & stamp)
 
 			//set covariance
 			// libviso2 uses approximately vel variance * 2
-			odom.pose.covariance.at(0) = info.varianceLin*2;  // xx
-			odom.pose.covariance.at(7) = info.varianceLin*2;  // yy
-			odom.pose.covariance.at(14) = info.varianceLin*2; // zz
-			odom.pose.covariance.at(21) = info.varianceAng*2; // rr
-			odom.pose.covariance.at(28) = info.varianceAng*2; // pp
-			odom.pose.covariance.at(35) = info.varianceAng*2; // yawyaw
+			odom.pose.covariance.at(0) = info.covariance.at<double>(0,0)*2;  // xx
+			odom.pose.covariance.at(7) = info.covariance.at<double>(1,1)*2;  // yy
+			odom.pose.covariance.at(14) = info.covariance.at<double>(2,2)*2; // zz
+			odom.pose.covariance.at(21) = info.covariance.at<double>(3,3)*2; // rr
+			odom.pose.covariance.at(28) = info.covariance.at<double>(4,4)*2; // pp
+			odom.pose.covariance.at(35) = info.covariance.at<double>(5,5)*2; // yawyaw
 
 			//set velocity
 			bool setTwist = !odometry_->previousVelocityTransform().isNull();
@@ -464,12 +456,12 @@ void OdometryROS::processData(const SensorData & data, const ros::Time & stamp)
 				odom.twist.twist.angular.z = yaw;
 			}
 
-			odom.twist.covariance.at(0) = setTwist?info.varianceLin:BAD_COVARIANCE;  // xx
-			odom.twist.covariance.at(7) = setTwist?info.varianceLin:BAD_COVARIANCE;  // yy
-			odom.twist.covariance.at(14) = setTwist?info.varianceLin:BAD_COVARIANCE; // zz
-			odom.twist.covariance.at(21) = setTwist?info.varianceAng:BAD_COVARIANCE; // rr
-			odom.twist.covariance.at(28) = setTwist?info.varianceAng:BAD_COVARIANCE; // pp
-			odom.twist.covariance.at(35) = setTwist?info.varianceAng:BAD_COVARIANCE; // yawyaw
+			odom.twist.covariance.at(0) = setTwist?info.covariance.at<double>(0,0):BAD_COVARIANCE;  // xx
+			odom.twist.covariance.at(7) = setTwist?info.covariance.at<double>(1,1):BAD_COVARIANCE;  // yy
+			odom.twist.covariance.at(14) = setTwist?info.covariance.at<double>(2,2):BAD_COVARIANCE; // zz
+			odom.twist.covariance.at(21) = setTwist?info.covariance.at<double>(3,3):BAD_COVARIANCE; // rr
+			odom.twist.covariance.at(28) = setTwist?info.covariance.at<double>(4,4):BAD_COVARIANCE; // pp
+			odom.twist.covariance.at(35) = setTwist?info.covariance.at<double>(5,5):BAD_COVARIANCE; // yawyaw
 
 			//publish the message
 			odomPub_.publish(odom);
@@ -620,16 +612,16 @@ void OdometryROS::processData(const SensorData & data, const ros::Time & stamp)
 	{
 		if(icpParams_)
 		{
-			NODELET_INFO( "Odom: quality=%d, ratio=%f, std dev=%fm|%frad, update time=%fs", info.inliers, info.icpInliersRatio, pose.isNull()?0.0f:std::sqrt(info.varianceLin), pose.isNull()?0.0f:std::sqrt(info.varianceAng), (ros::WallTime::now()-time).toSec());
+			NODELET_INFO( "Odom: quality=%d, ratio=%f, std dev=%fm|%frad, update time=%fs", info.inliers, info.icpInliersRatio, pose.isNull()?0.0f:std::sqrt(info.covariance.at<double>(0,0)), pose.isNull()?0.0f:std::sqrt(info.covariance.at<double>(5,5)), (ros::WallTime::now()-time).toSec());
 		}
 		else
 		{
-			NODELET_INFO( "Odom: quality=%d, std dev=%fm|%frad, update time=%fs", info.inliers, pose.isNull()?0.0f:std::sqrt(info.varianceLin), pose.isNull()?0.0f:std::sqrt(info.varianceAng), (ros::WallTime::now()-time).toSec());
+			NODELET_INFO( "Odom: quality=%d, std dev=%fm|%frad, update time=%fs", info.inliers, pose.isNull()?0.0f:std::sqrt(info.covariance.at<double>(0,0)), pose.isNull()?0.0f:std::sqrt(info.covariance.at<double>(5,5)), (ros::WallTime::now()-time).toSec());
 		}
 	}
 	else
 	{
-		NODELET_INFO( "Odom: ratio=%f, std dev=%fm|%frad, update time=%fs", info.icpInliersRatio, pose.isNull()?0.0f:std::sqrt(info.varianceLin), pose.isNull()?0.0f:std::sqrt(info.varianceAng), (ros::WallTime::now()-time).toSec());
+		NODELET_INFO( "Odom: ratio=%f, std dev=%fm|%frad, update time=%fs", info.icpInliersRatio, pose.isNull()?0.0f:std::sqrt(info.covariance.at<double>(0,0)), pose.isNull()?0.0f:std::sqrt(info.covariance.at<double>(5,5)), (ros::WallTime::now()-time).toSec());
 	}
 
 }

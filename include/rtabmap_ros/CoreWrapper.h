@@ -40,6 +40,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <std_msgs/Empty.h>
 #include <std_msgs/Int32.h>
 #include <nav_msgs/GetMap.h>
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
 
 #include <rtabmap/core/Parameters.h>
 #include <rtabmap/core/Rtabmap.h>
@@ -115,6 +116,9 @@ private:
 
 	void defaultCallback(const sensor_msgs::ImageConstPtr & imageMsg); // no odom
 
+	void userDataAsyncCallback(const rtabmap_ros::UserDataConstPtr & dataMsg);
+	void globalPoseAsyncCallback(const geometry_msgs::PoseWithCovarianceStampedConstPtr & globalPoseMsg);
+
 	void goalCommonCallback(int id, const std::string & label, const rtabmap::Transform & pose, const ros::Time & stamp, double * planningTime = 0);
 	void goalCallback(const geometry_msgs::PoseStampedConstPtr & msg);
 	void goalNodeCallback(const rtabmap_ros::GoalConstPtr & msg);
@@ -125,8 +129,7 @@ private:
 			const rtabmap::SensorData & data,
 			const rtabmap::Transform & odom = rtabmap::Transform(),
 			const std::string & odomFrameId = "",
-			float odomRotationalVariance = 1.0,
-			float odomTransitionalVariance = 1.0);
+			const cv::Mat & odomCovariance = cv::Mat::eye(6,6,CV_64FC1));
 
 	bool updateRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
 	bool resetRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
@@ -173,9 +176,9 @@ private:
 	rtabmap::Transform lastPose_;
 	ros::Time lastPoseStamp_;
 	bool lastPoseIntermediate_;
-	float rotVariance_;
-	float transVariance_;
+	cv::Mat covariance_;
 	rtabmap::Transform currentMetricGoal_;
+	rtabmap::Transform lastPublishedMetricGoal_;
 	bool latestNodeWasReached_;
 	rtabmap::ParametersMap parameters_;
 
@@ -186,6 +189,8 @@ private:
 	std::string groundTruthBaseFrameId_;
 	std::string configPath_;
 	std::string databasePath_;
+	float odomDefaultAngVariance_;
+	float odomDefaultLinVariance_;
 	bool waitForTransform_;
 	double waitForTransformDuration_;
 	bool useActionForGoal_;
@@ -249,6 +254,19 @@ private:
 
 	// for loop closure detection only
 	image_transport::Subscriber defaultSub_;
+
+	// for rgb/localization
+	image_transport::SubscriberFilter rgbSub_;
+	message_filters::Subscriber<nav_msgs::Odometry> rgbOdomSub_;
+	message_filters::Subscriber<sensor_msgs::CameraInfo> rgbCameraInfoSub_;
+	DATA_SYNCS2(rgb, sensor_msgs::Image, sensor_msgs::CameraInfo);
+	DATA_SYNCS3(rgbOdom, sensor_msgs::Image, sensor_msgs::CameraInfo, nav_msgs::Odometry);
+
+	ros::Subscriber userDataAsyncSub_;
+	cv::Mat userData_;
+
+	ros::Subscriber globalPoseAsyncSub_;
+	geometry_msgs::PoseWithCovarianceStamped globalPose_;
 
 	bool stereoToDepth_;
 	bool odomSensorSync_;
