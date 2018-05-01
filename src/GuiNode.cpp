@@ -25,7 +25,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include "GuiWrapper.h"
+#include "rtabmap_ros/GuiWrapper.h"
 #include "rtabmap/utilite/ULogger.h"
 
 #include <QApplication>
@@ -54,7 +54,7 @@ int main(int argc, char** argv)
 	app = new QApplication(argc, argv);
 	app->connect( app, SIGNAL( lastWindowClosed() ), app, SLOT( quit() ) );
 
-	GuiWrapper * gui = new GuiWrapper(argc, argv);
+	rtabmap_ros::GuiWrapper * gui = new rtabmap_ros::GuiWrapper(argc, argv);
 
 	// Catch ctrl-c to close the gui
 	// (Place this after QApplication's constructor)

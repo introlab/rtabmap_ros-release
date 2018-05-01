@@ -29,6 +29,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define MAPSMANAGER_H_
 
 #include <rtabmap/core/Signature.h>
+#include <rtabmap/core/Parameters.h>
+#include <rtabmap/core/FlannIndex.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <ros/time.h>
@@ -37,15 +39,20 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace rtabmap {
 class OctoMap;
 class Memory;
+class OccupancyGrid;
 
 }  // namespace rtabmap
 
 class MapsManager {
 public:
-	MapsManager(bool usePublicNamespace);
+	MapsManager();
 	virtual ~MapsManager();
+	void init(ros::NodeHandle & nh, ros::NodeHandle & pnh, const std::string & name, bool usePublicNamespace);
 	void clear();
 	bool hasSubscribers() const;
+	void backwardCompatibilityParameters(ros::NodeHandle & pnh, rtabmap::ParametersMap & parameters) const;
+	void setParameters(const rtabmap::ParametersMap & parameters);
+	void set2DMap(const cv::Mat & map, float xMin, float yMin, float cellSize, const std::map<int, rtabmap::Transform> & poses);
 
 	std::map<int, rtabmap::Transform> getFilteredPoses(
 			const std::map<int, rtabmap::Transform> & poses);
@@ -53,10 +60,7 @@ public:
 	std::map<int, rtabmap::Transform> updateMapCaches(
 			const std::map<int, rtabmap::Transform> & poses,
 			const rtabmap::Memory * memory,
-			bool updateCloud,
-			bool updateProj,
 			bool updateGrid,
-			bool updateScan,
 			bool updateOctomap,
 			const std::map<int, rtabmap::Signature> & signatures = std::map<int, rtabmap::Signature>());
 
@@ -65,70 +69,59 @@ public:
 			const ros::Time & stamp,
 			const std::string & mapFrameId);
 
-	cv::Mat generateProjMap(
-			const std::map<int, rtabmap::Transform> & filteredPoses,
+	cv::Mat getGridMap(
 			float & xMin,
 			float & yMin,
 			float & gridCellSize);
 
-	cv::Mat generateGridMap(
-			const std::map<int, rtabmap::Transform> & filteredPoses,
-			float & xMin,
-			float & yMin,
-			float & gridCellSize);
-
-	rtabmap::OctoMap * getOctomap() const {return octomap_;}
+	const rtabmap::OctoMap * getOctomap() const {return octomap_;}
+	const rtabmap::OccupancyGrid * getOccupancyGrid() const {return occupancyGrid_;}
 
 private:
 	// mapping stuff
-	int cloudDecimation_;
-	double cloudMaxDepth_;
-	double cloudMinDepth_;
-	double cloudVoxelSize_;
-	double cloudFloorCullingHeight_;
-	double cloudCeilingCullingHeight_;
 	bool cloudOutputVoxelized_;
-	bool cloudFrustumCulling_;
-	double cloudNoiseFilteringRadius_;
-	int cloudNoiseFilteringMinNeighbors_;
-	int scanDecimation_;
-	double scanVoxelSize_;
-	bool scanOutputVoxelized_;
-	double projMaxGroundAngle_;
-	int projMinClusterSize_;
-	double projMaxObstaclesHeight_;
-	double projMaxGroundHeight_;
-	bool projDetectFlatObstacles_;
-	bool projMapFrame_;
-	double gridCellSize_;
-	double gridSize_;
-	bool gridEroded_;
-	bool gridUnknownSpaceFilled_;
-	double gridMaxUnknownSpaceFilledRange_;
+	bool cloudSubtractFiltering_;
+	int cloudSubtractFilteringMinNeighbors_;
 	double mapFilterRadius_;
 	double mapFilterAngle_;
 	bool mapCacheCleanup_;
 	bool negativePosesIgnored_;
+	bool negativeScanEmptyRayTracing_;
 
 	ros::Publisher cloudMapPub_;
+	ros::Publisher cloudGroundPub_;
+	ros::Publisher cloudObstaclesPub_;
 	ros::Publisher projMapPub_;
 	ros::Publisher gridMapPub_;
 	ros::Publisher scanMapPub_;
 	ros::Publisher octoMapPubBin_;
 	ros::Publisher octoMapPubFull_;
 	ros::Publisher octoMapCloud_;
+	ros::Publisher octoMapGroundCloud_;
+	ros::Publisher octoMapObstacleCloud_;
 	ros::Publisher octoMapEmptySpace_;
 	ros::Publisher octoMapProj_;
 
-	std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr > clouds_;
-	std::map<int, pcl::PointCloud<pcl::PointXYZ>::Ptr > scans_;
-	std::map<int, std::vector<rtabmap::CameraModel> > cameraModels_;
-	std::map<int, std::pair<cv::Mat, cv::Mat> > projMaps_; // <ground, obstacles>
-	std::map<int, std::pair<cv::Mat, cv::Mat> > gridMaps_; // <ground, obstacles>
+	std::map<int, rtabmap::Transform> assembledGroundPoses_;
+	std::map<int, rtabmap::Transform> assembledObstaclePoses_;
+	pcl::PointCloud<pcl::PointXYZRGB>::Ptr assembledObstacles_;
+	pcl::PointCloud<pcl::PointXYZRGB>::Ptr assembledGround_;
+	rtabmap::FlannIndex assembledGroundIndex_;
+	rtabmap::FlannIndex assembledObstacleIndex_;
+	std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr > groundClouds_;
+	std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr > obstacleClouds_;
+
+	std::map<int, rtabmap::Transform> gridPoses_;
+	cv::Mat gridMap_;
+	std::map<int, std::pair< std::pair<cv::Mat, cv::Mat>, cv::Mat> > gridMaps_; // < <ground, obstacles>, empty cells >
+	std::map<int, cv::Point3f> gridMapsViewpoints_;
+
+	rtabmap::OccupancyGrid * occupancyGrid_;
 
 	rtabmap::OctoMap * octomap_;
 	int octomapTreeDepth_;
-	bool octomapGroundIsObstacle_;
+
+	rtabmap::ParametersMap parameters_;
 };
 
 #endif /* MAPSMANAGER_H_ */
