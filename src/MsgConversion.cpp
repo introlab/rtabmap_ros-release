@@ -31,6 +31,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <zlib.h>
 #include <ros/ros.h>
 #include <rtabmap/core/util3d.h>
+#include <rtabmap/core/util3d_transforms.h>
+#include <rtabmap/core/util3d_filtering.h>
 #include <rtabmap/core/Compression.h>
 #include <rtabmap/utilite/UStl.h>
 #include <rtabmap/utilite/ULogger.h>
@@ -69,6 +71,13 @@ void transformToGeometryMsg(const rtabmap::Transform & transform, geometry_msgs:
 	if(!transform.isNull())
 	{
 		tf::transformEigenToMsg(transform.toEigen3d(), msg);
+
+		// make sure the quaternion is normalized
+		long double recipNorm = 1.0 / sqrt(msg.rotation.x * msg.rotation.x + msg.rotation.y * msg.rotation.y + msg.rotation.z * msg.rotation.z + msg.rotation.w * msg.rotation.w);
+		msg.rotation.x *= recipNorm;
+		msg.rotation.y *= recipNorm;
+		msg.rotation.z *= recipNorm;
+		msg.rotation.w *= recipNorm;
 	}
 	else
 	{
@@ -126,7 +135,11 @@ void toCvCopy(const rtabmap_ros::RGBDImage & image, cv_bridge::CvImagePtr & rgb,
 	}
 	else if(!image.rgbCompressed.data.empty())
 	{
+#ifdef CV_BRIDGE_HYDRO
+		ROS_ERROR("Unsupported compressed image copy, please upgrade at least to ROS Indigo to use this.");
+#else
 		rgb = cv_bridge::toCvCopy(image.rgbCompressed);
+#endif
 	}
 	else
 	{
@@ -162,7 +175,11 @@ void toCvShare(const rtabmap_ros::RGBDImageConstPtr & image, cv_bridge::CvImageC
 	}
 	else if(!image->rgbCompressed.data.empty())
 	{
+#ifdef CV_BRIDGE_HYDRO
+                ROS_ERROR("Unsupported compressed image copy, please upgrade at least to ROS Indigo to use this.");
+#else
 		rgb = cv_bridge::toCvCopy(image->rgbCompressed);
+#endif
 	}
 	else
 	{
@@ -176,12 +193,23 @@ void toCvShare(const rtabmap_ros::RGBDImageConstPtr & image, cv_bridge::CvImageC
 	}
 	else if(!image->depthCompressed.data.empty())
 	{
-		cv_bridge::CvImagePtr ptr = boost::make_shared<cv_bridge::CvImage>();
-		ptr->header = image->depthCompressed.header;
-		ptr->image = rtabmap::uncompressImage(image->depthCompressed.data);
-		ROS_ASSERT(ptr->image.empty() || ptr->image.type() == CV_32FC1 || ptr->image.type() == CV_16UC1);
-		ptr->encoding = ptr->image.empty()?"":ptr->image.type() == CV_32FC1?sensor_msgs::image_encodings::TYPE_32FC1:sensor_msgs::image_encodings::TYPE_16UC1;
-		depth = ptr;
+		if(image->depthCompressed.format.compare("jpg")==0)
+		{
+#ifdef CV_BRIDGE_HYDRO
+			ROS_ERROR("Unsupported compressed image copy, please upgrade at least to ROS Indigo to use this.");
+#else
+			depth = cv_bridge::toCvCopy(image->depthCompressed);
+#endif
+		}
+		else
+		{
+			cv_bridge::CvImagePtr ptr = boost::make_shared<cv_bridge::CvImage>();
+			ptr->header = image->depthCompressed.header;
+			ptr->image = rtabmap::uncompressImage(image->depthCompressed.data);
+			ROS_ASSERT(ptr->image.empty() || ptr->image.type() == CV_32FC1 || ptr->image.type() == CV_16UC1);
+			ptr->encoding = ptr->image.empty()?"":ptr->image.type() == CV_32FC1?sensor_msgs::image_encodings::TYPE_32FC1:sensor_msgs::image_encodings::TYPE_16UC1;
+			depth = ptr;
+		}
 	}
 	else
 	{
@@ -294,7 +322,8 @@ void infoToROS(const rtabmap::Statistics & stats, rtabmap_ros::Info & info)
 
 rtabmap::Link linkFromROS(const rtabmap_ros::Link & msg)
 {
-	return rtabmap::Link(msg.fromId, msg.toId, (rtabmap::Link::Type)msg.type, transformFromGeometryMsg(msg.transform), msg.rotVariance, msg.transVariance);
+	cv::Mat information = cv::Mat(6,6,CV_64FC1, (void*)msg.information.data()).clone();
+	return rtabmap::Link(msg.fromId, msg.toId, (rtabmap::Link::Type)msg.type, transformFromGeometryMsg(msg.transform), information);
 }
 
 void linkToROS(const rtabmap::Link & link, rtabmap_ros::Link & msg)
@@ -302,8 +331,10 @@ void linkToROS(const rtabmap::Link & link, rtabmap_ros::Link & msg)
 	msg.fromId = link.from();
 	msg.toId = link.to();
 	msg.type = link.type();
-	msg.rotVariance = link.rotVariance();
-	msg.transVariance = link.transVariance();
+	if(link.infMatrix().type() == CV_64FC1 && link.infMatrix().cols == 6 && link.infMatrix().rows == 6)
+	{
+		memcpy(msg.information.data(), link.infMatrix().data, 36*sizeof(double));
+	}
 	transformToGeometryMsg(link.transform(), msg.transform);
 }
 
@@ -687,10 +718,10 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 			transformFromPoseMsg(msg.groundTruthPose),
 			stereoModel.isValidForProjection()?
 				rtabmap::SensorData(
-					compressedMatFromBytes(msg.laserScan),
-					rtabmap::LaserScanInfo(
+					rtabmap::LaserScan(compressedMatFromBytes(msg.laserScan),
 							msg.laserScanMaxPts,
 							msg.laserScanMaxRange,
+							(rtabmap::LaserScan::Format)msg.laserScanFormat,
 							transformFromGeometryMsg(msg.laserScanLocalTransform)),
 					compressedMatFromBytes(msg.image),
 					compressedMatFromBytes(msg.depth),
@@ -699,10 +730,10 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 					msg.stamp,
 					compressedMatFromBytes(msg.userData)):
 				rtabmap::SensorData(
-					compressedMatFromBytes(msg.laserScan),
-					rtabmap::LaserScanInfo(
+					rtabmap::LaserScan(compressedMatFromBytes(msg.laserScan),
 							msg.laserScanMaxPts,
 							msg.laserScanMaxRange,
+							(rtabmap::LaserScan::Format)msg.laserScanFormat,
 							transformFromGeometryMsg(msg.laserScanLocalTransform)),
 					compressedMatFromBytes(msg.image),
 					compressedMatFromBytes(msg.depth),
@@ -716,8 +747,10 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 	s.sensorData().setOccupancyGrid(
 			compressedMatFromBytes(msg.grid_ground),
 			compressedMatFromBytes(msg.grid_obstacles),
+			compressedMatFromBytes(msg.grid_empty_cells),
 			msg.grid_cell_size,
 			point3fFromROS(msg.grid_view_point));
+	s.sensorData().setGPS(rtabmap::GPS(msg.gps.stamp, msg.gps.longitude, msg.gps.latitude, msg.gps.altitude, msg.gps.error, msg.gps.bearing));
 	return s;
 }
 void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData & msg)
@@ -730,17 +763,25 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 	msg.label = signature.getLabel();
 	transformToPoseMsg(signature.getPose(), msg.pose);
 	transformToPoseMsg(signature.getGroundTruthPose(), msg.groundTruthPose);
+	msg.gps.stamp = signature.sensorData().gps().stamp();
+	msg.gps.longitude = signature.sensorData().gps().longitude();
+	msg.gps.latitude = signature.sensorData().gps().latitude();
+	msg.gps.altitude = signature.sensorData().gps().altitude();
+	msg.gps.error = signature.sensorData().gps().error();
+	msg.gps.bearing = signature.sensorData().gps().bearing();
 	compressedMatToBytes(signature.sensorData().imageCompressed(), msg.image);
 	compressedMatToBytes(signature.sensorData().depthOrRightCompressed(), msg.depth);
-	compressedMatToBytes(signature.sensorData().laserScanCompressed(), msg.laserScan);
+	compressedMatToBytes(signature.sensorData().laserScanCompressed().data(), msg.laserScan);
 	compressedMatToBytes(signature.sensorData().userDataCompressed(), msg.userData);
 	compressedMatToBytes(signature.sensorData().gridGroundCellsCompressed(), msg.grid_ground);
 	compressedMatToBytes(signature.sensorData().gridObstacleCellsCompressed(), msg.grid_obstacles);
+	compressedMatToBytes(signature.sensorData().gridEmptyCellsCompressed(), msg.grid_empty_cells);
 	point3fToROS(signature.sensorData().gridViewPoint(), msg.grid_view_point);
 	msg.grid_cell_size = signature.sensorData().gridCellSize();
-	msg.laserScanMaxPts = signature.sensorData().laserScanInfo().maxPoints();
-	msg.laserScanMaxRange = signature.sensorData().laserScanInfo().maxRange();
-	transformToGeometryMsg(signature.sensorData().laserScanInfo().localTransform(), msg.laserScanLocalTransform);
+	msg.laserScanMaxPts = signature.sensorData().laserScanCompressed().maxPoints();
+	msg.laserScanMaxRange = signature.sensorData().laserScanCompressed().maxRange();
+	msg.laserScanFormat = signature.sensorData().laserScanCompressed().format();
+	transformToGeometryMsg(signature.sensorData().laserScanCompressed().localTransform(), msg.laserScanLocalTransform);
 	msg.baseline = 0;
 	if(signature.sensorData().cameraModels().size())
 	{
@@ -873,18 +914,27 @@ rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg)
 {
 	rtabmap::OdometryInfo info;
 	info.lost = msg.lost;
-	info.matches = msg.matches;
+	info.reg.matches = msg.matches;
+	info.reg.inliers = msg.inliers;
+	info.reg.icpInliersRatio = msg.icpInliersRatio;
+	info.reg.icpRotation = msg.icpRotation;
+	info.reg.icpTranslation = msg.icpTranslation;
+	info.reg.icpStructuralComplexity = msg.icpStructuralComplexity;
+	info.reg.covariance = cv::Mat(6,6,CV_64FC1, (void*)msg.covariance.data()).clone();
 	info.features = msg.features;
-	info.inliers = msg.inliers;
 	info.localMapSize = msg.localMapSize;
 	info.localScanMapSize = msg.localScanMapSize;
+	info.localKeyFrames = msg.localKeyFrames;
+	info.localBundleOutliers = msg.localBundleOutliers;
+	info.localBundleConstraints = msg.localBundleConstraints;
+	info.localBundleTime = msg.localBundleTime;
+	info.keyFrameAdded = msg.keyFrameAdded;
 	info.timeEstimation = msg.timeEstimation;
-	info.varianceLin = msg.varianceLin;
-	info.varianceAng = msg.varianceAng;
 	info.timeParticleFiltering =  msg.timeParticleFiltering;
 	info.stamp = msg.stamp;
 	info.interval = msg.interval;
 	info.distanceTravelled = msg.distanceTravelled;
+	info.memoryUsage = msg.memoryUsage;
 
 	info.type = msg.type;
 
@@ -894,8 +944,8 @@ rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg)
 		info.words.insert(std::make_pair(msg.wordsKeys[i], keypointFromROS(msg.wordsValues[i])));
 	}
 
-	info.wordMatches = msg.wordMatches;
-	info.wordInliers = msg.wordInliers;
+	info.reg.matchesIDs = msg.wordMatches;
+	info.reg.inliersIDs = msg.wordInliers;
 
 	info.refCorners = points2fFromROS(msg.refCorners);
 	info.newCorners = points2fFromROS(msg.newCorners);
@@ -910,7 +960,7 @@ rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg)
 		info.localMap.insert(std::make_pair(msg.localMapKeys[i], point3fFromROS(msg.localMapValues[i])));
 	}
 
-	info.localScanMap = rtabmap::uncompressData(msg.localScanMap);
+	info.localScanMap = rtabmap::LaserScan::backwardCompatibility(rtabmap::uncompressData(msg.localScanMap));
 
 	return info;
 }
@@ -918,26 +968,38 @@ rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg)
 void odomInfoToROS(const rtabmap::OdometryInfo & info, rtabmap_ros::OdomInfo & msg)
 {
 	msg.lost = info.lost;
-	msg.matches = info.matches;
+	msg.matches = info.reg.matches;
+	msg.inliers = info.reg.inliers;
+	msg.icpInliersRatio = info.reg.icpInliersRatio;
+	msg.icpRotation = info.reg.icpRotation;
+	msg.icpTranslation = info.reg.icpTranslation;
+	msg.icpStructuralComplexity = info.reg.icpStructuralComplexity;
+	if(info.reg.covariance.type() == CV_64FC1 && info.reg.covariance.cols == 6 && info.reg.covariance.rows == 6)
+	{
+		memcpy(msg.covariance.data(), info.reg.covariance.data, 36*sizeof(double));
+	}
 	msg.features = info.features;
-	msg.inliers = info.inliers;
 	msg.localMapSize = info.localMapSize;
 	msg.localScanMapSize = info.localScanMapSize;
+	msg.localKeyFrames = info.localKeyFrames;
+	msg.localBundleOutliers = info.localBundleOutliers;
+	msg.localBundleConstraints = info.localBundleConstraints;
+	msg.localBundleTime = info.localBundleTime;
+	msg.keyFrameAdded = info.keyFrameAdded;
 	msg.timeEstimation = info.timeEstimation;
-	msg.varianceLin = info.varianceLin;
-	msg.varianceAng = info.varianceAng;
 	msg.timeParticleFiltering =  info.timeParticleFiltering;
 	msg.stamp = info.stamp;
 	msg.interval = info.interval;
 	msg.distanceTravelled = info.distanceTravelled;
+	msg.memoryUsage = info.memoryUsage;
 
 	msg.type = info.type;
 
 	msg.wordsKeys = uKeys(info.words);
 	keypointsToROS(uValues(info.words), msg.wordsValues);
 
-	msg.wordMatches = info.wordMatches;
-	msg.wordInliers = info.wordInliers;
+	msg.wordMatches = info.reg.matchesIDs;
+	msg.wordInliers = info.reg.inliersIDs;
 
 	points2fToROS(info.refCorners, msg.refCorners);
 	points2fToROS(info.newCorners, msg.newCorners);
@@ -949,7 +1011,7 @@ void odomInfoToROS(const rtabmap::OdometryInfo & info, rtabmap_ros::OdomInfo & m
 	msg.localMapKeys = uKeys(info.localMap);
 	points3fToROS(uValues(info.localMap), msg.localMapValues);
 
-	msg.localScanMap = rtabmap::compressData(info.localScanMap);
+	msg.localScanMap = rtabmap::compressData(rtabmap::util3d::transformLaserScan(info.localScanMap, info.localScanMap.localTransform()).data());
 }
 
 cv::Mat userDataFromROS(const rtabmap_ros::UserData & dataMsg)
@@ -1027,7 +1089,7 @@ rtabmap::Transform getTransform(
 	}
 	catch(tf::TransformException & ex)
 	{
-		ROS_WARN("%s",ex.what());
+		ROS_WARN("(getting transform %s -> %s) %s", fromFrameId.c_str(), toFrameId.c_str(), ex.what());
 	}
 	return transform;
 }
@@ -1064,7 +1126,7 @@ rtabmap::Transform getTransform(
 	}
 	catch(tf::TransformException & ex)
 	{
-		ROS_WARN("%s",ex.what());
+		ROS_WARN("(getting transform movement of %s according to fixed %s) %s", sourceTargetFrame.c_str(), fixedFrame.c_str(), ex.what());
 	}
 	return transform;
 }
@@ -1083,11 +1145,22 @@ bool convertRGBDMsgs(
 		double waitForTransform)
 {
 	UASSERT(imageMsgs.size()>0 &&
-			imageMsgs.size() == depthMsgs.size() &&
+			(imageMsgs.size() == depthMsgs.size() || depthMsgs.empty()) &&
 			imageMsgs.size() == cameraInfoMsgs.size());
 
 	int imageWidth = imageMsgs[0]->image.cols;
 	int imageHeight = imageMsgs[0]->image.rows;
+	int depthWidth = depthMsgs.size()?depthMsgs[0]->image.cols:0;
+	int depthHeight = depthMsgs.size()?depthMsgs[0]->image.rows:0;
+
+	if(depthMsgs.size())
+	{
+		UASSERT_MSG(
+				imageWidth % depthWidth == 0 && imageHeight % depthHeight == 0 &&
+				imageWidth/depthWidth == imageHeight/depthHeight,
+				uFormat("rgb=%dx%d depth=%dx%d", imageWidth, imageHeight, depthWidth, depthHeight).c_str());
+	}
+
 	int cameraCount = imageMsgs.size();
 	for(unsigned int i=0; i<imageMsgs.size(); ++i)
 	{
@@ -1095,12 +1168,23 @@ bool convertRGBDMsgs(
 			 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO8) ==0 ||
 			 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) ==0 ||
 			 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
-			 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0) ||
-			!(depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_16UC1) == 0 ||
-			 depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_32FC1) == 0 ||
-			 depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0))
+			 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0 ||
+			 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::BGRA8) == 0 ||
+			 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::RGBA8) == 0 ||
+			 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::BAYER_GRBG8) == 0))
 		{
-			ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8 and image_depth=32FC1,16UC1,mono16");
+
+			ROS_ERROR("Input rgb type must be image=mono8,mono16,rgb8,bgr8,bgra8,rgba8. Current rgb=%s",
+					imageMsgs[i]->encoding.c_str());
+			return false;
+		}
+		 if(depthMsgs.size() &&
+			 !(depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_16UC1) == 0 ||
+			   depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_32FC1) == 0 ||
+			   depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0))
+		{
+			ROS_ERROR("Input depth type must be image_depth=32FC1,16UC1,mono16. Current depth=%s",
+					depthMsgs[i]->encoding.c_str());
 			return false;
 		}
 
@@ -1110,37 +1194,47 @@ bool convertRGBDMsgs(
 						imageMsgs[i]->image.cols,
 						imageHeight,
 						imageMsgs[i]->image.rows).c_str());
-		UASSERT_MSG(depthMsgs[i]->image.cols == imageWidth && depthMsgs[i]->image.rows == imageHeight,
-				uFormat("imageWidth=%d vs %d imageHeight=%d vs %d",
-						imageWidth,
-						depthMsgs[i]->image.cols,
-						imageHeight,
-						depthMsgs[i]->image.rows).c_str());
+		ros::Time stamp;
+		if(depthMsgs.size())
+		{
+			UASSERT_MSG(depthMsgs[i]->image.cols == depthWidth && depthMsgs[i]->image.rows == depthHeight,
+					uFormat("depthWidth=%d vs %d imageHeight=%d vs %d",
+							depthWidth,
+							depthMsgs[i]->image.cols,
+							depthHeight,
+							depthMsgs[i]->image.rows).c_str());
+			stamp = depthMsgs[i]->header.stamp;
+		}
+		else
+		{
+			stamp = imageMsgs[i]->header.stamp;
+		}
 
-		rtabmap::Transform localTransform = rtabmap_ros::getTransform(frameId, depthMsgs[i]->header.frame_id, depthMsgs[i]->header.stamp, listener, waitForTransform);
+		// use depth's stamp so that geometry is sync to odom, use rgb frame as we assume depth is registered (normally depth msg should have same frame than rgb)
+		rtabmap::Transform localTransform = rtabmap_ros::getTransform(frameId, imageMsgs[i]->header.frame_id, stamp, listener, waitForTransform);
 		if(localTransform.isNull())
 		{
-			ROS_ERROR("TF of received depth image %d at time %fs is not set!", i, depthMsgs[i]->header.stamp.toSec());
+			ROS_ERROR("TF of received image %d at time %fs is not set!", i, stamp.toSec());
 			return false;
 		}
 		// sync with odometry stamp
-		if(!odomFrameId.empty() && odomStamp != depthMsgs[i]->header.stamp)
+		if(!odomFrameId.empty() && odomStamp != stamp)
 		{
 			rtabmap::Transform sensorT = getTransform(
 					frameId,
 					odomFrameId,
 					odomStamp,
-					depthMsgs[i]->header.stamp,
+					stamp,
 					listener,
 					waitForTransform);
 			if(sensorT.isNull())
 			{
 				ROS_WARN("Could not get odometry value for depth image stamp (%fs). Latest odometry "
-						"stamp is %fs. The depth image pose will not be synchronized with odometry.", depthMsgs[i]->header.stamp.toSec(), odomStamp.toSec());
+						"stamp is %fs. The depth image pose will not be synchronized with odometry.", stamp.toSec(), odomStamp.toSec());
 			}
 			else
 			{
-				//ROS_WARN("RGBD correction = %s (time diff=%fs)", sensorT.prettyPrint().c_str(), fabs(depthMsgs[i]->header.stamp.toSec()-odomStamp.toSec()));
+				//ROS_WARN("RGBD correction = %s (time diff=%fs)", sensorT.prettyPrint().c_str(), fabs(stamp.toSec()-odomStamp.toSec()));
 				localTransform = sensorT * localTransform;
 			}
 		}
@@ -1160,19 +1254,12 @@ bool convertRGBDMsgs(
 		{
 			ptrImage = cv_bridge::cvtColor(imageMsgs[i], "bgr8");
 		}
-		cv_bridge::CvImageConstPtr ptrDepth = depthMsgs[i];
-		cv::Mat subDepth = ptrDepth->image;
 
 		// initialize
 		if(rgb.empty())
 		{
 			rgb = cv::Mat(imageHeight, imageWidth*cameraCount, ptrImage->image.type());
 		}
-		if(depth.empty())
-		{
-			depth = cv::Mat(imageHeight, imageWidth*cameraCount, subDepth.type());
-		}
-
 		if(ptrImage->image.type() == rgb.type())
 		{
 			ptrImage->image.copyTo(cv::Mat(rgb, cv::Rect(i*imageWidth, 0, imageWidth, imageHeight)));
@@ -1183,14 +1270,25 @@ bool convertRGBDMsgs(
 			return false;
 		}
 
-		if(subDepth.type() == depth.type())
+		if(depthMsgs.size())
 		{
-			subDepth.copyTo(cv::Mat(depth, cv::Rect(i*imageWidth, 0, imageWidth, imageHeight)));
-		}
-		else
-		{
-			ROS_ERROR("Some Depth images are not the same type!");
-			return false;
+			cv_bridge::CvImageConstPtr ptrDepth = depthMsgs[i];
+			cv::Mat subDepth = ptrDepth->image;
+
+			if(depth.empty())
+			{
+				depth = cv::Mat(depthHeight, depthWidth*cameraCount, subDepth.type());
+			}
+
+			if(subDepth.type() == depth.type())
+			{
+				subDepth.copyTo(cv::Mat(depth, cv::Rect(i*depthWidth, 0, depthWidth, depthHeight)));
+			}
+			else
+			{
+				ROS_ERROR("Some Depth images are not the same type!");
+				return false;
+			}
 		}
 
 		cameraModels.push_back(rtabmap_ros::cameraModelFromROS(cameraInfoMsgs[i], localTransform));
@@ -1199,10 +1297,10 @@ bool convertRGBDMsgs(
 }
 
 bool convertStereoMsg(
-		const sensor_msgs::ImageConstPtr& leftImageMsg,
-		const sensor_msgs::ImageConstPtr& rightImageMsg,
-		const sensor_msgs::CameraInfoConstPtr& leftCamInfoMsg,
-		const sensor_msgs::CameraInfoConstPtr& rightCamInfoMsg,
+		const cv_bridge::CvImageConstPtr& leftImageMsg,
+		const cv_bridge::CvImageConstPtr& rightImageMsg,
+		const sensor_msgs::CameraInfo& leftCamInfoMsg,
+		const sensor_msgs::CameraInfo& rightCamInfoMsg,
 		const std::string & frameId,
 		const std::string & odomFrameId,
 		const ros::Time & odomStamp,
@@ -1213,7 +1311,6 @@ bool convertStereoMsg(
 		double waitForTransform)
 {
 	UASSERT(leftImageMsg.get() && rightImageMsg.get());
-	UASSERT(leftCamInfoMsg.get() && rightCamInfoMsg.get());
 
 	if(!(leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
 		leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0 ||
@@ -1224,20 +1321,23 @@ bool convertStereoMsg(
 		rightImageMsg->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
 		rightImageMsg->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0))
 	{
-		ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8");
+		ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8,bgra8,rgba8");
+		ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8,bgra8,rgba8 Current left=%s and right=%s",
+				leftImageMsg->encoding.c_str(),
+				rightImageMsg->encoding.c_str());
 		return false;
 	}
 
 	if(leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
 	   leftImageMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0)
 	{
-		left = cv_bridge::toCvCopy(leftImageMsg, "mono8")->image;
+		left = cv_bridge::cvtColor(leftImageMsg, "mono8")->image;
 	}
 	else
 	{
-		left = cv_bridge::toCvCopy(leftImageMsg, "bgr8")->image;
+		left = cv_bridge::cvtColor(leftImageMsg, "bgr8")->image;
 	}
-	right = cv_bridge::toCvCopy(rightImageMsg, "mono8")->image;
+	right = cv_bridge::cvtColor(rightImageMsg, "mono8")->image;
 
 	rtabmap::Transform localTransform = getTransform(frameId, leftImageMsg->header.frame_id, leftImageMsg->header.stamp, listener, waitForTransform);
 	if(localTransform.isNull())
@@ -1265,7 +1365,7 @@ bool convertStereoMsg(
 		}
 	}
 
-	stereoModel = rtabmap_ros::stereoCameraModelFromROS(*leftCamInfoMsg, *rightCamInfoMsg, localTransform);
+	stereoModel = rtabmap_ros::stereoCameraModelFromROS(leftCamInfoMsg, rightCamInfoMsg, localTransform);
 
 	if(stereoModel.baseline() > 10.0)
 	{
@@ -1322,6 +1422,7 @@ bool convertScanMsg(
 	projection.transformLaserScanToPointCloud(odomFrameId.empty()?frameId:odomFrameId, *scan2dMsg, scanOut, listener);
 	pcl::PointCloud<pcl::PointXYZ>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZ>);
 	pcl::fromROSMsg(scanOut, *pclScan);
+	pclScan->is_dense = true;
 
 	//transform back in laser frame
 	rtabmap::Transform laserToOdom = getTransform(
@@ -1356,7 +1457,9 @@ bool convertScanMsg(
 			scanLocalTransform = sensorT * scanLocalTransform;
 		}
 	}
+
 	scan = rtabmap::util3d::laserScan2dFromPointCloud(*pclScan, laserToOdom); // put back in laser frame
+
 	return true;
 }
 
@@ -1365,19 +1468,22 @@ bool convertScan3dMsg(
 		const std::string & frameId,
 		const std::string & odomFrameId,
 		const ros::Time & odomStamp,
-		int scanCloudNormalK,
 		cv::Mat & scan,
 		rtabmap::Transform & scanLocalTransform,
 		tf::TransformListener & listener,
 		double waitForTransform)
 {
 	bool containNormals = false;
+	bool containColors = false;
 	for(unsigned int i=0; i<scan3dMsg->fields.size(); ++i)
 	{
 		if(scan3dMsg->fields[i].name.compare("normal_x") == 0)
 		{
 			containNormals = true;
-			break;
+		}
+		if(scan3dMsg->fields[i].name.compare("rgb") == 0 || scan3dMsg->fields[i].name.compare("rgba") == 0)
+		{
+			containColors = true;
 		}
 	}
 
@@ -1411,26 +1517,49 @@ bool convertScan3dMsg(
 
 	if(containNormals)
 	{
-		pcl::PointCloud<pcl::PointNormal>::Ptr pclScan(new pcl::PointCloud<pcl::PointNormal>);
-		pcl::fromROSMsg(*scan3dMsg, *pclScan);
-
-		scan = rtabmap::util3d::laserScanFromPointCloud(*pclScan);
-	}
-	else
-	{
-		pcl::PointCloud<pcl::PointXYZ>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZ>);
-		pcl::fromROSMsg(*scan3dMsg, *pclScan);
-
-		if(scanCloudNormalK > 0)
+		if(containColors)
 		{
-			//compute normals
-			pcl::PointCloud<pcl::Normal>::Ptr normals = rtabmap::util3d::computeNormals(pclScan, scanCloudNormalK);
-			pcl::PointCloud<pcl::PointNormal>::Ptr pclScanNormal(new pcl::PointCloud<pcl::PointNormal>);
-			pcl::concatenateFields(*pclScan, *normals, *pclScanNormal);
-			scan = rtabmap::util3d::laserScanFromPointCloud(*pclScanNormal);
+			pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
+			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+			if(!pclScan->is_dense)
+			{
+				pclScan = rtabmap::util3d::removeNaNNormalsFromPointCloud(pclScan);
+			}
+			scan = rtabmap::util3d::laserScanFromPointCloud(*pclScan);
 		}
 		else
 		{
+			pcl::PointCloud<pcl::PointNormal>::Ptr pclScan(new pcl::PointCloud<pcl::PointNormal>);
+			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+			if(!pclScan->is_dense)
+			{
+				pclScan = rtabmap::util3d::removeNaNNormalsFromPointCloud(pclScan);
+			}
+			scan = rtabmap::util3d::laserScanFromPointCloud(*pclScan);
+		}
+	}
+	else
+	{
+		if(containColors)
+		{
+			pcl::PointCloud<pcl::PointXYZRGB>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZRGB>);
+			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+			if(!pclScan->is_dense)
+			{
+				pclScan = rtabmap::util3d::removeNaNFromPointCloud(pclScan);
+			}
+
+			scan = rtabmap::util3d::laserScanFromPointCloud(*pclScan);
+		}
+		else
+		{
+			pcl::PointCloud<pcl::PointXYZ>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZ>);
+			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+			if(!pclScan->is_dense)
+			{
+				pclScan = rtabmap::util3d::removeNaNFromPointCloud(pclScan);
+			}
+
 			scan = rtabmap::util3d::laserScanFromPointCloud(*pclScan);
 		}
 	}
