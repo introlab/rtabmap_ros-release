@@ -1,0 +1,13 @@
+Source: ros-lunar-rtabmap-ros
+Section: misc
+Priority: extra
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), libpcl-dev, ros-lunar-catkin, ros-lunar-class-loader, ros-lunar-costmap-2d, ros-lunar-cv-bridge, ros-lunar-dynamic-reconfigure, ros-lunar-eigen-conversions, ros-lunar-genmsg, ros-lunar-geometry-msgs, ros-lunar-image-geometry, ros-lunar-image-transport, ros-lunar-laser-geometry, ros-lunar-message-filters, ros-lunar-move-base-msgs, ros-lunar-nav-msgs, ros-lunar-nodelet, ros-lunar-octomap-ros, ros-lunar-pcl-conversions, ros-lunar-pcl-ros, ros-lunar-roscpp, ros-lunar-rospy, ros-lunar-rtabmap, ros-lunar-rviz, ros-lunar-sensor-msgs, ros-lunar-std-msgs, ros-lunar-std-srvs, ros-lunar-stereo-msgs, ros-lunar-tf, ros-lunar-tf-conversions, ros-lunar-tf2-ros, ros-lunar-visualization-msgs
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-lunar-rtabmap-ros
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-lunar-class-loader, ros-lunar-compressed-depth-image-transport, ros-lunar-compressed-image-transport, ros-lunar-costmap-2d, ros-lunar-cv-bridge, ros-lunar-dynamic-reconfigure, ros-lunar-eigen-conversions, ros-lunar-geometry-msgs, ros-lunar-image-geometry, ros-lunar-image-transport, ros-lunar-laser-geometry, ros-lunar-message-filters, ros-lunar-move-base-msgs, ros-lunar-nav-msgs, ros-lunar-nodelet, ros-lunar-octomap-ros, ros-lunar-pcl-conversions, ros-lunar-pcl-ros, ros-lunar-roscpp, ros-lunar-rospy, ros-lunar-rtabmap, ros-lunar-rviz, ros-lunar-sensor-msgs, ros-lunar-std-msgs, ros-lunar-std-srvs, ros-lunar-stereo-msgs, ros-lunar-tf, ros-lunar-tf-conversions, ros-lunar-tf2-ros, ros-lunar-visualization-msgs
+Description: RTAB-Map's ros-pkg.
+ RTAB-Map is a RGB-D SLAM approach with real-time constraints.
