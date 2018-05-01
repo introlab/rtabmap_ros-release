@@ -53,9 +53,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cv_bridge/cv_bridge.h>
 #include <opencv2/highgui/highgui.hpp>
 
+#include "rtabmap/core/util2d.h"
 #include "rtabmap/core/util3d.h"
 #include "rtabmap/core/util3d_filtering.h"
-#include "rtabmap/core/Features2d.h"
+#include "rtabmap/core/util3d_surface.h"
 #include "rtabmap/utilite/UConversion.h"
 #include "rtabmap/utilite/UStl.h"
 
@@ -72,6 +73,9 @@ public:
 		decimation_(1),
 		noiseFilterRadius_(0.0),
 		noiseFilterMinNeighbors_(5),
+		normalK_(0),
+		normalRadius_(0.0),
+		filterNaNs_(false),
 		approxSyncDepth_(0),
 		approxSyncDisparity_(0),
 		exactSyncDepth_(0),
@@ -107,6 +111,9 @@ private:
 		pnh.param("decimation", decimation_, decimation_);
 		pnh.param("noise_filter_radius", noiseFilterRadius_, noiseFilterRadius_);
 		pnh.param("noise_filter_min_neighbors", noiseFilterMinNeighbors_, noiseFilterMinNeighbors_);
+		pnh.param("normal_k", normalK_, normalK_);
+		pnh.param("normal_radius", normalRadius_, normalRadius_);
+		pnh.param("filter_nans", filterNaNs_, filterNaNs_);
 		pnh.param("roi_ratios", roiStr, roiStr);
 
 		// Deprecated
@@ -208,7 +215,7 @@ private:
 			ros::WallTime time = ros::WallTime::now();
 
 			cv_bridge::CvImageConstPtr imageDepthPtr = cv_bridge::toCvShare(depth);
-			cv::Rect roi = rtabmap::Feature2D::computeRoi(imageDepthPtr->image, roiRatios_);
+			cv::Rect roi = rtabmap::util2d::computeRoi(imageDepthPtr->image, roiRatios_);
 
 			image_geometry::PinholeCameraModel model;
 			model.fromCameraInfo(*cameraInfo);
@@ -259,7 +266,7 @@ private:
 		{
 			ros::WallTime time = ros::WallTime::now();
 
-			cv::Rect roi = rtabmap::Feature2D::computeRoi(disparity, roiRatios_);
+			cv::Rect roi = rtabmap::util2d::computeRoi(disparity, roiRatios_);
 
 			pcl::PointCloud<pcl::PointXYZ>::Ptr pclCloud;
 			rtabmap::CameraModel leftModel = rtabmap_ros::cameraModelFromROS(*cameraInfo);
@@ -303,7 +310,26 @@ private:
 		}
 
 		sensor_msgs::PointCloud2 rosCloud;
-		pcl::toROSMsg(*pclCloud, rosCloud);
+		if(pclCloud->size() && (normalK_ > 0 || normalRadius_ > 0.0f))
+		{
+			//compute normals
+			pcl::PointCloud<pcl::Normal>::Ptr normals = rtabmap::util3d::computeNormals(pclCloud, normalK_, normalRadius_);
+			pcl::PointCloud<pcl::PointNormal>::Ptr pclCloudNormal(new pcl::PointCloud<pcl::PointNormal>);
+			pcl::concatenateFields(*pclCloud, *normals, *pclCloudNormal);
+			if(filterNaNs_)
+			{
+				pclCloudNormal = rtabmap::util3d::removeNaNNormalsFromPointCloud(pclCloudNormal);
+			}
+			pcl::toROSMsg(*pclCloudNormal, rosCloud);
+		}
+		else
+		{
+			if(filterNaNs_ && !pclCloud->is_dense)
+			{
+				pclCloud = rtabmap::util3d::removeNaNFromPointCloud(pclCloud);
+			}
+			pcl::toROSMsg(*pclCloud, rosCloud);
+		}
 		rosCloud.header.stamp = header.stamp;
 		rosCloud.header.frame_id = header.frame_id;
 
@@ -319,6 +345,9 @@ private:
 	int decimation_;
 	double noiseFilterRadius_;
 	int noiseFilterMinNeighbors_;
+	int normalK_;
+	double normalRadius_;
+	bool filterNaNs_;
 	std::vector<float> roiRatios_;
 
 	ros::Publisher cloudPub_;

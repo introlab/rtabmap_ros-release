@@ -18,9 +18,12 @@ find_package(rviz)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(RTABMap 0.13.2 REQUIRED)
+find_package(RTABMap 0.17.0 REQUIRED)
 
 find_package(OpenCV REQUIRED)
+
+find_package(PCL 1.7 REQUIRED)
+add_definitions(${PCL_DEFINITIONS}) # To include -march=native if set
 
 #Qt stuff
 # If librtabmap_gui.so is found, rtabmapviz will be built
@@ -42,13 +45,13 @@ IF(RTABMAP_GUI OR rviz_FOUND)
       ENDIF()
    ENDIF()   
 ENDIF(RTABMAP_GUI OR rviz_FOUND)
-
-## We also use Ogre
-include($ENV{ROS_ROOT}/core/rosbuild/FindPkgConfig.cmake)
-pkg_check_modules(OGRE OGRE)
-include_directories( ${OGRE_INCLUDE_DIRS} )
-link_directories( ${OGRE_LIBRARY_DIRS} )
-
+IF(rviz_FOUND)
+   ## We also use Ogre for rviz plugins
+   include($ENV{ROS_ROOT}/core/rosbuild/FindPkgConfig.cmake)
+   pkg_check_modules(OGRE OGRE)
+   include_directories( ${OGRE_INCLUDE_DIRS} )
+   link_directories( ${OGRE_LIBRARY_DIRS} )
+ENDIF(rviz_FOUND)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -74,6 +77,7 @@ add_message_files(
    Goal.msg
    RGBDImage.msg
    UserData.msg
+   GPS.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -166,7 +170,6 @@ SET(rtabmap_ros_lib_src
    src/nodelets/obstacles_detection_old.cpp
    src/nodelets/point_cloud_aggregator.cpp
    src/nodelets/undistort_depth.cpp
-   src/nodelets/rgbd_sync.cpp
    src/OdometryROS.cpp
    src/MsgConversion.cpp
    src/MapsManager.cpp
@@ -178,7 +181,13 @@ SET(rtabmap_ros_lib_src
    src/impl/CommonDataSubscriberRGBD2.cpp
    src/impl/CommonDataSubscriberRGBD3.cpp
    src/impl/CommonDataSubscriberRGBD4.cpp
-)   
+)
+
+IF(${cv_bridge_VERSION_MAJOR} GREATER 1 OR ${cv_bridge_VERSION_MINOR} GREATER 10)
+   SET(rtabmap_ros_lib_src ${rtabmap_ros_lib_src} src/nodelets/rgbd_sync.cpp)
+ELSE()
+   ADD_DEFINITIONS("-DCV_BRIDGE_HYDRO")
+ENDIF()   
 
 # If costmap_2d is found, add the plugin
 IF(costmap_2d_FOUND)
@@ -353,6 +362,8 @@ install(TARGETS
    map_assembler
    map_optimizer
    data_player
+   odom_msg_to_tf
+   pointcloud_to_depthimage
    camera
    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
@@ -368,6 +379,8 @@ install(TARGETS
    map_assembler
    map_optimizer
    data_player
+   odom_msg_to_tf
+   pointcloud_to_depthimage
    camera
    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
