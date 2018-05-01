@@ -97,11 +97,12 @@ private:
 	std::string groundTruthFrameId_;
 	std::string groundTruthBaseFrameId_;
 	std::string guessFrameId_;
+	double guessMinTranslation_;
+	double guessMinRotation_;
 	bool publishTf_;
 	bool waitForTransform_;
 	double waitForTransformDuration_;
 	bool publishNullWhenLost_;
-	bool guessFromTf_;
 	rtabmap::ParametersMap parameters_;
 
 	ros::Publisher odomPub_;
@@ -126,6 +127,8 @@ private:
 	bool stereoParams_;
 	bool visParams_;
 	bool icpParams_;
+	rtabmap::Transform guess_;
+	double guessStamp_;
 };
 
 }

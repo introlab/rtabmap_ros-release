@@ -44,6 +44,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <rtabmap/core/Parameters.h>
 #include <rtabmap/core/Rtabmap.h>
+#include <rtabmap/core/OdometryInfo.h>
 
 #include "rtabmap_ros/GetMap.h"
 #include "rtabmap_ros/ListLabels.h"
@@ -106,10 +107,11 @@ private:
 			const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg);
 	virtual void commonStereoCallback(
 				const nav_msgs::OdometryConstPtr & odomMsg,
-				const sensor_msgs::ImageConstPtr& leftImageMsg,
-				const sensor_msgs::ImageConstPtr& rightImageMsg,
-				const sensor_msgs::CameraInfoConstPtr& leftCamInfoMsg,
-				const sensor_msgs::CameraInfoConstPtr& rightCamInfoMsg,
+				const rtabmap_ros::UserDataConstPtr & userDataMsg,
+				const cv_bridge::CvImageConstPtr& leftImageMsg,
+				const cv_bridge::CvImageConstPtr& rightImageMsg,
+				const sensor_msgs::CameraInfo& leftCamInfoMsg,
+				const sensor_msgs::CameraInfo& rightCamInfoMsg,
 				const sensor_msgs::LaserScanConstPtr& scanMsg,
 				const sensor_msgs::PointCloud2ConstPtr& scan3dMsg,
 				const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg);
@@ -118,6 +120,8 @@ private:
 
 	void userDataAsyncCallback(const rtabmap_ros::UserDataConstPtr & dataMsg);
 	void globalPoseAsyncCallback(const geometry_msgs::PoseWithCovarianceStampedConstPtr & globalPoseMsg);
+
+	void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStampedConstPtr & msg);
 
 	void goalCommonCallback(int id, const std::string & label, const rtabmap::Transform & pose, const ros::Time & stamp, double * planningTime = 0);
 	void goalCallback(const geometry_msgs::PoseStampedConstPtr & msg);
@@ -129,7 +133,8 @@ private:
 			const rtabmap::SensorData & data,
 			const rtabmap::Transform & odom = rtabmap::Transform(),
 			const std::string & odomFrameId = "",
-			const cv::Mat & odomCovariance = cv::Mat::eye(6,6,CV_64FC1));
+			const cv::Mat & odomCovariance = cv::Mat::eye(6,6,CV_64FC1),
+			const rtabmap::OdometryInfo & odomInfo = rtabmap::OdometryInfo());
 
 	bool updateRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
 	bool resetRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
@@ -181,6 +186,7 @@ private:
 	rtabmap::Transform lastPublishedMetricGoal_;
 	bool latestNodeWasReached_;
 	rtabmap::ParametersMap parameters_;
+	std::map<std::string, float> rtabmapROSStats_;
 
 	std::string frameId_;
 	std::string odomFrameId_;
@@ -189,16 +195,16 @@ private:
 	std::string groundTruthBaseFrameId_;
 	std::string configPath_;
 	std::string databasePath_;
-	float odomDefaultAngVariance_;
-	float odomDefaultLinVariance_;
+	double odomDefaultAngVariance_;
+	double odomDefaultLinVariance_;
 	bool waitForTransform_;
 	double waitForTransformDuration_;
 	bool useActionForGoal_;
+	bool useSavedMap_;
 	bool genScan_;
 	double genScanMaxDepth_;
 	double genScanMinDepth_;
 	int scanCloudMaxPoints_;
-	int scanCloudNormalK_;
 
 	rtabmap::Transform mapToOdom_;
 	boost::mutex mapToOdomMutex_;
@@ -209,6 +215,8 @@ private:
 	ros::Publisher mapDataPub_;
 	ros::Publisher mapGraphPub_;
 	ros::Publisher labelsPub_;
+	ros::Publisher mapPathPub_;
+	ros::Subscriber initialPoseSub_;
 
 	//Planning stuff
 	ros::Subscriber goalSub_;
@@ -272,6 +280,7 @@ private:
 	bool odomSensorSync_;
 	float rate_;
 	bool createIntermediateNodes_;
+	int maxMappingNodes_;
 	ros::Time time_;
 	ros::Time previousStamp_;
 };
