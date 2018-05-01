@@ -11,6 +11,9 @@ geometry_msgs/Pose pose
 # Ground truth (optional)
 geometry_msgs/Pose groundTruthPose
 
+# GPS (optional)
+GPS gps
+
 # compressed image in /camera_link frame
 # use rtabmap::util3d::uncompressImage() from "rtabmap/core/util3d.h"
 uint8[] image
@@ -35,6 +38,7 @@ geometry_msgs/Transform[] localTransform
 uint8[] laserScan
 int32 laserScanMaxPts
 float32 laserScanMaxRange
+int32 laserScanFormat
 geometry_msgs/Transform laserScanLocalTransform
 
 # compressed user data
@@ -45,6 +49,7 @@ uint8[] userData
 # use rtabmap::util3d::uncompressData() from "rtabmap/core/util3d.h"
 uint8[] grid_ground
 uint8[] grid_obstacles
+uint8[] grid_empty_cells
 float32 grid_cell_size
 Point3f grid_view_point
 
