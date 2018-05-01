@@ -542,7 +542,6 @@ void GuiWrapper::commonDepthCallback(
 					frameId_,
 					odomSensorSync_?odomHeader.frame_id:"",
 					odomHeader.stamp,
-					0,
 					scan,
 					scanLocalTransform,
 					tfListener_,
@@ -570,11 +569,10 @@ void GuiWrapper::commonDepthCallback(
 		return;
 	}
 
-	info.covariance = covariance;
+	info.reg.covariance = covariance;
 	rtabmap::OdometryEvent odomEvent(
 		rtabmap::SensorData(
-				scan,
-				LaserScanInfo(
+				LaserScan::backwardCompatibility(scan,
 						scan2dMsg.get()?(int)scan2dMsg->ranges.size():0,
 						scan2dMsg.get()?(int)scan2dMsg->range_max:0,
 						scanLocalTransform),
@@ -591,10 +589,11 @@ void GuiWrapper::commonDepthCallback(
 
 void GuiWrapper::commonStereoCallback(
 		const nav_msgs::OdometryConstPtr & odomMsg,
-		const sensor_msgs::ImageConstPtr& leftImageMsg,
-		const sensor_msgs::ImageConstPtr& rightImageMsg,
-		const sensor_msgs::CameraInfoConstPtr& leftCamInfoMsg,
-		const sensor_msgs::CameraInfoConstPtr& rightCamInfoMsg,
+		const rtabmap_ros::UserDataConstPtr & userDataMsg,
+		const cv_bridge::CvImageConstPtr& leftImageMsg,
+		const cv_bridge::CvImageConstPtr& rightImageMsg,
+		const sensor_msgs::CameraInfo& leftCamInfoMsg,
+		const sensor_msgs::CameraInfo& rightCamInfoMsg,
 		const sensor_msgs::LaserScanConstPtr& scan2dMsg,
 		const sensor_msgs::PointCloud2ConstPtr& scan3dMsg,
 		const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg)
@@ -616,7 +615,7 @@ void GuiWrapper::commonStereoCallback(
 		}
 		else
 		{
-			odomHeader = leftCamInfoMsg->header;
+			odomHeader = leftCamInfoMsg.header;
 		}
 		odomHeader.frame_id = odomFrameId_;
 	}
@@ -698,7 +697,6 @@ void GuiWrapper::commonStereoCallback(
 					frameId_,
 					odomSensorSync_?odomHeader.frame_id:"",
 					odomHeader.stamp,
-					0,
 					scan,
 					scanLocalTransform,
 					tfListener_,
@@ -726,11 +724,10 @@ void GuiWrapper::commonStereoCallback(
 		return;
 	}
 
-	info.covariance = covariance;
+	info.reg.covariance = covariance;
 	rtabmap::OdometryEvent odomEvent(
 		rtabmap::SensorData(
-				scan,
-				LaserScanInfo(
+				LaserScan::backwardCompatibility(scan,
 						scan2dMsg.get()?(int)scan2dMsg->ranges.size():0,
 						scan2dMsg.get()?(int)scan2dMsg->range_max:0,
 						scanLocalTransform),
@@ -753,6 +750,7 @@ void GuiWrapper::defaultCallback(const nav_msgs::OdometryConstPtr & odomMsg)
 			rtabmap_ros::UserDataConstPtr(),
 			cv_bridge::CvImageConstPtr(),
 			cv_bridge::CvImageConstPtr(),
+			sensor_msgs::CameraInfo(),
 			sensor_msgs::CameraInfo(),
 			sensor_msgs::LaserScanConstPtr(),
 			sensor_msgs::PointCloud2ConstPtr(),

@@ -52,6 +52,7 @@ public:
 	bool hasSubscribers() const;
 	void backwardCompatibilityParameters(ros::NodeHandle & pnh, rtabmap::ParametersMap & parameters) const;
 	void setParameters(const rtabmap::ParametersMap & parameters);
+	void set2DMap(const cv::Mat & map, float xMin, float yMin, float cellSize, const std::map<int, rtabmap::Transform> & poses);
 
 	std::map<int, rtabmap::Transform> getFilteredPoses(
 			const std::map<int, rtabmap::Transform> & poses);
@@ -68,8 +69,7 @@ public:
 			const ros::Time & stamp,
 			const std::string & mapFrameId);
 
-	cv::Mat generateGridMap(
-			const std::map<int, rtabmap::Transform> & filteredPoses,
+	cv::Mat getGridMap(
 			float & xMin,
 			float & yMin,
 			float & gridCellSize);
@@ -97,6 +97,8 @@ private:
 	ros::Publisher octoMapPubBin_;
 	ros::Publisher octoMapPubFull_;
 	ros::Publisher octoMapCloud_;
+	ros::Publisher octoMapGroundCloud_;
+	ros::Publisher octoMapObstacleCloud_;
 	ros::Publisher octoMapEmptySpace_;
 	ros::Publisher octoMapProj_;
 
@@ -111,14 +113,13 @@ private:
 
 	std::map<int, rtabmap::Transform> gridPoses_;
 	cv::Mat gridMap_;
-	std::map<int, std::pair<cv::Mat, cv::Mat> > gridMaps_; // <ground, obstacles>
+	std::map<int, std::pair< std::pair<cv::Mat, cv::Mat>, cv::Mat> > gridMaps_; // < <ground, obstacles>, empty cells >
 	std::map<int, cv::Point3f> gridMapsViewpoints_;
 
 	rtabmap::OccupancyGrid * occupancyGrid_;
 
 	rtabmap::OctoMap * octomap_;
 	int octomapTreeDepth_;
-	double octomapOccupancyThr_;
 
 	rtabmap::ParametersMap parameters_;
 };
