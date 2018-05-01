@@ -8,7 +8,7 @@ find_package(catkin REQUIRED COMPONENTS
              cv_bridge roscpp rospy sensor_msgs std_msgs std_srvs nav_msgs geometry_msgs visualization_msgs
              image_transport tf tf_conversions tf2_ros eigen_conversions laser_geometry pcl_conversions 
              pcl_ros nodelet dynamic_reconfigure message_filters class_loader
-             genmsg stereo_msgs move_base_msgs
+             genmsg stereo_msgs move_base_msgs image_geometry
 )
 
 # Optional components
@@ -18,9 +18,12 @@ find_package(rviz)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(RTABMap 0.11.8 REQUIRED)
+find_package(RTABMap 0.17.0 REQUIRED)
 
 find_package(OpenCV REQUIRED)
+
+find_package(PCL 1.7 REQUIRED)
+add_definitions(${PCL_DEFINITIONS}) # To include -march=native if set
 
 #Qt stuff
 # If librtabmap_gui.so is found, rtabmapviz will be built
@@ -42,13 +45,13 @@ IF(RTABMAP_GUI OR rviz_FOUND)
       ENDIF()
    ENDIF()   
 ENDIF(RTABMAP_GUI OR rviz_FOUND)
-
-## We also use Ogre
-include($ENV{ROS_ROOT}/core/rosbuild/FindPkgConfig.cmake)
-pkg_check_modules(OGRE OGRE)
-include_directories( ${OGRE_INCLUDE_DIRS} )
-link_directories( ${OGRE_LIBRARY_DIRS} )
-
+IF(rviz_FOUND)
+   ## We also use Ogre for rviz plugins
+   include($ENV{ROS_ROOT}/core/rosbuild/FindPkgConfig.cmake)
+   pkg_check_modules(OGRE OGRE)
+   include_directories( ${OGRE_INCLUDE_DIRS} )
+   link_directories( ${OGRE_LIBRARY_DIRS} )
+ENDIF(rviz_FOUND)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -72,6 +75,9 @@ add_message_files(
    Point2f.msg
    Point3f.msg
    Goal.msg
+   RGBDImage.msg
+   UserData.msg
+   GPS.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -123,7 +129,7 @@ catkin_package(
   CATKIN_DEPENDS cv_bridge roscpp rospy sensor_msgs std_msgs std_srvs nav_msgs geometry_msgs visualization_msgs
                  image_transport tf tf_conversions tf2_ros eigen_conversions laser_geometry pcl_conversions 
                  pcl_ros nodelet dynamic_reconfigure message_filters class_loader
-                 stereo_msgs move_base_msgs ${optional_dependencies}
+                 stereo_msgs move_base_msgs image_geometry ${optional_dependencies}
   DEPENDS RTABMap OpenCV
 )
 
@@ -151,18 +157,37 @@ SET(Libraries
 SET(rtabmap_ros_lib_src
    src/nodelets/rgbd_odometry.cpp
    src/nodelets/stereo_odometry.cpp
+   src/nodelets/rgbdicp_odometry.cpp
+   src/nodelets/icp_odometry.cpp
    src/nodelets/data_throttle.cpp
    src/nodelets/stereo_throttle.cpp
    src/nodelets/data_odom_sync.cpp
    src/nodelets/point_cloud_xyzrgb.cpp 
    src/nodelets/point_cloud_xyz.cpp
    src/nodelets/disparity_to_depth.cpp 
+   src/nodelets/pointcloud_to_depthimage.cpp 
    src/nodelets/obstacles_detection.cpp
+   src/nodelets/obstacles_detection_old.cpp
    src/nodelets/point_cloud_aggregator.cpp
-   src/nodelets/OdometryROS.cpp
+   src/nodelets/undistort_depth.cpp
+   src/OdometryROS.cpp
    src/MsgConversion.cpp
    src/MapsManager.cpp
-)   
+   src/CommonDataSubscriber.cpp
+   src/CoreWrapper.cpp
+   src/impl/CommonDataSubscriberDepth.cpp
+   src/impl/CommonDataSubscriberStereo.cpp
+   src/impl/CommonDataSubscriberRGBD.cpp
+   src/impl/CommonDataSubscriberRGBD2.cpp
+   src/impl/CommonDataSubscriberRGBD3.cpp
+   src/impl/CommonDataSubscriberRGBD4.cpp
+)
+
+IF(${cv_bridge_VERSION_MAJOR} GREATER 1 OR ${cv_bridge_VERSION_MINOR} GREATER 10)
+   SET(rtabmap_ros_lib_src ${rtabmap_ros_lib_src} src/nodelets/rgbd_sync.cpp)
+ELSE()
+   ADD_DEFINITIONS("-DCV_BRIDGE_HYDRO")
+ENDIF()   
 
 # If costmap_2d is found, add the plugin
 IF(costmap_2d_FOUND)
@@ -259,8 +284,8 @@ IF(Qt5_FOUND)
 ENDIF(Qt5_FOUND)
 add_dependencies(rtabmap_ros ${${PROJECT_NAME}_EXPORTED_TARGETS})
 
-add_executable(rtabmap src/CoreNode.cpp src/CoreWrapper.cpp)
-target_link_libraries(rtabmap rtabmap_ros ${Libraries})
+add_executable(rtabmap src/CoreNode.cpp)
+target_link_libraries(rtabmap ${Libraries})
 
 add_executable(rgbd_odometry src/RGBDOdometryNode.cpp)
 target_link_libraries(rgbd_odometry ${Libraries})
@@ -268,11 +293,22 @@ target_link_libraries(rgbd_odometry ${Libraries})
 add_executable(stereo_odometry src/StereoOdometryNode.cpp)
 target_link_libraries(stereo_odometry ${Libraries})
 
+add_executable(rgbdicp_odometry src/RGBDICPOdometryNode.cpp)
+target_link_libraries(rgbdicp_odometry ${Libraries})
+
+add_executable(icp_odometry src/ICPOdometryNode.cpp)
+target_link_libraries(icp_odometry ${Libraries})
+
 add_executable(map_optimizer src/MapOptimizerNode.cpp)
 target_link_libraries(map_optimizer rtabmap_ros ${Libraries})
 
 add_executable(map_assembler src/MapAssemblerNode.cpp)
 target_link_libraries(map_assembler rtabmap_ros ${Libraries})
+
+add_executable(wifi_signal_pub src/WifiSignalPubNode.cpp)
+target_link_libraries(wifi_signal_pub rtabmap_ros ${Libraries})
+add_executable(wifi_signal_sub src/WifiSignalSubNode.cpp)
+target_link_libraries(wifi_signal_sub rtabmap_ros ${Libraries})
 
 add_executable(camera src/CameraNode.cpp)
 add_dependencies(camera ${${PROJECT_NAME}_EXPORTED_TARGETS})
@@ -297,6 +333,9 @@ target_link_libraries(data_player rtabmap_ros ${QT_LIBRARIES} ${Libraries})
 add_executable(odom_msg_to_tf src/OdomMsgToTFNode.cpp)
 target_link_libraries(odom_msg_to_tf rtabmap_ros ${Libraries})
 
+add_executable(pointcloud_to_depthimage src/PointCloudToDepthImageNode.cpp)
+target_link_libraries(pointcloud_to_depthimage rtabmap_ros ${Libraries})
+
 #############
 ## Install ##
 #############
@@ -318,10 +357,13 @@ install(TARGETS
    rtabmap 
    rtabmapviz 
    rgbd_odometry 
+   rgbdicp_odometry 
    stereo_odometry
    map_assembler
    map_optimizer
    data_player
+   odom_msg_to_tf
+   pointcloud_to_depthimage
    camera
    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
@@ -332,10 +374,13 @@ install(TARGETS
    rtabmap_ros 
    rtabmap 
    rgbd_odometry 
+   rgbdicp_odometry 
    stereo_odometry
    map_assembler
    map_optimizer
    data_player
+   odom_msg_to_tf
+   pointcloud_to_depthimage
    camera
    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
@@ -392,3 +437,4 @@ ENDIF(costmap_2d_FOUND)
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
+
