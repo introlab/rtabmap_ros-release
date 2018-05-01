@@ -58,9 +58,11 @@ class PointCloudToDepthImage : public nodelet::Nodelet
 {
 public:
 	PointCloudToDepthImage() :
+		listener_(0),
 		waitForTransform_(0.1),
 		fillHolesSize_ (0),
 		fillHolesError_(0.1),
+		fillIterations_(1),
 		decimation_(1),
 		approxSync_(0),
 		exactSync_(0)
@@ -94,6 +96,7 @@ private:
 		pnh.param("wait_for_transform", waitForTransform_, waitForTransform_);
 		pnh.param("fill_holes_size", fillHolesSize_, fillHolesSize_);
 		pnh.param("fill_holes_error", fillHolesError_, fillHolesError_);
+		pnh.param("fill_iterations", fillIterations_, fillIterations_);
 		pnh.param("decimation", decimation_, decimation_);
 		pnh.param("approx", approx, approx);
 
@@ -112,6 +115,7 @@ private:
 		ROS_INFO("  wait_for_transform=%fs", waitForTransform_);
 		ROS_INFO("  fill_holes_size=%d pixels (0=disabled)", fillHolesSize_);
 		ROS_INFO("  fill_holes_error=%f", fillHolesError_);
+		ROS_INFO("  fill_iterations=%d", fillIterations_);
 		ROS_INFO("  decimation=%d", decimation_);
 
 		image_transport::ImageTransport it(nh);
@@ -144,7 +148,7 @@ private:
 			if(!fixedFrameId_.empty())
 			{
 				// approx sync
-				rtabmap::Transform cloudDisplacement = rtabmap_ros::getTransform(
+				cloudDisplacement = rtabmap_ros::getTransform(
 						pointCloud2Msg->header.frame_id,
 						fixedFrameId_,
 						pointCloud2Msg->header.stamp,
@@ -170,7 +174,7 @@ private:
 				return;
 			}
 
-			rtabmap::Transform localTransform = cloudToCamera*cloudDisplacement;
+			rtabmap::Transform localTransform = cloudDisplacement.inverse()*cloudToCamera;
 
 			rtabmap::CameraModel model = rtabmap_ros::cameraModelFromROS(*cameraInfoMsg, localTransform);
 
@@ -195,9 +199,12 @@ private:
 			cv_bridge::CvImage depthImage;
 			depthImage.image = rtabmap::util3d::projectCloudToCamera(model.imageSize(), model.K(), cloud, model.localTransform());
 
-			if(fillHolesSize_ > 0)
+			if(fillHolesSize_ > 0 && fillIterations_ > 0)
 			{
-				depthImage.image = rtabmap::util2d::fillDepthHoles(depthImage.image, fillHolesSize_, fillHolesError_);
+				for(int i=0; i<fillIterations_;++i)
+				{
+					depthImage.image = rtabmap::util2d::fillDepthHoles(depthImage.image, fillHolesSize_, fillHolesError_);
+				}
 			}
 
 			depthImage.header = cameraInfoMsg->header;
@@ -227,6 +234,7 @@ private:
 	double waitForTransform_;
 	int fillHolesSize_;
 	double fillHolesError_;
+	int fillIterations_;
 	int decimation_;
 
 	typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::PointCloud2, sensor_msgs::CameraInfo> MyApproxSyncPolicy;
