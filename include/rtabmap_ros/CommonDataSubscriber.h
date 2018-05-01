@@ -66,6 +66,7 @@ public:
 	bool isSubscribedToScan3d() const {return subscribedToScan3d_;}
 	bool isSubscribedToOdomInfo() const {return subscribedToOdomInfo_;}
 	bool isDataSubscribed() const {return isSubscribedToDepth() || isSubscribedToStereo() || isSubscribedToRGBD();}
+	int rgbdCameras() const {return isSubscribedToRGBD()?(int)rgbdSubs_.size():0;}
 	int getQueueSize() const {return queueSize_;}
 	bool isApproxSync() const {return approxSync_;}
 
@@ -82,10 +83,11 @@ protected:
 				const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg) = 0;
 	virtual void commonStereoCallback(
 				const nav_msgs::OdometryConstPtr & odomMsg,
-				const sensor_msgs::ImageConstPtr& leftImageMsg,
-				const sensor_msgs::ImageConstPtr& rightImageMsg,
-				const sensor_msgs::CameraInfoConstPtr& leftCamInfoMsg,
-				const sensor_msgs::CameraInfoConstPtr& rightCamInfoMsg,
+				const rtabmap_ros::UserDataConstPtr & userDataMsg,
+				const cv_bridge::CvImageConstPtr& leftImageMsg,
+				const cv_bridge::CvImageConstPtr& rightImageMsg,
+				const sensor_msgs::CameraInfo& leftCamInfoMsg,
+				const sensor_msgs::CameraInfo& rightCamInfoMsg,
 				const sensor_msgs::LaserScanConstPtr& scanMsg,
 				const sensor_msgs::PointCloud2ConstPtr& scan3dMsg,
 				const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg) = 0;
@@ -95,7 +97,8 @@ protected:
 				const rtabmap_ros::UserDataConstPtr & userDataMsg,
 				const cv_bridge::CvImageConstPtr & imageMsg,
 				const cv_bridge::CvImageConstPtr & depthMsg,
-				const sensor_msgs::CameraInfo & cameraInfoMsg,
+				const sensor_msgs::CameraInfo & rgbCameraInfoMsg,
+				const sensor_msgs::CameraInfo & depthCameraInfoMsg,
 				const sensor_msgs::LaserScanConstPtr& scanMsg,
 				const sensor_msgs::PointCloud2ConstPtr& scan3dMsg,
 				const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg);
