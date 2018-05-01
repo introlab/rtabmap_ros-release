@@ -1,3 +1,26 @@
+## rtabmap_ros (lunar) - 0.17.0-0
+
+The packages in the `rtabmap_ros` repository were released into the `lunar` distro by running `/usr/bin/bloom-release rtabmap_ros --track lunar --rosdistro lunar` on `Tue, 01 May 2018 19:34:23 -0000`
+
+The `rtabmap_ros` package was released.
+
+Version of package(s) in repository `rtabmap_ros`:
+
+- upstream repository: https://github.com/introlab/rtabmap_ros.git
+- release repository: https://github.com/introlab/rtabmap_ros-release.git
+- rosdistro version: `0.13.2-0`
+- old version: `0.13.2-0`
+- new version: `0.17.0-0`
+
+Versions of tools used:
+
+- bloom version: `0.6.4`
+- catkin_pkg version: `0.4.1`
+- rosdep version: `0.12.2`
+- rosdistro version: `0.6.8`
+- vcstools version: `0.1.40`
+
+
 ## rtabmap_ros (lunar) - 0.13.2-0
 
 The packages in the `rtabmap_ros` repository were released into the `lunar` distro by running `/usr/bin/bloom-release rtabmap_ros --track lunar --rosdistro lunar --new-track` on `Thu, 03 Aug 2017 21:24:25 -0000`
