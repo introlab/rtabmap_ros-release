@@ -163,9 +163,11 @@ int main(int argc, char** argv)
 	tf2_ros::TransformBroadcaster tfBroadcaster;
 
 	UTimer timer;
-	rtabmap::CameraInfo info;
-	rtabmap::SensorData data = reader.takeImage(&info);
-	rtabmap::OdometryEvent odom(data, info.odomPose, info.odomCovariance);
+	rtabmap::CameraInfo cameraInfo;
+	rtabmap::SensorData data = reader.takeImage(&cameraInfo);
+	rtabmap::OdometryInfo odomInfo;
+	odomInfo.reg.covariance = cameraInfo.odomCovariance;
+	rtabmap::OdometryEvent odom(data, cameraInfo.odomPose, odomInfo);
 	double acquisitionTime = timer.ticks();
 	while(ros::ok() && odom.data().id())
 	{
@@ -260,7 +262,7 @@ int main(int argc, char** argv)
 		camInfoB.height = odom.data().depthOrRightRaw().rows;
 		camInfoB.width = odom.data().depthOrRightRaw().cols;
 
-		if(!odom.data().laserScanRaw().empty())
+		if(!odom.data().laserScanRaw().isEmpty())
 		{
 			if(scanPub.getTopic().empty()) scanPub = nh.advertise<sensor_msgs::LaserScan>("scan", 1);
 		}
@@ -410,7 +412,7 @@ int main(int argc, char** argv)
 			rightCamInfoPub.publish(camInfoB);
 		}
 
-		if(scanPub.getNumSubscribers() && !odom.data().laserScanRaw().empty())
+		if(scanPub.getNumSubscribers() && !odom.data().laserScanRaw().isEmpty())
 		{
 			//inspired from pointcloud_to_laserscan package
 			sensor_msgs::LaserScan msg;
@@ -428,16 +430,14 @@ int main(int argc, char** argv)
 			uint32_t rangesSize = std::ceil((msg.angle_max - msg.angle_min) / msg.angle_increment);
 			msg.ranges.assign(rangesSize, 0.0);
 
-			const cv::Mat & scan = odom.data().laserScanRaw();
-			UASSERT(scan.type() == CV_32FC2 || scan.type() == CV_32FC3);
-			UASSERT(scan.rows == 1);
+			const cv::Mat & scan = odom.data().laserScanRaw().data();
 			for (int i=0; i<scan.cols; ++i)
 			{
-				cv::Vec2f pos = scan.at<cv::Vec2f>(i);
-				double range = hypot(pos[0], pos[1]);
+				const float * ptr = scan.ptr<float>(0,i);
+				double range = hypot(ptr[0], ptr[1]);
 				if (range >= scanRangeMin && range <=scanRangeMax)
 				{
-					double angle = atan2(pos[1], pos[0]);
+					double angle = atan2(ptr[1], ptr[0]);
 					if (angle >= msg.angle_min && angle <= msg.angle_max)
 					{
 						int index = (angle - msg.angle_min) / msg.angle_increment;
@@ -490,9 +490,10 @@ int main(int argc, char** argv)
 		}
 
 		timer.restart();
-		info = rtabmap::CameraInfo();
-		data = reader.takeImage(&info);
-		odom = rtabmap::OdometryEvent(data, info.odomPose, info.odomCovariance);
+		cameraInfo = rtabmap::CameraInfo();
+		data = reader.takeImage(&cameraInfo);
+		odomInfo.reg.covariance = cameraInfo.odomCovariance;
+		odom = rtabmap::OdometryEvent(data, cameraInfo.odomPose, odomInfo);
 		acquisitionTime = timer.ticks();
 	}
 
