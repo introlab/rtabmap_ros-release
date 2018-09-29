@@ -40,6 +40,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <std_msgs/Empty.h>
 #include <std_msgs/Int32.h>
 #include <nav_msgs/GetMap.h>
+#include <nav_msgs/GetPlan.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 
 #include <rtabmap/core/Parameters.h>
@@ -56,7 +57,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "MapsManager.h"
 
-#ifdef WITH_OCTOMAP_ROS
+#ifdef WITH_OCTOMAP_MSGS
 #include <octomap_msgs/GetOctomap.h>
 #endif
 
@@ -84,7 +85,7 @@ private:
 
 	virtual void onInit();
 
-	bool odomUpdate(const nav_msgs::OdometryConstPtr & odomMsg);
+	bool odomUpdate(const nav_msgs::OdometryConstPtr & odomMsg, ros::Time stamp);
 	bool odomTFUpdate(const ros::Time & stamp); // TF odom
 
 	virtual void commonDepthCallback(
@@ -150,14 +151,16 @@ private:
 	bool setLogError(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
 	bool getMapDataCallback(rtabmap_ros::GetMap::Request& req, rtabmap_ros::GetMap::Response& res);
 	bool getMapCallback(nav_msgs::GetMap::Request  &req, nav_msgs::GetMap::Response &res);
+	bool getProbMapCallback(nav_msgs::GetMap::Request  &req, nav_msgs::GetMap::Response &res);
 	bool getProjMapCallback(nav_msgs::GetMap::Request  &req, nav_msgs::GetMap::Response &res);
 	bool getGridMapCallback(nav_msgs::GetMap::Request  &req, nav_msgs::GetMap::Response &res);
 	bool publishMapCallback(rtabmap_ros::PublishMap::Request&, rtabmap_ros::PublishMap::Response&);
+	bool getPlanCallback(nav_msgs::GetPlan::Request  &req, nav_msgs::GetPlan::Response &res);
 	bool setGoalCallback(rtabmap_ros::SetGoal::Request& req, rtabmap_ros::SetGoal::Response& res);
 	bool cancelGoalCallback(std_srvs::Empty::Request& req, std_srvs::Empty::Response& res);
 	bool setLabelCallback(rtabmap_ros::SetLabel::Request& req, rtabmap_ros::SetLabel::Response& res);
 	bool listLabelsCallback(rtabmap_ros::ListLabels::Request& req, rtabmap_ros::ListLabels::Response& res);
-#ifdef WITH_OCTOMAP_ROS
+#ifdef WITH_OCTOMAP_MSGS
 	bool octomapBinaryCallback(octomap_msgs::GetOctomap::Request  &req, octomap_msgs::GetOctomap::Response &res);
 	bool octomapFullCallback(octomap_msgs::GetOctomap::Request  &req, octomap_msgs::GetOctomap::Response &res);
 #endif
@@ -216,6 +219,7 @@ private:
 	ros::Publisher mapGraphPub_;
 	ros::Publisher labelsPub_;
 	ros::Publisher mapPathPub_;
+	ros::Publisher localizationPosePub_;
 	ros::Subscriber initialPoseSub_;
 
 	//Planning stuff
@@ -244,13 +248,15 @@ private:
 	ros::ServiceServer getMapDataSrv_;
 	ros::ServiceServer getProjMapSrv_;
 	ros::ServiceServer getMapSrv_;
+	ros::ServiceServer getProbMapSrv_;
 	ros::ServiceServer getGridMapSrv_;
 	ros::ServiceServer publishMapDataSrv_;
+	ros::ServiceServer getPlanSrv_;
 	ros::ServiceServer setGoalSrv_;
 	ros::ServiceServer cancelGoalSrv_;
 	ros::ServiceServer setLabelSrv_;
 	ros::ServiceServer listLabelsSrv_;
-#ifdef WITH_OCTOMAP_ROS
+#ifdef WITH_OCTOMAP_MSGS
 	ros::ServiceServer octomapBinarySrv_;
 	ros::ServiceServer octomapFullSrv_;
 #endif
@@ -272,6 +278,7 @@ private:
 
 	ros::Subscriber userDataAsyncSub_;
 	cv::Mat userData_;
+	UMutex userDataMutex_;
 
 	ros::Subscriber globalPoseAsyncSub_;
 	geometry_msgs::PoseWithCovarianceStamped globalPose_;
