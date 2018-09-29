@@ -52,7 +52,7 @@ public:
 	bool hasSubscribers() const;
 	void backwardCompatibilityParameters(ros::NodeHandle & pnh, rtabmap::ParametersMap & parameters) const;
 	void setParameters(const rtabmap::ParametersMap & parameters);
-	void set2DMap(const cv::Mat & map, float xMin, float yMin, float cellSize, const std::map<int, rtabmap::Transform> & poses);
+	void set2DMap(const cv::Mat & map, float xMin, float yMin, float cellSize, const std::map<int, rtabmap::Transform> & poses, const rtabmap::Memory * memory = 0);
 
 	std::map<int, rtabmap::Transform> getFilteredPoses(
 			const std::map<int, rtabmap::Transform> & poses);
@@ -70,6 +70,11 @@ public:
 			const std::string & mapFrameId);
 
 	cv::Mat getGridMap(
+			float & xMin,
+			float & yMin,
+			float & gridCellSize);
+
+	cv::Mat getGridProbMap(
 			float & xMin,
 			float & yMin,
 			float & gridCellSize);
@@ -93,6 +98,7 @@ private:
 	ros::Publisher cloudObstaclesPub_;
 	ros::Publisher projMapPub_;
 	ros::Publisher gridMapPub_;
+	ros::Publisher gridProbMapPub_;
 	ros::Publisher scanMapPub_;
 	ros::Publisher octoMapPubBin_;
 	ros::Publisher octoMapPubFull_;
