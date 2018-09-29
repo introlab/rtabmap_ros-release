@@ -46,7 +46,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <pcl_conversions/pcl_conversions.h>
 
-#ifdef WITH_OCTOMAP_ROS
+#ifdef WITH_OCTOMAP_MSGS
 #ifdef RTABMAP_OCTOMAP
 #include <octomap_msgs/conversions.h>
 #include <octomap/ColorOcTree.h>
@@ -104,7 +104,7 @@ void MapsManager::init(ros::NodeHandle & nh, ros::NodeHandle & pnh, const std::s
 	ROS_INFO("%s(maps): cloud_subtract_filtering   = %s", name.c_str(), cloudSubtractFiltering_?"true":"false");
 	ROS_INFO("%s(maps): cloud_subtract_filtering_min_neighbors = %d", name.c_str(), cloudSubtractFilteringMinNeighbors_);
 
-#ifdef WITH_OCTOMAP_ROS
+#ifdef WITH_OCTOMAP_MSGS
 #ifdef RTABMAP_OCTOMAP
 	octomap_ = new OctoMap(occupancyGrid_->getCellSize(), 0.5, occupancyGrid_->isFullUpdate(), occupancyGrid_->getUpdateError());
 	pnh.param("octomap_tree_depth", octomapTreeDepth_, octomapTreeDepth_);
@@ -139,6 +139,7 @@ void MapsManager::init(ros::NodeHandle & nh, ros::NodeHandle & pnh, const std::s
 		nht = &pnh;
 	}
 	gridMapPub_ = nht->advertise<nav_msgs::OccupancyGrid>("grid_map", 1, latch);
+	gridProbMapPub_ = nht->advertise<nav_msgs::OccupancyGrid>("grid_prob_map", 1, latch);
 	cloudMapPub_ = nht->advertise<sensor_msgs::PointCloud2>("cloud_map", 1, latch);
 	cloudObstaclesPub_ = nht->advertise<sensor_msgs::PointCloud2>("cloud_obstacles", 1, latch);
 	cloudGroundPub_ = nht->advertise<sensor_msgs::PointCloud2>("cloud_ground", 1, latch);
@@ -147,7 +148,7 @@ void MapsManager::init(ros::NodeHandle & nh, ros::NodeHandle & pnh, const std::s
 	projMapPub_ = nht->advertise<nav_msgs::OccupancyGrid>("proj_map", 1, latch);
 	scanMapPub_ = nht->advertise<sensor_msgs::PointCloud2>("scan_map", 1, latch);
 
-#ifdef WITH_OCTOMAP_ROS
+#ifdef WITH_OCTOMAP_MSGS
 #ifdef RTABMAP_OCTOMAP
 	octoMapPubBin_ = nht->advertise<octomap_msgs::Octomap>("octomap_binary", 1, latch);
 	octoMapPubFull_ = nht->advertise<octomap_msgs::Octomap>("octomap_full", 1, latch);
@@ -165,7 +166,7 @@ MapsManager::~MapsManager() {
 
 	delete occupancyGrid_;
 
-#ifdef WITH_OCTOMAP_ROS
+#ifdef WITH_OCTOMAP_MSGS
 #ifdef RTABMAP_OCTOMAP
 	if(octomap_)
 	{
@@ -264,10 +265,10 @@ void MapsManager::backwardCompatibilityParameters(ros::NodeHandle & pnh, Paramet
 	parameterMoved(pnh, "grid_eroded", Parameters::kGridGlobalEroded(), parameters);
 	parameterMoved(pnh, "grid_footprint_radius", Parameters::kGridGlobalFootprintRadius(), parameters);
 
-#ifdef WITH_OCTOMAP_ROS
+#ifdef WITH_OCTOMAP_MSGS
 #ifdef RTABMAP_OCTOMAP
 	parameterMoved(pnh, "octomap_ground_is_obstacle", Parameters::kGridGroundIsObstacle(), parameters);
-	parameterMoved(pnh, "octomap_occupancy_thr", Parameters::kGridGlobalOctoMapOccupancyThr(), parameters);
+	parameterMoved(pnh, "octomap_occupancy_thr", Parameters::kGridGlobalOccupancyThr(), parameters);
 #endif
 #endif
 }
@@ -277,7 +278,7 @@ void MapsManager::setParameters(const rtabmap::ParametersMap & parameters)
 	parameters_ = parameters;
 	occupancyGrid_->parseParameters(parameters_);
 
-#ifdef WITH_OCTOMAP_ROS
+#ifdef WITH_OCTOMAP_MSGS
 #ifdef RTABMAP_OCTOMAP
 	if(octomap_)
 	{
@@ -289,9 +290,52 @@ void MapsManager::setParameters(const rtabmap::ParametersMap & parameters)
 #endif
 }
 
-void MapsManager::set2DMap(const cv::Mat & map, float xMin, float yMin, float cellSize, const std::map<int, rtabmap::Transform> & poses)
+void MapsManager::set2DMap(
+		const cv::Mat & map,
+		float xMin,
+		float yMin,
+		float cellSize,
+		const std::map<int, rtabmap::Transform> & poses,
+		const rtabmap::Memory * memory)
 {
 	occupancyGrid_->setMap(map, xMin, yMin, cellSize, poses);
+	//update cache in case the map should be updated
+	if(memory)
+	{
+		for(std::map<int, rtabmap::Transform>::const_iterator iter=poses.begin(); iter!=poses.end(); ++iter)
+		{
+			std::map<int, std::pair< std::pair<cv::Mat, cv::Mat>, cv::Mat> >::iterator jter = gridMaps_.find(iter->first);
+			if(!uContains(gridMaps_, iter->first))
+			{
+				rtabmap::SensorData data;
+				data = memory->getSignatureDataConst(iter->first, false, false, false, true);
+				if(data.gridCellSize() == 0.0f)
+				{
+					ROS_WARN("Local occupancy grid doesn't exist for node %d", iter->first);
+				}
+				else
+				{
+					cv::Mat ground, obstacles, emptyCells;
+					data.uncompressData(
+							0,
+							0,
+							0,
+							0,
+							&ground,
+							&obstacles,
+							&emptyCells);
+
+					uInsert(gridMaps_, std::make_pair(iter->first, std::make_pair(std::make_pair(ground, obstacles), emptyCells)));
+					uInsert(gridMapsViewpoints_, std::make_pair(iter->first, data.gridViewPoint()));
+					occupancyGrid_->addToCache(iter->first, ground, obstacles, emptyCells);
+				}
+			}
+			else
+			{
+				occupancyGrid_->addToCache(iter->first, jter->second.first.first, jter->second.first.second, jter->second.second);
+			}
+		}
+	}
 }
 
 void MapsManager::clear()
@@ -307,7 +351,7 @@ void MapsManager::clear()
 	groundClouds_.clear();
 	obstacleClouds_.clear();
 	occupancyGrid_->clear();
-#ifdef WITH_OCTOMAP_ROS
+#ifdef WITH_OCTOMAP_MSGS
 #ifdef RTABMAP_OCTOMAP
 	octomap_->clear();
 #endif
@@ -321,6 +365,7 @@ bool MapsManager::hasSubscribers() const
 			cloudGroundPub_.getNumSubscribers() != 0 ||
 			projMapPub_.getNumSubscribers() != 0 ||
 			gridMapPub_.getNumSubscribers() != 0 ||
+			gridProbMapPub_.getNumSubscribers() != 0 ||
 			scanMapPub_.getNumSubscribers() != 0 ||
 			octoMapPubBin_.getNumSubscribers() != 0 ||
 			octoMapPubFull_.getNumSubscribers() != 0 ||
@@ -363,7 +408,8 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 				octoMapProj_.getNumSubscribers() != 0;
 
 		updateGrid = projMapPub_.getNumSubscribers() != 0 ||
-				gridMapPub_.getNumSubscribers() != 0;
+				gridMapPub_.getNumSubscribers() != 0 ||
+				gridProbMapPub_.getNumSubscribers() != 0;
 
 		updateGridCache = updateOctomap || updateGrid ||
 				cloudMapPub_.getNumSubscribers() != 0 ||
@@ -372,7 +418,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 				scanMapPub_.getNumSubscribers() != 0;
 	}
 
-#ifndef WITH_OCTOMAP_ROS
+#ifndef WITH_OCTOMAP_MSGS
 	updateOctomap = false;
 #endif
 #ifndef RTABMAP_OCTOMAP
@@ -441,7 +487,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 				ROS_WARN("Many occupancy grids should be loaded (~%d), this may take a while to update the map(s)...", int(filteredPoses.size()-gridMaps_.size()));
 				longUpdate = true;
 			}
-#ifdef WITH_OCTOMAP_ROS
+#ifdef WITH_OCTOMAP_MSGS
 #ifdef RTABMAP_OCTOMAP
 			if(updateOctomap && octomap_->addedNodes().size() < 5)
 			{
@@ -596,7 +642,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 					}
 				}
 
-#ifdef WITH_OCTOMAP_ROS
+#ifdef WITH_OCTOMAP_MSGS
 #ifdef RTABMAP_OCTOMAP
 				if(updateOctomap &&
 						(iter->first < 0 ||
@@ -634,7 +680,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 			occupancyGrid_->update(filteredPoses);
 		}
 
-#ifdef WITH_OCTOMAP_ROS
+#ifdef WITH_OCTOMAP_MSGS
 #ifdef RTABMAP_OCTOMAP
 		if(updateOctomap)
 		{
@@ -817,6 +863,7 @@ void MapsManager::publishMaps(
 
 		if(graphGroundOptimized || graphObstacleOptimized)
 		{
+			ROS_INFO("Graph has changed, updating clouds...");
 			UTimer t;
 			cv::Mat tmpGroundPts;
 			cv::Mat tmpObstaclePts;
@@ -1061,7 +1108,7 @@ void MapsManager::publishMaps(
 		obstacleClouds_.clear();
 	}
 
-#ifdef WITH_OCTOMAP_ROS
+#ifdef WITH_OCTOMAP_MSGS
 #ifdef RTABMAP_OCTOMAP
 	if(octoMapPubBin_.getNumSubscribers() ||
 			octoMapPubFull_.getNumSubscribers() ||
@@ -1185,7 +1232,7 @@ void MapsManager::publishMaps(
 #endif
 #endif
 
-	if(gridMapPub_.getNumSubscribers() || projMapPub_.getNumSubscribers())
+	if(gridMapPub_.getNumSubscribers() || projMapPub_.getNumSubscribers() || gridProbMapPub_.getNumSubscribers())
 	{
 		if(projMapPub_.getNumSubscribers())
 		{
@@ -1204,46 +1251,88 @@ void MapsManager::publishMaps(
 			}
 		}
 
-		// create the grid map
-		float xMin=0.0f, yMin=0.0f, gridCellSize = 0.05f;
-		cv::Mat pixels = this->getGridMap(xMin, yMin, gridCellSize);
-
-		if(!pixels.empty())
+		if(gridProbMapPub_.getNumSubscribers())
 		{
-			//init
-			nav_msgs::OccupancyGrid map;
-			map.info.resolution = gridCellSize;
-			map.info.origin.position.x = 0.0;
-			map.info.origin.position.y = 0.0;
-			map.info.origin.position.z = 0.0;
-			map.info.origin.orientation.x = 0.0;
-			map.info.origin.orientation.y = 0.0;
-			map.info.origin.orientation.z = 0.0;
-			map.info.origin.orientation.w = 1.0;
-
-			map.info.width = pixels.cols;
-			map.info.height = pixels.rows;
-			map.info.origin.position.x = xMin;
-			map.info.origin.position.y = yMin;
-			map.data.resize(map.info.width * map.info.height);
-
-			memcpy(map.data.data(), pixels.data, map.info.width * map.info.height);
-
-			map.header.frame_id = mapFrameId;
-			map.header.stamp = stamp;
-
-			if(gridMapPub_.getNumSubscribers())
+			// create the grid map
+			float xMin=0.0f, yMin=0.0f, gridCellSize = 0.05f;
+			cv::Mat pixels = this->getGridProbMap(xMin, yMin, gridCellSize);
+			if(!pixels.empty())
 			{
-				gridMapPub_.publish(map);
+				//init
+				nav_msgs::OccupancyGrid map;
+				map.info.resolution = gridCellSize;
+				map.info.origin.position.x = 0.0;
+				map.info.origin.position.y = 0.0;
+				map.info.origin.position.z = 0.0;
+				map.info.origin.orientation.x = 0.0;
+				map.info.origin.orientation.y = 0.0;
+				map.info.origin.orientation.z = 0.0;
+				map.info.origin.orientation.w = 1.0;
+
+				map.info.width = pixels.cols;
+				map.info.height = pixels.rows;
+				map.info.origin.position.x = xMin;
+				map.info.origin.position.y = yMin;
+				map.data.resize(map.info.width * map.info.height);
+
+				memcpy(map.data.data(), pixels.data, map.info.width * map.info.height);
+
+				map.header.frame_id = mapFrameId;
+				map.header.stamp = stamp;
+
+				if(gridProbMapPub_.getNumSubscribers())
+				{
+					gridProbMapPub_.publish(map);
+				}
 			}
-			if(projMapPub_.getNumSubscribers())
+			else if(poses.size())
 			{
-				projMapPub_.publish(map);
+				ROS_WARN("Grid map is empty! (local maps=%d)", (int)gridMaps_.size());
 			}
 		}
-		else if(poses.size())
+		if(gridMapPub_.getNumSubscribers() || projMapPub_.getNumSubscribers())
 		{
-			ROS_WARN("Grid map is empty! (local maps=%d)", (int)gridMaps_.size());
+			// create the grid map
+			float xMin=0.0f, yMin=0.0f, gridCellSize = 0.05f;
+			cv::Mat pixels = this->getGridMap(xMin, yMin, gridCellSize);
+
+			if(!pixels.empty())
+			{
+				//init
+				nav_msgs::OccupancyGrid map;
+				map.info.resolution = gridCellSize;
+				map.info.origin.position.x = 0.0;
+				map.info.origin.position.y = 0.0;
+				map.info.origin.position.z = 0.0;
+				map.info.origin.orientation.x = 0.0;
+				map.info.origin.orientation.y = 0.0;
+				map.info.origin.orientation.z = 0.0;
+				map.info.origin.orientation.w = 1.0;
+
+				map.info.width = pixels.cols;
+				map.info.height = pixels.rows;
+				map.info.origin.position.x = xMin;
+				map.info.origin.position.y = yMin;
+				map.data.resize(map.info.width * map.info.height);
+
+				memcpy(map.data.data(), pixels.data, map.info.width * map.info.height);
+
+				map.header.frame_id = mapFrameId;
+				map.header.stamp = stamp;
+
+				if(gridMapPub_.getNumSubscribers())
+				{
+					gridMapPub_.publish(map);
+				}
+				if(projMapPub_.getNumSubscribers())
+				{
+					projMapPub_.publish(map);
+				}
+			}
+			else if(poses.size())
+			{
+				ROS_WARN("Grid map is empty! (local maps=%d)", (int)gridMaps_.size());
+			}
 		}
 	}
 
@@ -1261,5 +1350,14 @@ cv::Mat MapsManager::getGridMap(
 {
 	gridCellSize = occupancyGrid_->getCellSize();
 	return occupancyGrid_->getMap(xMin, yMin);
+}
+
+cv::Mat MapsManager::getGridProbMap(
+		float & xMin,
+		float & yMin,
+		float & gridCellSize)
+{
+	gridCellSize = occupancyGrid_->getCellSize();
+	return occupancyGrid_->getProbMap(xMin, yMin);
 }
 
