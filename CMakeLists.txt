@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(rtabmap_ros)
 
+# Policy CMP0043 introduced in cmake version 3.0 IGNORES the use of COMPILE_DEFINITIONS suffixed variables, e.g. COMPILE_DEFINITIONS_DEBUG
+# Set to OLD behavior until minimum cmake version >= 2.8.10 (version that COMPILE_DEFINITIONS can be set by generator expressions instead)
+if (POLICY CMP0043)
+	cmake_policy(SET CMP0043 OLD)
+endif (POLICY CMP0043)
+# Policy CMP0042 introduced in cmake version 3.0 enables the use of @rpath in an install name via MACOSX_RPATH by default
+# Set to OLD behavior so that all versions use the same behavior, or until minimum cmake version >= 2.8.12 (version where @rpath is available)
+if (POLICY CMP0042)
+	cmake_policy(SET CMP0042 OLD)
+endif (POLICY CMP0042)
+
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
@@ -13,12 +24,13 @@ find_package(catkin REQUIRED COMPONENTS
 
 # Optional components
 find_package(costmap_2d)
-find_package(octomap_ros)
+find_package(octomap_msgs)
 find_package(rviz)
+find_package(find_object_2d)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(RTABMap 0.17.0 REQUIRED)
+find_package(RTABMap 0.17.6 REQUIRED)
 
 find_package(OpenCV REQUIRED)
 
@@ -116,12 +128,15 @@ SET(optional_dependencies "")
 IF(costmap_2d_FOUND)		
    SET(optional_dependencies ${optional_dependencies} costmap_2d)		
 ENDIF(costmap_2d_FOUND)		
-IF(octomap_ros_FOUND)		
-   SET(optional_dependencies ${optional_dependencies} octomap_ros)		
-ENDIF(octomap_ros_FOUND)		
+IF(octomap_msgs_FOUND)		
+   SET(optional_dependencies ${optional_dependencies} octomap_msgs)		
+ENDIF(octomap_msgs_FOUND)		
 IF(rviz_FOUND)		
    SET(optional_dependencies ${optional_dependencies} rviz)		
 ENDIF(rviz_FOUND)
+IF(find_object_2d_FOUND)		
+   SET(optional_dependencies ${optional_dependencies} find_object_2d)		
+ENDIF(find_object_2d_FOUND)	
 
 catkin_package(
   INCLUDE_DIRS include
@@ -204,17 +219,17 @@ SET(rtabmap_ros_lib_src
 ENDIF(costmap_2d_FOUND)
 
 # If octomap is found, add definition
-IF(octomap_ros_FOUND)
-MESSAGE(STATUS "WITH octomap")
+IF(octomap_msgs_FOUND)
+MESSAGE(STATUS "WITH octomap_msgs")
 include_directories(
-  ${octomap_ros_INCLUDE_DIRS}
+  ${octomap_msgs_INCLUDE_DIRS}
 )
 SET(Libraries
-  ${octomap_ros_LIBRARIES}
+  ${octomap_msgs_LIBRARIES}
   ${Libraries}
 )
-ADD_DEFINITIONS("-DWITH_OCTOMAP_ROS")
-ENDIF(octomap_ros_FOUND)
+ADD_DEFINITIONS("-DWITH_OCTOMAP_MSGS")
+ENDIF(octomap_msgs_FOUND)
 
 IF(QT4_FOUND OR Qt5_FOUND)
 SET(Libraries 
@@ -310,6 +325,14 @@ target_link_libraries(wifi_signal_pub rtabmap_ros ${Libraries})
 add_executable(wifi_signal_sub src/WifiSignalSubNode.cpp)
 target_link_libraries(wifi_signal_sub rtabmap_ros ${Libraries})
 
+# If find_object_2d is found, add save objects example
+IF(find_object_2d_FOUND)
+MESSAGE(STATUS "WITH find_object_2d")
+include_directories(${find_object_2d_INCLUDE_DIRS})
+add_executable(save_objects_example src/SaveObjectsExample.cpp)
+target_link_libraries(save_objects_example rtabmap_ros ${Libraries} ${find_object_2d_LIBRARIES})
+ENDIF(find_object_2d_FOUND)
+
 add_executable(camera src/CameraNode.cpp)
 add_dependencies(camera ${${PROJECT_NAME}_EXPORTED_TARGETS})
 target_link_libraries(camera ${Libraries})
@@ -357,6 +380,7 @@ install(TARGETS
    rtabmap 
    rtabmapviz 
    rgbd_odometry 
+   icp_odometry
    rgbdicp_odometry 
    stereo_odometry
    map_assembler
@@ -374,6 +398,7 @@ install(TARGETS
    rtabmap_ros 
    rtabmap 
    rgbd_odometry 
+   icp_odometry
    rgbdicp_odometry 
    stereo_odometry
    map_assembler
