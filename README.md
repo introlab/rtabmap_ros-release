@@ -1,3 +1,26 @@
+## rtabmap_ros (melodic) - 0.17.6-0
+
+The packages in the `rtabmap_ros` repository were released into the `melodic` distro by running `/usr/bin/bloom-release --ros-distro melodic --new-track rtabmap_ros` on `Fri, 05 Oct 2018 14:44:20 -0000`
+
+The `rtabmap_ros` package was released.
+
+Version of package(s) in repository `rtabmap_ros`:
+
+- upstream repository: https://github.com/introlab/rtabmap_ros.git
+- release repository: unknown
+- rosdistro version: `null`
+- old version: `null`
+- new version: `0.17.6-0`
+
+Versions of tools used:
+
+- bloom version: `0.6.7`
+- catkin_pkg version: `0.4.8`
+- rosdep version: `0.12.2`
+- rosdistro version: `0.6.9`
+- vcstools version: `0.1.40`
+
+
 ## rtabmap_ros (lunar) - 0.17.6-0
 
 The packages in the `rtabmap_ros` repository were released into the `lunar` distro by running `/usr/bin/bloom-release rtabmap_ros --rosdistro lunar` on `Sat, 29 Sep 2018 19:36:18 -0000`
