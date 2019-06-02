@@ -63,13 +63,16 @@ MapsManager::MapsManager() :
 		mapFilterRadius_(0.0),
 		mapFilterAngle_(30.0), // degrees
 		mapCacheCleanup_(true),
-		negativePosesIgnored_(true),
-		negativeScanEmptyRayTracing_(true),
+		alwaysUpdateMap_(false),
+		scanEmptyRayTracing_(true),
 		assembledObstacles_(new pcl::PointCloud<pcl::PointXYZRGB>),
 		assembledGround_(new pcl::PointCloud<pcl::PointXYZRGB>),
 		occupancyGrid_(new OccupancyGrid),
+		gridUpdated_(true),
 		octomap_(0),
-		octomapTreeDepth_(16)
+		octomapTreeDepth_(16),
+		octomapUpdated_(true),
+		latching_(true)
 {
 }
 
@@ -79,8 +82,30 @@ void MapsManager::init(ros::NodeHandle & nh, ros::NodeHandle & pnh, const std::s
 	pnh.param("map_filter_radius", mapFilterRadius_, mapFilterRadius_);
 	pnh.param("map_filter_angle", mapFilterAngle_, mapFilterAngle_);
 	pnh.param("map_cleanup", mapCacheCleanup_, mapCacheCleanup_);
-	pnh.param("map_negative_poses_ignored", negativePosesIgnored_, negativePosesIgnored_);
-	pnh.param("map_negative_scan_empty_ray_tracing", negativeScanEmptyRayTracing_, negativeScanEmptyRayTracing_);
+
+	if(pnh.hasParam("map_negative_poses_ignored"))
+	{
+		ROS_WARN("Parameter \"map_negative_poses_ignored\" has been "
+				"removed. Use \"map_always_update\" instead.");
+		if(!pnh.hasParam("map_always_update"))
+		{
+			bool negPosesIgnored;
+			pnh.getParam("map_negative_poses_ignored", negPosesIgnored);
+			alwaysUpdateMap_ = !negPosesIgnored;
+		}
+	}
+	pnh.param("map_always_update", alwaysUpdateMap_, alwaysUpdateMap_);
+
+	if(pnh.hasParam("map_negative_scan_empty_ray_tracing"))
+	{
+		ROS_WARN("Parameter \"map_negative_scan_empty_ray_tracing\" has been "
+				"removed. Use \"map_empty_ray_tracing\" instead.");
+		if(!pnh.hasParam("map_empty_ray_tracing"))
+		{
+			pnh.getParam("map_negative_scan_empty_ray_tracing", scanEmptyRayTracing_);
+		}
+	}
+	pnh.param("map_empty_ray_tracing", scanEmptyRayTracing_, scanEmptyRayTracing_);
 
 	if(pnh.hasParam("scan_output_voxelized"))
 	{
@@ -98,8 +123,8 @@ void MapsManager::init(ros::NodeHandle & nh, ros::NodeHandle & pnh, const std::s
 	ROS_INFO("%s(maps): map_filter_radius          = %f", name.c_str(), mapFilterRadius_);
 	ROS_INFO("%s(maps): map_filter_angle           = %f", name.c_str(), mapFilterAngle_);
 	ROS_INFO("%s(maps): map_cleanup                = %s", name.c_str(), mapCacheCleanup_?"true":"false");
-	ROS_INFO("%s(maps): map_negative_poses_ignored = %s", name.c_str(), negativePosesIgnored_?"true":"false");
-	ROS_INFO("%s(maps): map_negative_scan_ray_tracing = %s", name.c_str(), negativeScanEmptyRayTracing_?"true":"false");
+	ROS_INFO("%s(maps): map_always_update          = %s", name.c_str(), alwaysUpdateMap_?"true":"false");
+	ROS_INFO("%s(maps): map_empty_ray_tracing      = %s", name.c_str(), scanEmptyRayTracing_?"true":"false");
 	ROS_INFO("%s(maps): cloud_output_voxelized     = %s", name.c_str(), cloudOutputVoxelized_?"true":"false");
 	ROS_INFO("%s(maps): cloud_subtract_filtering   = %s", name.c_str(), cloudSubtractFiltering_?"true":"false");
 	ROS_INFO("%s(maps): cloud_subtract_filtering_min_neighbors = %d", name.c_str(), cloudSubtractFilteringMinNeighbors_);
@@ -125,8 +150,7 @@ void MapsManager::init(ros::NodeHandle & nh, ros::NodeHandle & pnh, const std::s
 	// If true, the last message published on
 	// the map topics will be saved and sent to new subscribers when they
 	// connect
-	bool latch = true;
-	pnh.param("latch", latch, latch);
+	pnh.param("latch", latching_, latching_);
 
 	// mapping topics
 	ros::NodeHandle * nht;
@@ -138,25 +162,40 @@ void MapsManager::init(ros::NodeHandle & nh, ros::NodeHandle & pnh, const std::s
 	{
 		nht = &pnh;
 	}
-	gridMapPub_ = nht->advertise<nav_msgs::OccupancyGrid>("grid_map", 1, latch);
-	gridProbMapPub_ = nht->advertise<nav_msgs::OccupancyGrid>("grid_prob_map", 1, latch);
-	cloudMapPub_ = nht->advertise<sensor_msgs::PointCloud2>("cloud_map", 1, latch);
-	cloudObstaclesPub_ = nht->advertise<sensor_msgs::PointCloud2>("cloud_obstacles", 1, latch);
-	cloudGroundPub_ = nht->advertise<sensor_msgs::PointCloud2>("cloud_ground", 1, latch);
+	latched_.clear();
+	gridMapPub_ = nht->advertise<nav_msgs::OccupancyGrid>("grid_map", 1, latching_);
+	latched_.insert(std::make_pair((void*)&gridMapPub_, false));
+	gridProbMapPub_ = nht->advertise<nav_msgs::OccupancyGrid>("grid_prob_map", 1, latching_);
+	latched_.insert(std::make_pair((void*)&gridProbMapPub_, false));
+	cloudMapPub_ = nht->advertise<sensor_msgs::PointCloud2>("cloud_map", 1, latching_);
+	latched_.insert(std::make_pair((void*)&cloudMapPub_, false));
+	cloudObstaclesPub_ = nht->advertise<sensor_msgs::PointCloud2>("cloud_obstacles", 1, latching_);
+	latched_.insert(std::make_pair((void*)&cloudObstaclesPub_, false));
+	cloudGroundPub_ = nht->advertise<sensor_msgs::PointCloud2>("cloud_ground", 1, latching_);
+	latched_.insert(std::make_pair((void*)&cloudGroundPub_, false));
 
 	// deprecated
-	projMapPub_ = nht->advertise<nav_msgs::OccupancyGrid>("proj_map", 1, latch);
-	scanMapPub_ = nht->advertise<sensor_msgs::PointCloud2>("scan_map", 1, latch);
+	projMapPub_ = nht->advertise<nav_msgs::OccupancyGrid>("proj_map", 1, latching_);
+	latched_.insert(std::make_pair((void*)&projMapPub_, false));
+	scanMapPub_ = nht->advertise<sensor_msgs::PointCloud2>("scan_map", 1, latching_);
+	latched_.insert(std::make_pair((void*)&scanMapPub_, false));
 
 #ifdef WITH_OCTOMAP_MSGS
 #ifdef RTABMAP_OCTOMAP
-	octoMapPubBin_ = nht->advertise<octomap_msgs::Octomap>("octomap_binary", 1, latch);
-	octoMapPubFull_ = nht->advertise<octomap_msgs::Octomap>("octomap_full", 1, latch);
-	octoMapCloud_ = nht->advertise<sensor_msgs::PointCloud2>("octomap_occupied_space", 1, latch);
-	octoMapObstacleCloud_ = nht->advertise<sensor_msgs::PointCloud2>("octomap_obstacles", 1, latch);
-	octoMapGroundCloud_ = nht->advertise<sensor_msgs::PointCloud2>("octomap_ground", 1, latch);
-	octoMapEmptySpace_ = nht->advertise<sensor_msgs::PointCloud2>("octomap_empty_space", 1, latch);
-	octoMapProj_ = nht->advertise<nav_msgs::OccupancyGrid>("octomap_grid", 1, latch);
+	octoMapPubBin_ = nht->advertise<octomap_msgs::Octomap>("octomap_binary", 1, latching_);
+	latched_.insert(std::make_pair((void*)&octoMapPubBin_, false));
+	octoMapPubFull_ = nht->advertise<octomap_msgs::Octomap>("octomap_full", 1, latching_);
+	latched_.insert(std::make_pair((void*)&octoMapPubFull_, false));
+	octoMapCloud_ = nht->advertise<sensor_msgs::PointCloud2>("octomap_occupied_space", 1, latching_);
+	latched_.insert(std::make_pair((void*)&octoMapCloud_, false));
+	octoMapObstacleCloud_ = nht->advertise<sensor_msgs::PointCloud2>("octomap_obstacles", 1, latching_);
+	latched_.insert(std::make_pair((void*)&octoMapObstacleCloud_, false));
+	octoMapGroundCloud_ = nht->advertise<sensor_msgs::PointCloud2>("octomap_ground", 1, latching_);
+	latched_.insert(std::make_pair((void*)&octoMapGroundCloud_, false));
+	octoMapEmptySpace_ = nht->advertise<sensor_msgs::PointCloud2>("octomap_empty_space", 1, latching_);
+	latched_.insert(std::make_pair((void*)&octoMapEmptySpace_, false));
+	octoMapProj_ = nht->advertise<nav_msgs::OccupancyGrid>("octomap_grid", 1, latching_);
+	latched_.insert(std::make_pair((void*)&octoMapProj_, false));
 #endif
 #endif
 }
@@ -302,7 +341,7 @@ void MapsManager::set2DMap(
 	//update cache in case the map should be updated
 	if(memory)
 	{
-		for(std::map<int, rtabmap::Transform>::const_iterator iter=poses.begin(); iter!=poses.end(); ++iter)
+		for(std::map<int, rtabmap::Transform>::const_iterator iter=poses.lower_bound(1); iter!=poses.end(); ++iter)
 		{
 			std::map<int, std::pair< std::pair<cv::Mat, cv::Mat>, cv::Mat> >::iterator jter = gridMaps_.find(iter->first);
 			if(!uContains(gridMaps_, iter->first))
@@ -356,6 +395,10 @@ void MapsManager::clear()
 	octomap_->clear();
 #endif
 #endif
+	for(std::map<void*, bool>::iterator iter=latched_.begin(); iter!=latched_.end(); ++iter)
+	{
+		iter->second = false;
+	}
 }
 
 bool MapsManager::hasSubscribers() const
@@ -388,7 +431,7 @@ std::map<int, Transform> MapsManager::getFilteredPoses(const std::map<int, Trans
 }
 
 std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
-		const std::map<int, rtabmap::Transform> & poses,
+		const std::map<int, rtabmap::Transform> & posesIn,
 		const rtabmap::Memory * memory,
 		bool updateGrid,
 		bool updateOctomap,
@@ -425,6 +468,9 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 	updateOctomap = false;
 #endif
 
+	gridUpdated_ = updateGrid;
+	octomapUpdated_ = updateOctomap;
+
 
 	UDEBUG("Updating map caches...");
 
@@ -434,6 +480,16 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 		return std::map<int, rtabmap::Transform>();
 	}
 
+	// process only nodes (exclude landmarks)
+	std::map<int, rtabmap::Transform> poses;
+	if(posesIn.begin()->first < 0)
+	{
+		poses.insert(posesIn.lower_bound(0), posesIn.end());
+	}
+	else
+	{
+		poses = posesIn;
+	}
 	std::map<int, rtabmap::Transform> filteredPoses;
 
 	// update cache
@@ -445,17 +501,10 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 			UDEBUG("Filter nodes...");
 			double angle = mapFilterAngle_ == 0.0?CV_PI+0.1:mapFilterAngle_*CV_PI/180.0;
 			filteredPoses = rtabmap::graph::radiusPosesFiltering(poses, mapFilterRadius_, angle);
-			for(std::map<int, rtabmap::Transform>::const_iterator iter=poses.begin(); iter!=poses.end(); ++iter)
+			if(poses.find(0) != poses.end())
 			{
-				if(iter->first <=0)
-				{
-					// make sure to keep latest data
-					filteredPoses.insert(*iter);
-				}
-				else
-				{
-					break;
-				}
+				// make sure to keep latest data
+				filteredPoses.insert(*poses.find(0));
 			}
 		}
 		else
@@ -463,19 +512,9 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 			filteredPoses = poses;
 		}
 
-		if(negativePosesIgnored_)
+		if(!alwaysUpdateMap_)
 		{
-			for(std::map<int, rtabmap::Transform>::iterator iter=filteredPoses.begin(); iter!=filteredPoses.end();)
-			{
-				if(iter->first <= 0)
-				{
-					filteredPoses.erase(iter++);
-				}
-				else
-				{
-					++iter;
-				}
-			}
+			filteredPoses.erase(0);
 		}
 
 		bool longUpdate = false;
@@ -505,7 +544,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 			if(!iter->second.isNull())
 			{
 				rtabmap::SensorData data;
-				if(updateGridCache && (iter->first < 0 || !uContains(gridMaps_, iter->first)))
+				if(updateGridCache && (iter->first == 0 || !uContains(gridMaps_, iter->first)))
 				{
 					UDEBUG("Data required for %d", iter->first);
 					std::map<int, rtabmap::Signature>::const_iterator findIter = signatures.find(iter->first);
@@ -518,78 +557,35 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 						data = memory->getSignatureDataConst(iter->first, occupancyGrid_->isGridFromDepth() && !occupancySavedInDB, !occupancyGrid_->isGridFromDepth() && !occupancySavedInDB, false, true);
 					}
 
-					if(data.id() != 0)
+					UDEBUG("Adding grid map %d to cache...", iter->first);
+					cv::Point3f viewPoint;
+					cv::Mat ground, obstacles, emptyCells;
+					if(iter->first > 0)
 					{
-						UDEBUG("Adding grid map %d to cache...", iter->first);
-						cv::Point3f viewPoint;
-						cv::Mat ground, obstacles, emptyCells;
-						if(iter->first > 0)
+						cv::Mat rgb, depth;
+						LaserScan scan;
+						bool generateGrid = data.gridCellSize() == 0.0f;
+						static bool warningShown = false;
+						if(occupancySavedInDB && generateGrid && !warningShown)
 						{
-							cv::Mat rgb, depth;
-							LaserScan scan;
-							bool generateGrid = data.gridCellSize() == 0.0f;
-							static bool warningShown = false;
-							if(occupancySavedInDB && generateGrid && !warningShown)
-							{
-								warningShown = true;
-								UWARN("Occupancy grid for location %d should be added to global map (e..g, a ROS node is subscribed to "
-										"any occupancy grid output) but it cannot be found "
-										"in memory. For convenience, the occupancy "
-										"grid is regenerated. Make sure parameter \"%s\" is true to "
-										"avoid this warning for the next locations added to map. For older "
-										"locations already in database without an occupancy grid map, you can use the "
-										"\"rtabmap-databaseViewer\" to regenerate the missing occupancy grid maps and "
-										"save them back in the database for next sessions. This warning is only shown once.",
-										data.id(), Parameters::kRGBDCreateOccupancyGrid().c_str());
-							}
-							if(memory && occupancySavedInDB && generateGrid)
-							{
-								// if we are here, it is because we loaded a database with old nodes not having occupancy grid set
-								// try reload again
-								data = memory->getSignatureDataConst(iter->first, occupancyGrid_->isGridFromDepth(), !occupancyGrid_->isGridFromDepth(), false, false);
-							}
-							data.uncompressData(
-									occupancyGrid_->isGridFromDepth() && generateGrid?&rgb:0,
-									occupancyGrid_->isGridFromDepth() && generateGrid?&depth:0,
-									!occupancyGrid_->isGridFromDepth() && generateGrid?&scan:0,
-									0,
-									generateGrid?0:&ground,
-									generateGrid?0:&obstacles,
-									generateGrid?0:&emptyCells);
-
-							if(generateGrid)
-							{
-								Signature tmp(data);
-								tmp.setPose(iter->second);
-								occupancyGrid_->createLocalMap(tmp, ground, obstacles, emptyCells, viewPoint);
-								uInsert(gridMaps_, std::make_pair(iter->first, std::make_pair(std::make_pair(ground, obstacles), emptyCells)));
-								uInsert(gridMapsViewpoints_, std::make_pair(iter->first, viewPoint));
-							}
-							else
-							{
-								viewPoint = data.gridViewPoint();
-								uInsert(gridMaps_, std::make_pair(iter->first, std::make_pair(std::make_pair(ground, obstacles), emptyCells)));
-								uInsert(gridMapsViewpoints_, std::make_pair(iter->first, viewPoint));
-							}
+							warningShown = true;
+							UWARN("Occupancy grid for location %d should be added to global map (e..g, a ROS node is subscribed to "
+									"any occupancy grid output) but it cannot be found "
+									"in memory. For convenience, the occupancy "
+									"grid is regenerated. Make sure parameter \"%s\" is true to "
+									"avoid this warning for the next locations added to map. For older "
+									"locations already in database without an occupancy grid map, you can use the "
+									"\"rtabmap-databaseViewer\" to regenerate the missing occupancy grid maps and "
+									"save them back in the database for next sessions. This warning is only shown once.",
+									data.id(), Parameters::kRGBDCreateOccupancyGrid().c_str());
 						}
-						else
+						if(memory && occupancySavedInDB && generateGrid)
 						{
-							// generate tmp occupancy grid for negative ids (assuming data is already uncompressed)
-							// For negative laser scans, fill empty space?
-							bool unknownSpaceFilled = Parameters::defaultGridScan2dUnknownSpaceFilled();
-							Parameters::parse(parameters_, Parameters::kGridScan2dUnknownSpaceFilled(), unknownSpaceFilled);
-
-							if(unknownSpaceFilled != negativeScanEmptyRayTracing_ && negativeScanEmptyRayTracing_)
-							{
-								ParametersMap parameters;
-								parameters.insert(ParametersPair(Parameters::kGridScan2dUnknownSpaceFilled(), uBool2Str(negativeScanEmptyRayTracing_)));
-								occupancyGrid_->parseParameters(parameters);
-							}
-
-							cv::Mat rgb, depth;
-							LaserScan scan;
-							bool generateGrid = data.gridCellSize() == 0.0f || (unknownSpaceFilled != negativeScanEmptyRayTracing_ && negativeScanEmptyRayTracing_);
-							data.uncompressData(
+							// if we are here, it is because we loaded a database with old nodes not having occupancy grid set
+							// try reload again
+							data = memory->getSignatureDataConst(iter->first, occupancyGrid_->isGridFromDepth(), !occupancyGrid_->isGridFromDepth(), false, false);
+						}
+						data.uncompressData(
 								occupancyGrid_->isGridFromDepth() && generateGrid?&rgb:0,
 								occupancyGrid_->isGridFromDepth() && generateGrid?&depth:0,
 								!occupancyGrid_->isGridFromDepth() && generateGrid?&scan:0,
@@ -598,44 +594,80 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 								generateGrid?0:&obstacles,
 								generateGrid?0:&emptyCells);
 
-							if(generateGrid)
-							{
-								Signature tmp(data);
-								tmp.setPose(iter->second);
-								occupancyGrid_->createLocalMap(tmp, ground, obstacles, emptyCells, viewPoint);
-								uInsert(gridMaps_,  std::make_pair(iter->first, std::make_pair(std::make_pair(ground, obstacles), emptyCells)));
-								uInsert(gridMapsViewpoints_, std::make_pair(iter->first, viewPoint));
-							}
-							else
-							{
-								viewPoint = data.gridViewPoint();
-								uInsert(gridMaps_,  std::make_pair(iter->first, std::make_pair(std::make_pair(ground, obstacles), emptyCells)));
-								uInsert(gridMapsViewpoints_, std::make_pair(iter->first, viewPoint));
-							}
-
-							// put back
-							if(unknownSpaceFilled != negativeScanEmptyRayTracing_ && negativeScanEmptyRayTracing_)
-							{
-								ParametersMap parameters;
-								parameters.insert(ParametersPair(Parameters::kGridScan2dUnknownSpaceFilled(), uBool2Str(unknownSpaceFilled)));
-								occupancyGrid_->parseParameters(parameters);
-							}
+						if(generateGrid)
+						{
+							Signature tmp(data);
+							tmp.setPose(iter->second);
+							occupancyGrid_->createLocalMap(tmp, ground, obstacles, emptyCells, viewPoint);
+							uInsert(gridMaps_, std::make_pair(iter->first, std::make_pair(std::make_pair(ground, obstacles), emptyCells)));
+							uInsert(gridMapsViewpoints_, std::make_pair(iter->first, viewPoint));
+						}
+						else
+						{
+							viewPoint = data.gridViewPoint();
+							uInsert(gridMaps_, std::make_pair(iter->first, std::make_pair(std::make_pair(ground, obstacles), emptyCells)));
+							uInsert(gridMapsViewpoints_, std::make_pair(iter->first, viewPoint));
 						}
 					}
-					else if(memory)
+					else
 					{
-						ROS_ERROR("Data missing for node %d to update the maps", iter->first);
+						// generate tmp occupancy grid for latest id (assuming data is already uncompressed)
+						// For negative laser scans, fill empty space?
+						bool unknownSpaceFilled = Parameters::defaultGridScan2dUnknownSpaceFilled();
+						Parameters::parse(parameters_, Parameters::kGridScan2dUnknownSpaceFilled(), unknownSpaceFilled);
+
+						if(unknownSpaceFilled != scanEmptyRayTracing_ && scanEmptyRayTracing_)
+						{
+							ParametersMap parameters;
+							parameters.insert(ParametersPair(Parameters::kGridScan2dUnknownSpaceFilled(), uBool2Str(scanEmptyRayTracing_)));
+							occupancyGrid_->parseParameters(parameters);
+						}
+
+						cv::Mat rgb, depth;
+						LaserScan scan;
+						bool generateGrid = data.gridCellSize() == 0.0f || (unknownSpaceFilled != scanEmptyRayTracing_ && scanEmptyRayTracing_);
+						data.uncompressData(
+							occupancyGrid_->isGridFromDepth() && generateGrid?&rgb:0,
+							occupancyGrid_->isGridFromDepth() && generateGrid?&depth:0,
+							!occupancyGrid_->isGridFromDepth() && generateGrid?&scan:0,
+							0,
+							generateGrid?0:&ground,
+							generateGrid?0:&obstacles,
+							generateGrid?0:&emptyCells);
+
+						if(generateGrid)
+						{
+							Signature tmp(data);
+							tmp.setPose(iter->second);
+							occupancyGrid_->createLocalMap(tmp, ground, obstacles, emptyCells, viewPoint);
+							uInsert(gridMaps_,  std::make_pair(iter->first, std::make_pair(std::make_pair(ground, obstacles), emptyCells)));
+							uInsert(gridMapsViewpoints_, std::make_pair(iter->first, viewPoint));
+						}
+						else
+						{
+							viewPoint = data.gridViewPoint();
+							uInsert(gridMaps_,  std::make_pair(iter->first, std::make_pair(std::make_pair(ground, obstacles), emptyCells)));
+							uInsert(gridMapsViewpoints_, std::make_pair(iter->first, viewPoint));
+						}
+
+						// put back
+						if(unknownSpaceFilled != scanEmptyRayTracing_ && scanEmptyRayTracing_)
+						{
+							ParametersMap parameters;
+							parameters.insert(ParametersPair(Parameters::kGridScan2dUnknownSpaceFilled(), uBool2Str(unknownSpaceFilled)));
+							occupancyGrid_->parseParameters(parameters);
+						}
 					}
 				}
 
 				if(updateGrid &&
-						(iter->first < 0 ||
+						(iter->first == 0 ||
 						  occupancyGrid_->addedNodes().find(iter->first) == occupancyGrid_->addedNodes().end()))
 				{
 					std::map<int, std::pair<std::pair<cv::Mat, cv::Mat>, cv::Mat> >::iterator mter = gridMaps_.find(iter->first);
 					if(mter != gridMaps_.end())
 					{
-						if(!mter->second.first.first.empty() || !mter->second.first.second.empty())
+						if(!mter->second.first.first.empty() || !mter->second.first.second.empty() || !mter->second.second.empty())
 						{
 							occupancyGrid_->addToCache(iter->first, mter->second.first.first, mter->second.first.second, mter->second.second);
 						}
@@ -645,7 +677,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 #ifdef WITH_OCTOMAP_MSGS
 #ifdef RTABMAP_OCTOMAP
 				if(updateOctomap &&
-						(iter->first < 0 ||
+						(iter->first == 0 ||
 						  octomap_->addedNodes().find(iter->first) == octomap_->addedNodes().end()))
 				{
 					std::map<int, std::pair<std::pair<cv::Mat, cv::Mat>, cv::Mat> >::iterator mter = gridMaps_.find(iter->first);
@@ -653,11 +685,12 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 					if(mter != gridMaps_.end() && pter!=gridMapsViewpoints_.end())
 					{
 						if((mter->second.first.first.empty() || mter->second.first.first.channels() > 2) &&
-						   (mter->second.first.second.empty() || mter->second.first.second.channels() > 2))
+						   (mter->second.first.second.empty() || mter->second.first.second.channels() > 2) &&
+						   (mter->second.second.empty() || mter->second.second.channels() > 2))
 						{
 							octomap_->addToCache(iter->first, mter->second.first.first, mter->second.first.second, mter->second.second, pter->second);
 						}
-						else if(!mter->second.first.first.empty() && !mter->second.first.second.empty())
+						else if(!mter->second.first.first.empty() && !mter->second.first.second.empty() && !mter->second.second.empty())
 						{
 							ROS_WARN("Node %d: Cannot update octomap with 2D occupancy grids. "
 									"Do \"$ rosrun rtabmap_ros rtabmap --params | grep Grid\" to see "
@@ -677,7 +710,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 
 		if(updateGrid)
 		{
-			occupancyGrid_->update(filteredPoses);
+			gridUpdated_ = occupancyGrid_->update(filteredPoses);
 		}
 
 #ifdef WITH_OCTOMAP_MSGS
@@ -685,7 +718,7 @@ std::map<int, rtabmap::Transform> MapsManager::updateMapCaches(
 		if(updateOctomap)
 		{
 			UTimer time;
-			octomap_->update(filteredPoses);
+			octomapUpdated_ = octomap_->update(filteredPoses);
 			ROS_INFO("Octomap update time = %fs", time.ticks());
 		}
 #endif
@@ -810,7 +843,7 @@ void MapsManager::publishMaps(
 				   cloudObstaclesPub_.getNumSubscribers();
 		bool graphGroundChanged = updateGround;
 		bool graphObstacleChanged = updateObstacles;
-		for(std::map<int, Transform>::const_iterator iter=poses.begin(); iter!=poses.end(); ++iter)
+		for(std::map<int, Transform>::const_iterator iter=poses.lower_bound(0); iter!=poses.end(); ++iter)
 		{
 			std::map<int, Transform>::const_iterator jter;
 			if(updateGround)
@@ -1062,37 +1095,51 @@ void MapsManager::publishMaps(
 		ROS_INFO("Assembled %d obstacle and %d ground clouds (%d points, %fs)",
 				countObstacles, countGrounds, (int)(assembledGround_->size() + assembledObstacles_->size()), time.ticks());
 
-		if(cloudGroundPub_.getNumSubscribers())
+		if( countGrounds > 0 ||
+			countObstacles > 0 ||
+			!latching_ ||
+			(assembledGround_->empty() && assembledObstacles_->empty()) ||
+			(cloudGroundPub_.getNumSubscribers() && !latched_.at(&cloudGroundPub_)) ||
+			(cloudObstaclesPub_.getNumSubscribers() && !latched_.at(&cloudObstaclesPub_)) ||
+			(cloudMapPub_.getNumSubscribers() && !latched_.at(&cloudMapPub_)) ||
+			(scanMapPub_.getNumSubscribers() && !latched_.at(&scanMapPub_)))
 		{
-			sensor_msgs::PointCloud2::Ptr cloudMsg(new sensor_msgs::PointCloud2);
-			pcl::toROSMsg(*assembledGround_, *cloudMsg);
-			cloudMsg->header.stamp = stamp;
-			cloudMsg->header.frame_id = mapFrameId;
-			cloudGroundPub_.publish(cloudMsg);
-		}
-		if(cloudObstaclesPub_.getNumSubscribers())
-		{
-			sensor_msgs::PointCloud2::Ptr cloudMsg(new sensor_msgs::PointCloud2);
-			pcl::toROSMsg(*assembledObstacles_, *cloudMsg);
-			cloudMsg->header.stamp = stamp;
-			cloudMsg->header.frame_id = mapFrameId;
-			cloudObstaclesPub_.publish(cloudMsg);
-		}
-		if(cloudMapPub_.getNumSubscribers() || scanMapPub_.getNumSubscribers())
-		{
-			pcl::PointCloud<pcl::PointXYZRGB> cloud = *assembledObstacles_ + *assembledGround_;
-			sensor_msgs::PointCloud2::Ptr cloudMsg(new sensor_msgs::PointCloud2);
-			pcl::toROSMsg(cloud, *cloudMsg);
-			cloudMsg->header.stamp = stamp;
-			cloudMsg->header.frame_id = mapFrameId;
-
-			if(cloudMapPub_.getNumSubscribers())
+			if(cloudGroundPub_.getNumSubscribers())
 			{
-				cloudMapPub_.publish(cloudMsg);
+				sensor_msgs::PointCloud2::Ptr cloudMsg(new sensor_msgs::PointCloud2);
+				pcl::toROSMsg(*assembledGround_, *cloudMsg);
+				cloudMsg->header.stamp = stamp;
+				cloudMsg->header.frame_id = mapFrameId;
+				cloudGroundPub_.publish(cloudMsg);
+				latched_.at(&cloudGroundPub_) = true;
 			}
-			if(scanMapPub_.getNumSubscribers())
+			if(cloudObstaclesPub_.getNumSubscribers())
 			{
-				scanMapPub_.publish(cloudMsg);
+				sensor_msgs::PointCloud2::Ptr cloudMsg(new sensor_msgs::PointCloud2);
+				pcl::toROSMsg(*assembledObstacles_, *cloudMsg);
+				cloudMsg->header.stamp = stamp;
+				cloudMsg->header.frame_id = mapFrameId;
+				cloudObstaclesPub_.publish(cloudMsg);
+				latched_.at(&cloudObstaclesPub_) = true;
+			}
+			if(cloudMapPub_.getNumSubscribers() || scanMapPub_.getNumSubscribers())
+			{
+				pcl::PointCloud<pcl::PointXYZRGB> cloud = *assembledObstacles_ + *assembledGround_;
+				sensor_msgs::PointCloud2::Ptr cloudMsg(new sensor_msgs::PointCloud2);
+				pcl::toROSMsg(cloud, *cloudMsg);
+				cloudMsg->header.stamp = stamp;
+				cloudMsg->header.frame_id = mapFrameId;
+
+				if(cloudMapPub_.getNumSubscribers())
+				{
+					cloudMapPub_.publish(cloudMsg);
+					latched_.at(&cloudMapPub_) = true;
+				}
+				if(scanMapPub_.getNumSubscribers())
+				{
+					scanMapPub_.publish(cloudMsg);
+					latched_.at(&scanMapPub_) = true;
+				}
 			}
 		}
 	}
@@ -1107,16 +1154,34 @@ void MapsManager::publishMaps(
 		groundClouds_.clear();
 		obstacleClouds_.clear();
 	}
+	if(cloudMapPub_.getNumSubscribers() == 0)
+	{
+		latched_.at(&cloudMapPub_) = false;
+	}
+	if(scanMapPub_.getNumSubscribers() == 0)
+	{
+		latched_.at(&scanMapPub_) = false;
+	}
+	if(cloudGroundPub_.getNumSubscribers() == 0)
+	{
+		latched_.at(&cloudGroundPub_) = false;
+	}
+	if(cloudObstaclesPub_.getNumSubscribers() == 0)
+	{
+		latched_.at(&cloudObstaclesPub_) = false;
+	}
 
 #ifdef WITH_OCTOMAP_MSGS
 #ifdef RTABMAP_OCTOMAP
-	if(octoMapPubBin_.getNumSubscribers() ||
-			octoMapPubFull_.getNumSubscribers() ||
-			octoMapCloud_.getNumSubscribers() ||
-			octoMapObstacleCloud_.getNumSubscribers() ||
-			octoMapGroundCloud_.getNumSubscribers() ||
-			octoMapEmptySpace_.getNumSubscribers() ||
-			octoMapProj_.getNumSubscribers())
+	if( octomapUpdated_ ||
+		!latching_ ||
+		(octoMapPubBin_.getNumSubscribers() && !latched_.at(&octoMapPubBin_)) ||
+		(octoMapPubFull_.getNumSubscribers() && !latched_.at(&octoMapPubFull_)) ||
+		(octoMapCloud_.getNumSubscribers() && !latched_.at(&octoMapCloud_)) ||
+		(octoMapObstacleCloud_.getNumSubscribers() && !latched_.at(&octoMapObstacleCloud_)) ||
+		(octoMapGroundCloud_.getNumSubscribers() && !latched_.at(&octoMapGroundCloud_)) ||
+		(octoMapEmptySpace_.getNumSubscribers() && !latched_.at(&octoMapEmptySpace_)) ||
+		(octoMapProj_.getNumSubscribers() && !latched_.at(&octoMapProj_)))
 	{
 		if(octoMapPubBin_.getNumSubscribers())
 		{
@@ -1125,6 +1190,7 @@ void MapsManager::publishMaps(
 			msg.header.frame_id = mapFrameId;
 			msg.header.stamp = stamp;
 			octoMapPubBin_.publish(msg);
+			latched_.at(&octoMapPubBin_) = true;
 		}
 		if(octoMapPubFull_.getNumSubscribers())
 		{
@@ -1133,6 +1199,7 @@ void MapsManager::publishMaps(
 			msg.header.frame_id = mapFrameId;
 			msg.header.stamp = stamp;
 			octoMapPubFull_.publish(msg);
+			latched_.at(&octoMapPubFull_) = true;
 		}
 		if(octoMapCloud_.getNumSubscribers() ||
 			octoMapObstacleCloud_.getNumSubscribers() ||
@@ -1154,6 +1221,7 @@ void MapsManager::publishMaps(
 				msg.header.frame_id = mapFrameId;
 				msg.header.stamp = stamp;
 				octoMapCloud_.publish(msg);
+				latched_.at(&octoMapCloud_) = true;
 			}
 			if(octoMapObstacleCloud_.getNumSubscribers())
 			{
@@ -1163,6 +1231,7 @@ void MapsManager::publishMaps(
 				msg.header.frame_id = mapFrameId;
 				msg.header.stamp = stamp;
 				octoMapObstacleCloud_.publish(msg);
+				latched_.at(&octoMapObstacleCloud_) = true;
 			}
 			if(octoMapGroundCloud_.getNumSubscribers())
 			{
@@ -1172,6 +1241,7 @@ void MapsManager::publishMaps(
 				msg.header.frame_id = mapFrameId;
 				msg.header.stamp = stamp;
 				octoMapGroundCloud_.publish(msg);
+				latched_.at(&octoMapGroundCloud_) = true;
 			}
 			if(octoMapEmptySpace_.getNumSubscribers())
 			{
@@ -1181,6 +1251,7 @@ void MapsManager::publishMaps(
 				msg.header.frame_id = mapFrameId;
 				msg.header.stamp = stamp;
 				octoMapEmptySpace_.publish(msg);
+				latched_.at(&octoMapEmptySpace_) = true;
 			}
 		}
 		if(octoMapProj_.getNumSubscribers())
@@ -1214,6 +1285,7 @@ void MapsManager::publishMaps(
 				map.header.stamp = stamp;
 
 				octoMapProj_.publish(map);
+				latched_.at(&octoMapProj_) = true;
 			}
 			else if(poses.size())
 			{
@@ -1225,14 +1297,56 @@ void MapsManager::publishMaps(
 			}
 		}
 	}
-	else if(mapCacheCleanup_)
+
+	if( mapCacheCleanup_ &&
+		octoMapPubBin_.getNumSubscribers() == 0 &&
+		octoMapPubFull_.getNumSubscribers() == 0 &&
+		octoMapCloud_.getNumSubscribers() == 0 &&
+		octoMapObstacleCloud_.getNumSubscribers() == 0 &&
+		octoMapGroundCloud_.getNumSubscribers() == 0 &&
+		octoMapEmptySpace_.getNumSubscribers() == 0 &&
+		octoMapProj_.getNumSubscribers() == 0)
 	{
 		octomap_->clear();
 	}
+
+	if(octoMapPubBin_.getNumSubscribers() == 0)
+	{
+		latched_.at(&octoMapPubBin_) = false;
+	}
+	if(octoMapPubFull_.getNumSubscribers() == 0)
+	{
+		latched_.at(&octoMapPubFull_) = false;
+	}
+	if(octoMapCloud_.getNumSubscribers() == 0)
+	{
+		latched_.at(&octoMapCloud_) = false;
+	}
+	if(octoMapObstacleCloud_.getNumSubscribers() == 0)
+	{
+		latched_.at(&octoMapObstacleCloud_) = false;
+	}
+	if(octoMapGroundCloud_.getNumSubscribers() == 0)
+	{
+		latched_.at(&octoMapGroundCloud_) = false;
+	}
+	if(octoMapEmptySpace_.getNumSubscribers() == 0)
+	{
+		latched_.at(&octoMapEmptySpace_) = false;
+	}
+	if(octoMapProj_.getNumSubscribers() == 0)
+	{
+		latched_.at(&octoMapProj_) = false;
+	}
+
 #endif
 #endif
 
-	if(gridMapPub_.getNumSubscribers() || projMapPub_.getNumSubscribers() || gridProbMapPub_.getNumSubscribers())
+	if( gridUpdated_ ||
+		!latching_ ||
+		(gridMapPub_.getNumSubscribers() && !latched_.at(&gridMapPub_)) ||
+		(projMapPub_.getNumSubscribers() && !latched_.at(&projMapPub_)) ||
+		(gridProbMapPub_.getNumSubscribers() && !latched_.at(&gridProbMapPub_)))
 	{
 		if(projMapPub_.getNumSubscribers())
 		{
@@ -1283,6 +1397,7 @@ void MapsManager::publishMaps(
 				if(gridProbMapPub_.getNumSubscribers())
 				{
 					gridProbMapPub_.publish(map);
+					latched_.at(&gridProbMapPub_) = true;
 				}
 			}
 			else if(poses.size())
@@ -1323,10 +1438,12 @@ void MapsManager::publishMaps(
 				if(gridMapPub_.getNumSubscribers())
 				{
 					gridMapPub_.publish(map);
+					latched_.at(&gridMapPub_) = true;
 				}
 				if(projMapPub_.getNumSubscribers())
 				{
 					projMapPub_.publish(map);
+					latched_.at(&projMapPub_) = true;
 				}
 			}
 			else if(poses.size())
@@ -1334,6 +1451,19 @@ void MapsManager::publishMaps(
 				ROS_WARN("Grid map is empty! (local maps=%d)", (int)gridMaps_.size());
 			}
 		}
+	}
+
+	if(gridMapPub_.getNumSubscribers() == 0)
+	{
+		latched_.at(&gridMapPub_) = false;
+	}
+	if(projMapPub_.getNumSubscribers() == 0)
+	{
+		latched_.at(&projMapPub_) = false;
+	}
+	if(gridProbMapPub_.getNumSubscribers() == 0)
+	{
+		latched_.at(&gridProbMapPub_) = false;
 	}
 
 	if(!this->hasSubscribers() && mapCacheCleanup_)
