@@ -88,6 +88,18 @@ bool PreferencesDialogROS::readCoreSettings(const QString & filePath)
 	bool validParameters = true;
 	int readCount = 0;
 	rtabmap::ParametersMap parameters = rtabmap::Parameters::getDefaultParameters();
+	// remove Odom parameters
+	for(ParametersMap::iterator iter=parameters.begin(); iter!=parameters.end();)
+	{
+		if(iter->first.find("Odom") == 0)
+		{
+			parameters.erase(iter++);
+		}
+		else
+		{
+			++iter;
+		}
+	}
 	for(rtabmap::ParametersMap::iterator i=parameters.begin(); i!=parameters.end(); ++i)
 	{
 		if(i->first.compare(rtabmap::Parameters::kRtabmapWorkingDirectory()) == 0)
@@ -103,7 +115,9 @@ bool PreferencesDialogROS::readCoreSettings(const QString & filePath)
 			else
 			{
 				// use default one
-				this->setParameter(rtabmap::Parameters::kRtabmapWorkingDirectory(), (QDir::homePath()+"/.ros").toStdString());
+				char * rosHomePath = getenv("ROS_HOME");
+				std::string workingDir = rosHomePath?rosHomePath:(QDir::homePath()+"/.ros").toStdString();
+				this->setParameter(rtabmap::Parameters::kRtabmapWorkingDirectory(), workingDir);
 			}
 			settings.endGroup();
 		}

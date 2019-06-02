@@ -1,3 +1,29 @@
+/*
+Copyright (c) 2010-2019, Mathieu Labbe - IntRoLab - Universite de Sherbrooke
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of the Universite de Sherbrooke nor the
+      names of its contributors may be used to endorse or promote products
+      derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
 
 #include <ros/ros.h>
 #include <pluginlib/class_list_macros.h>
@@ -6,6 +32,7 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl/io/pcd_io.h>
 
 #include <pcl_ros/transforms.h>
 
@@ -26,6 +53,12 @@
 namespace rtabmap_ros
 {
 
+/**
+ * Nodelet used to merge point clouds from different sensors into a single
+ * assembled cloud. If fixed_frame_id is set and approx_sync is true,
+ * the clouds are adjusted to include the displacement of the robot
+ * in the output cloud.
+ */
 class PointCloudAggregator : public nodelet::Nodelet
 {
 public:
@@ -42,12 +75,12 @@ public:
 
 	virtual ~PointCloudAggregator()
 	{
-	    if (exactSync4_!=0) delete exactSync4_;
-	    if (approxSync4_!=0) delete approxSync4_;
-	    if (exactSync3_!=0) delete exactSync3_;
-	    if (approxSync3_!=0) delete approxSync3_;
-	    if (exactSync2_!=0) delete exactSync2_;
-	    if (approxSync2_!=0) delete approxSync2_;
+	    delete exactSync4_;
+	    delete approxSync4_;
+	    delete exactSync3_;
+	    delete approxSync3_;
+	    delete exactSync2_;
+	    delete approxSync2_;
 
 	    if(warningThread_)
 		{
@@ -68,6 +101,7 @@ private:
 		bool approx=true;
 		pnh.param("queue_size", queueSize, queueSize);
 		pnh.param("frame_id", frameId_, frameId_);
+		pnh.param("fixed_frame_id", fixedFrameId_, fixedFrameId_);
 		pnh.param("approx_sync", approx, approx);
 		pnh.param("count", count, count);
 
@@ -198,17 +232,51 @@ private:
 
 			for(unsigned int i=1; i<cloudMsgs.size(); ++i)
 			{
+				rtabmap::Transform cloudDisplacement;
+				bool notsync = false;
+				if(!fixedFrameId_.empty() &&
+				   cloudMsgs[0]->header.stamp != cloudMsgs[i]->header.stamp)
+				{
+					// approx sync
+					cloudDisplacement = rtabmap_ros::getTransform(
+							frameId, //sourceTargetFrame
+							fixedFrameId_, //fixedFrame
+							cloudMsgs[i]->header.stamp, //stampSource
+							cloudMsgs[0]->header.stamp, //stampTarget
+							tfListener_,
+							0.1);
+					notsync = true;
+				}
+
 				pcl::PCLPointCloud2 cloud2;
 				if(frameId.compare(cloudMsgs[i]->header.frame_id) != 0)
 				{
 					sensor_msgs::PointCloud2 tmp;
 					pcl_ros::transformPointCloud(frameId, *cloudMsgs[i], tmp, tfListener_);
-					pcl_conversions::toPCL(tmp, cloud2);
+					if(!cloudDisplacement.isNull())
+					{
+						sensor_msgs::PointCloud2 tmp2;
+						pcl_ros::transformPointCloud(cloudDisplacement.toEigen4f(), tmp, tmp2);
+						pcl_conversions::toPCL(tmp2, cloud2);
+					}
+					else
+					{
+						pcl_conversions::toPCL(tmp, cloud2);
+					}
+
 				}
 				else
 				{
-					pcl_conversions::toPCL(*cloudMsgs[i], cloud2);
-					frameId = cloudMsgs[i]->header.frame_id;
+					if(!cloudDisplacement.isNull())
+					{
+						sensor_msgs::PointCloud2 tmp;
+						pcl_ros::transformPointCloud(cloudDisplacement.toEigen4f(), *cloudMsgs[i], tmp);
+						pcl_conversions::toPCL(tmp, cloud2);
+					}
+					else
+					{
+						pcl_conversions::toPCL(*cloudMsgs[i], cloud2);
+					}
 				}
 
 				pcl::PCLPointCloud2 tmp_output;
@@ -266,6 +334,7 @@ private:
 	ros::Publisher cloudPub_;
 
 	std::string frameId_;
+	std::string fixedFrameId_;
 	tf::TransformListener tfListener_;
 };
 
