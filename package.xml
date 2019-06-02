@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package>
   <name>rtabmap_ros</name>
-  <version>0.17.6</version>
+  <version>0.19.3</version>
   <description>RTAB-Map's ros-pkg. RTAB-Map is a RGB-D SLAM approach with real-time constraints.</description>
   <maintainer email="matlabbe@gmail.com">Mathieu Labbe</maintainer>
   <author>Mathieu Labbe</author>
@@ -22,6 +22,7 @@
   <build_depend>stereo_msgs</build_depend>
   <build_depend>geometry_msgs</build_depend>
   <build_depend>visualization_msgs</build_depend>
+  <build_depend>rosgraph_msgs</build_depend>
   <build_depend>image_transport</build_depend>
   <build_depend>tf</build_depend>
   <build_depend>tf_conversions</build_depend>
@@ -53,6 +54,7 @@
   <run_depend>stereo_msgs</run_depend>
   <run_depend>geometry_msgs</run_depend>
   <run_depend>visualization_msgs</run_depend>
+  <run_depend>rosgraph_msgs</run_depend>
   <run_depend>image_transport</run_depend>
   <run_depend>compressed_depth_image_transport</run_depend>
   <run_depend>compressed_image_transport</run_depend>
