@@ -36,6 +36,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <std_srvs/Empty.h>
 #include <std_msgs/Header.h>
+#include <sensor_msgs/Imu.h>
 
 #include <rtabmap_ros/ResetPose.h>
 #include <rtabmap/core/SensorData.h>
@@ -86,6 +87,9 @@ private:
 	virtual void onOdomInit() = 0;
 	virtual void updateParameters(rtabmap::ParametersMap & parameters) {}
 
+	void callbackIMU(const sensor_msgs::ImuConstPtr& msg);
+	void reset(const rtabmap::Transform & pose = rtabmap::Transform::getIdentity());
+
 private:
 	rtabmap::Odometry * odometry_;
 	boost::thread * warningThread_;
@@ -99,6 +103,7 @@ private:
 	std::string guessFrameId_;
 	double guessMinTranslation_;
 	double guessMinRotation_;
+	double guessMinTime_;
 	bool publishTf_;
 	bool waitForTransform_;
 	double waitForTransformDuration_;
@@ -120,6 +125,7 @@ private:
 	ros::ServiceServer setLogErrorSrv_;
 	tf2_ros::TransformBroadcaster tfBroadcaster_;
 	tf::TransformListener tfListener_;
+	ros::Subscriber imuSub_;
 
 	bool paused_;
 	int resetCountdown_;
@@ -128,7 +134,11 @@ private:
 	bool visParams_;
 	bool icpParams_;
 	rtabmap::Transform guess_;
-	double guessStamp_;
+	rtabmap::Transform guessPreviousPose_;
+	double previousStamp_;
+	double expectedUpdateRate_;
+	int odomStrategy_;
+	bool waitIMUToinit_;
 };
 
 }

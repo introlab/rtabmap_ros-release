@@ -27,6 +27,12 @@ RTAB-Map is released as binaries in the ROS distribution.
     ```
     $ sudo apt-get install ros-indigo-rtabmap-ros
     ```
+    * For armhf architecture, `ros-indigo-rtabmap-ros` is not available. Install `ros-indigo-rtabmap` and build from source `rtabmap_ros` using the `indigo-devel` branch.
+        ```
+        $ cd catkin_ws
+        $ git clone -b indigo-devel https://github.com/introlab/rtabmap_ros.git src/rtabmap_ros
+        $ catkin_make -j1
+        ```
 * Hydro:
     ```
     $ sudo apt-get install ros-hydro-rtabmap-ros
@@ -38,6 +44,11 @@ When launching `rtabmap_ros`'s nodes, if you have the error `error while loading
 ```bash
 $ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/ros/kinetic/lib/x86_64-linux-gnu
 ```
+
+### Docker
+
+* Go to [docker](https://github.com/introlab/rtabmap_ros/tree/master/docker) directory for an example.
+
 
 ## Build from source
 This section shows how to install RTAB-Map ros-pkg on **ROS Hydro/Indigo/Jade/Kinetic/Lunar** (Catkin build). RTAB-Map works only with the PCL >=1.7, which is the default version installed with ROS Hydro/Indigo/Jade/Kinetic/Lunar (**Fuerte and Groovy are not supported**).
@@ -123,7 +134,7 @@ To use `rtabmap_ros` on Jetson, you can follow the instructions above if you don
     $ cd ~/catkin_ws
     $ git clone https://github.com/ros-perception/vision_opencv src/vision_opencv
     $ git clone https://github.com/ros-perception/image_transport_plugins.git src/image_transport_plugins
-    $ git clone https://github.com/introlab/rtabmap_ros.git src/rtabmap_ros src/rtabmap_ros
+    $ git clone https://github.com/introlab/rtabmap_ros.git src/rtabmap_ros
     $ catkin_make -j2
    ```
 
