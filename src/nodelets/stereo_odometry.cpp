@@ -38,7 +38,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
-#include <sensor_msgs/Imu.h>
 
 #include <image_geometry/stereo_camera_model.h>
 
@@ -143,14 +142,6 @@ private:
 					cameraInfoRight_.getTopic().c_str());
 		}
 
-		int odomStrategy = 0;
-		Parameters::parse(this->parameters(), Parameters::kOdomStrategy(), odomStrategy);
-		if(odomStrategy == Odometry::kTypeOkvis || odomStrategy == Odometry::kTypeMSCKF)
-		{
-			imuSub_ = nh.subscribe("imu", queueSize_*5, &StereoOdometry::callbackIMU, this);
-			NODELET_INFO("VIO approach selected, subscribing to IMU topic %s", imuSub_.getTopic().c_str());
-		}
-
 		this->startWarningThread(subscribedTopicsMsg, approxSync);
 	}
 
@@ -177,13 +168,17 @@ private:
 			if(!(imageRectLeft->encoding.compare(sensor_msgs::image_encodings::MONO8) ==0 ||
 				 imageRectLeft->encoding.compare(sensor_msgs::image_encodings::MONO16) ==0 ||
 				 imageRectLeft->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
-				 imageRectLeft->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0) ||
+				 imageRectLeft->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0 ||
+				 imageRectLeft->encoding.compare(sensor_msgs::image_encodings::BGRA8) == 0 ||
+				 imageRectLeft->encoding.compare(sensor_msgs::image_encodings::RGBA8) == 0) ||
 				!(imageRectRight->encoding.compare(sensor_msgs::image_encodings::MONO8) ==0 ||
 				  imageRectRight->encoding.compare(sensor_msgs::image_encodings::MONO16) ==0 ||
 				  imageRectRight->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
-				  imageRectRight->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0))
+				  imageRectRight->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0 ||
+				  imageRectRight->encoding.compare(sensor_msgs::image_encodings::BGRA8) == 0 ||
+				  imageRectRight->encoding.compare(sensor_msgs::image_encodings::RGBA8) == 0))
 			{
-				NODELET_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8 (mono8 recommended), received types are %s (left) and %s (right)",
+				NODELET_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8,rgba8,bgra8 (mono8 recommended), received types are %s (left) and %s (right)",
 						imageRectLeft->encoding.c_str(), imageRectRight->encoding.c_str());
 				return;
 			}
@@ -199,10 +194,27 @@ private:
 			int quality = -1;
 			if(imageRectLeft->data.size() && imageRectRight->data.size())
 			{
-				rtabmap::StereoCameraModel stereoModel = rtabmap_ros::stereoCameraModelFromROS(*cameraInfoLeft, *cameraInfoRight, localTransform);
-				if(stereoModel.baseline() <= 0)
+				bool alreadyRectified = true;
+				Parameters::parse(parameters(), Parameters::kRtabmapImagesAlreadyRectified(), alreadyRectified);
+				rtabmap::Transform stereoTransform;
+				if(!alreadyRectified)
 				{
-					NODELET_FATAL("The stereo baseline (%f) should be positive (baseline=-Tx/fx). We assume a horizontal left/right stereo "
+					stereoTransform = getTransform(
+							cameraInfoRight->header.frame_id,
+							cameraInfoLeft->header.frame_id,
+							cameraInfoLeft->header.stamp);
+					if(stereoTransform.isNull())
+					{
+						NODELET_ERROR("Parameter %s is false but we cannot get TF between the two cameras!", Parameters::kRtabmapImagesAlreadyRectified().c_str());
+						return;
+					}
+				}
+
+				rtabmap::StereoCameraModel stereoModel = rtabmap_ros::stereoCameraModelFromROS(*cameraInfoLeft, *cameraInfoRight, localTransform, stereoTransform);
+
+				if(alreadyRectified && stereoModel.baseline() <= 0)
+				{
+					NODELET_ERROR("The stereo baseline (%f) should be positive (baseline=-Tx/fx). We assume a horizontal left/right stereo "
 							  "setup where the Tx (or P(0,3)) is negative in the right camera info msg.", stereoModel.baseline());
 					return;
 				}
@@ -254,13 +266,17 @@ private:
 			if(!(imageRectLeft->encoding.compare(sensor_msgs::image_encodings::MONO8) ==0 ||
 				 imageRectLeft->encoding.compare(sensor_msgs::image_encodings::MONO16) ==0 ||
 				 imageRectLeft->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
-				 imageRectLeft->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0) ||
+				 imageRectLeft->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0 ||
+				 imageRectLeft->encoding.compare(sensor_msgs::image_encodings::BGRA8) == 0 ||
+				 imageRectLeft->encoding.compare(sensor_msgs::image_encodings::RGBA8) == 0) ||
 				!(imageRectRight->encoding.compare(sensor_msgs::image_encodings::MONO8) ==0 ||
 				  imageRectRight->encoding.compare(sensor_msgs::image_encodings::MONO16) ==0 ||
 				  imageRectRight->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
-				  imageRectRight->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0))
+				  imageRectRight->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0 ||
+				  imageRectRight->encoding.compare(sensor_msgs::image_encodings::BGRA8) == 0 ||
+				  imageRectRight->encoding.compare(sensor_msgs::image_encodings::RGBA8) == 0))
 			{
-				NODELET_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8 (mono8 recommended), received types are %s (left) and %s (right)",
+				NODELET_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8,rgba8,bgra8 (mono8 recommended), received types are %s (left) and %s (right)",
 						imageRectLeft->encoding.c_str(), imageRectRight->encoding.c_str());
 				return;
 			}
@@ -318,36 +334,6 @@ private:
 			{
 				NODELET_WARN("Odom: input images empty?!?");
 			}
-		}
-	}
-
-	void callbackIMU(
-			const sensor_msgs::ImuConstPtr& msg)
-	{
-		if(!this->isPaused())
-		{
-			double stamp = msg->header.stamp.toSec();
-			rtabmap::Transform localTransform = rtabmap::Transform::getIdentity();
-			if(this->frameId().compare(msg->header.frame_id) != 0)
-			{
-				localTransform = getTransform(this->frameId(), msg->header.frame_id, msg->header.stamp);
-			}
-			if(localTransform.isNull())
-			{
-				ROS_ERROR("Could not transform IMU msg from frame \"%s\" to frame \"%s\", TF not available at time %f",
-						msg->header.frame_id.c_str(), this->frameId().c_str(), stamp);
-				return;
-			}
-
-			IMU imu(
-					cv::Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z),
-					cv::Mat(3,3,CV_64FC1,(void*)msg->angular_velocity_covariance.data()).clone(),
-					cv::Vec3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z),
-					cv::Mat(3,3,CV_64FC1,(void*)msg->linear_acceleration_covariance.data()).clone(),
-					localTransform);
-
-			SensorData data(imu, 0, stamp);
-			this->processData(data, msg->header.stamp);
 		}
 	}
 
