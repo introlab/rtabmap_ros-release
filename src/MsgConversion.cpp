@@ -394,24 +394,34 @@ void infoFromROS(const rtabmap_ros::Info & info, rtabmap::Statistics & stat)
 		mapIntFloat.insert(std::pair<int, float>(info.posteriorKeys.at(i), info.posteriorValues.at(i)));
 	}
 	stat.setPosterior(mapIntFloat);
+
 	mapIntFloat.clear();
 	for(unsigned int i=0; i<info.likelihoodKeys.size() && i<info.likelihoodValues.size(); ++i)
 	{
 		mapIntFloat.insert(std::pair<int, float>(info.likelihoodKeys.at(i), info.likelihoodValues.at(i)));
 	}
 	stat.setLikelihood(mapIntFloat);
+
 	mapIntFloat.clear();
 	for(unsigned int i=0; i<info.rawLikelihoodKeys.size() && i<info.rawLikelihoodValues.size(); ++i)
 	{
 		mapIntFloat.insert(std::pair<int, float>(info.rawLikelihoodKeys.at(i), info.rawLikelihoodValues.at(i)));
 	}
 	stat.setRawLikelihood(mapIntFloat);
+
 	std::map<int, int> mapIntInt;
 	for(unsigned int i=0; i<info.weightsKeys.size() && i<info.weightsValues.size(); ++i)
 	{
 		mapIntInt.insert(std::pair<int, int>(info.weightsKeys.at(i), info.weightsValues.at(i)));
 	}
 	stat.setWeights(mapIntInt);
+
+	std::map<int, std::string> mapIntStr;
+	for(unsigned int i=0; i<info.labelsKeys.size() && i<info.labelsValues.size(); ++i)
+	{
+		mapIntStr.insert(std::pair<int, std::string>(info.labelsKeys.at(i), info.labelsValues.at(i)));
+	}
+	stat.setLabels(mapIntStr);
 
 	stat.setLocalPath(info.localPath);
 	stat.setCurrentGoalId(info.currentGoalId);
@@ -443,6 +453,8 @@ void infoToROS(const rtabmap::Statistics & stats, rtabmap_ros::Info & info)
 		info.rawLikelihoodValues = uValues(stats.rawLikelihood());
 		info.weightsKeys = uKeys(stats.weights());
 		info.weightsValues = uValues(stats.weights());
+		info.labelsKeys = uKeys(stats.labels());
+		info.labelsValues = uValues(stats.labels());
 		info.localPath = stats.localPath();
 		info.currentGoalId = stats.currentGoalId();
 
@@ -688,13 +700,44 @@ void cameraModelToROS(
 rtabmap::StereoCameraModel stereoCameraModelFromROS(
 		const sensor_msgs::CameraInfo & leftCamInfo,
 		const sensor_msgs::CameraInfo & rightCamInfo,
-		const rtabmap::Transform & localTransform)
+		const rtabmap::Transform & localTransform,
+		const rtabmap::Transform & stereoTransform)
 {
 	return rtabmap::StereoCameraModel(
 			"ros",
 			cameraModelFromROS(leftCamInfo, localTransform),
 			cameraModelFromROS(rightCamInfo, localTransform),
-			rtabmap::Transform());
+			stereoTransform);
+}
+rtabmap::StereoCameraModel stereoCameraModelFromROS(
+		const sensor_msgs::CameraInfo & leftCamInfo,
+		const sensor_msgs::CameraInfo & rightCamInfo,
+		const std::string & frameId,
+		tf::TransformListener & listener,
+		double waitForTransform)
+{
+	rtabmap::Transform localTransform = getTransform(
+			frameId,
+			leftCamInfo.header.frame_id,
+			leftCamInfo.header.stamp,
+			listener,
+			waitForTransform);
+	if(localTransform.isNull())
+	{
+		return rtabmap::StereoCameraModel();
+	}
+
+	rtabmap::Transform stereoTransform = getTransform(
+			leftCamInfo.header.frame_id,
+			rightCamInfo.header.frame_id,
+			leftCamInfo.header.stamp,
+			listener,
+			waitForTransform);
+	if(stereoTransform.isNull())
+	{
+		return rtabmap::StereoCameraModel();
+	}
+	return stereoCameraModelFromROS(leftCamInfo, rightCamInfo, localTransform, stereoTransform);
 }
 
 void mapDataFromROS(
@@ -936,7 +979,7 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 	point3fToROS(signature.sensorData().gridViewPoint(), msg.grid_view_point);
 	msg.grid_cell_size = signature.sensorData().gridCellSize();
 	msg.laserScanMaxPts = signature.sensorData().laserScanCompressed().maxPoints();
-	msg.laserScanMaxRange = signature.sensorData().laserScanCompressed().maxRange();
+	msg.laserScanMaxRange = signature.sensorData().laserScanCompressed().rangeMax();
 	msg.laserScanFormat = signature.sensorData().laserScanCompressed().format();
 	transformToGeometryMsg(signature.sensorData().laserScanCompressed().localTransform(), msg.laserScanLocalTransform);
 	msg.baseline = 0;
@@ -1110,6 +1153,8 @@ rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg)
 
 	info.transform = transformFromGeometryMsg(msg.transform);
 	info.transformFiltered = transformFromGeometryMsg(msg.transformFiltered);
+	info.transformGroundTruth = transformFromGeometryMsg(msg.transformGroundTruth);
+	info.guessVelocity = transformFromGeometryMsg(msg.guessVelocity);
 
 	UASSERT(msg.localMapKeys.size() == msg.localMapValues.size());
 	for(unsigned int i=0; i<msg.localMapKeys.size(); ++i)
@@ -1164,6 +1209,8 @@ void odomInfoToROS(const rtabmap::OdometryInfo & info, rtabmap_ros::OdomInfo & m
 
 	transformToGeometryMsg(info.transform, msg.transform);
 	transformToGeometryMsg(info.transformFiltered, msg.transformFiltered);
+	transformToGeometryMsg(info.transformGroundTruth, msg.transformGroundTruth);
+	transformToGeometryMsg(info.guessVelocity, msg.guessVelocity);
 
 	msg.localMapKeys = uKeys(info.localMap);
 	points3fToROS(uValues(info.localMap), msg.localMapValues);
@@ -1215,6 +1262,74 @@ void userDataToROS(const cv::Mat & data, rtabmap_ros::UserData & dataMsg, bool c
 			dataMsg.type = data.type();
 		}
 	}
+}
+
+rtabmap::Landmarks landmarksFromROS(
+		const std::map<int, geometry_msgs::PoseWithCovarianceStamped> & tags,
+		const std::string & frameId,
+		const std::string & odomFrameId,
+		const ros::Time & odomStamp,
+		tf::TransformListener & listener,
+		double waitForTransform,
+		double defaultLinVariance,
+		double defaultAngVariance)
+{
+	//tag detections
+	rtabmap::Landmarks landmarks;
+	for(std::map<int, geometry_msgs::PoseWithCovarianceStamped>::const_iterator iter=tags.begin(); iter!=tags.end(); ++iter)
+	{
+		if(iter->first <=0)
+		{
+			ROS_ERROR("Invalid landmark received! IDs should be > 0 (it is %d). Ignoring this landmark.", iter->first);
+			continue;
+		}
+		rtabmap::Transform baseToCamera = rtabmap_ros::getTransform(
+				frameId,
+				iter->second.header.frame_id,
+				iter->second.header.stamp,
+				listener,
+				waitForTransform);
+
+		if(baseToCamera.isNull())
+		{
+			ROS_ERROR("Cannot transform tag pose from \"%s\" frame to \"%s\" frame!",
+					iter->second.header.frame_id.c_str(), frameId.c_str());
+			continue;
+		}
+
+		rtabmap::Transform baseToTag = baseToCamera * transformFromPoseMsg(iter->second.pose.pose);
+
+		if(!baseToTag.isNull())
+		{
+			// Correction of the global pose accounting the odometry movement since we received it
+			rtabmap::Transform correction = rtabmap_ros::getTransform(
+					frameId,
+					odomFrameId,
+					iter->second.header.stamp,
+					odomStamp,
+					listener,
+					waitForTransform);
+			if(!correction.isNull())
+			{
+				baseToTag = correction * baseToTag;
+			}
+			else
+			{
+				ROS_WARN("Could not adjust tag pose accordingly to latest odometry pose. "
+						"If odometry is small since it received the tag pose and "
+						"covariance is large, this should not be a problem.");
+			}
+			cv::Mat covariance = cv::Mat(6,6, CV_64FC1, (void*)iter->second.pose.covariance.data()).clone();
+			if(covariance.empty() || !uIsFinite(covariance.at<double>(0,0)) || covariance.at<double>(0,0)<=0.0f)
+			{
+				covariance = cv::Mat::eye(6,6,CV_64FC1);
+				covariance(cv::Range(0,3), cv::Range(0,3)) *= defaultLinVariance;
+				covariance(cv::Range(3,6), cv::Range(3,6)) *= defaultAngVariance;
+			}
+			landmarks.insert(std::make_pair(iter->first, rtabmap::Landmark(iter->first, baseToTag, covariance)));
+		}
+	}
+	return landmarks;
 }
 
 rtabmap::Transform getTransform(
@@ -1549,10 +1664,10 @@ bool convertScanMsg(
 		const std::string & frameId,
 		const std::string & odomFrameId,
 		const ros::Time & odomStamp,
-		cv::Mat & scan,
-		rtabmap::Transform & scanLocalTransform,
+		rtabmap::LaserScan & scan,
 		tf::TransformListener & listener,
-		double waitForTransform)
+		double waitForTransform,
+		bool outputInFrameId)
 {
 	// make sure the frame of the laser is updated too
 	rtabmap::Transform tmpT = getTransform(
@@ -1566,7 +1681,7 @@ bool convertScanMsg(
 		return false;
 	}
 
-	scanLocalTransform = getTransform(
+	rtabmap::Transform scanLocalTransform = getTransform(
 			frameId,
 			scan2dMsg->header.frame_id,
 			scan2dMsg->header.stamp,
@@ -1581,9 +1696,6 @@ bool convertScanMsg(
 	sensor_msgs::PointCloud2 scanOut;
 	laser_geometry::LaserProjection projection;
 	projection.transformLaserScanToPointCloud(odomFrameId.empty()?frameId:odomFrameId, *scan2dMsg, scanOut, listener);
-	pcl::PointCloud<pcl::PointXYZ>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZ>);
-	pcl::fromROSMsg(scanOut, *pclScan);
-	pclScan->is_dense = true;
 
 	//transform back in laser frame
 	rtabmap::Transform laserToOdom = getTransform(
@@ -1619,7 +1731,56 @@ bool convertScanMsg(
 		}
 	}
 
-	scan = rtabmap::util3d::laserScan2dFromPointCloud(*pclScan, laserToOdom); // put back in laser frame
+	if(outputInFrameId)
+	{
+		laserToOdom *= scanLocalTransform;
+	}
+
+	bool containIntensity = false;
+	for(unsigned int i=0; i<scanOut.fields.size(); ++i)
+	{
+		if(scanOut.fields[i].name.compare("intensity") == 0)
+		{
+			containIntensity = true;
+		}
+	}
+
+	rtabmap::LaserScan::Format format;
+	cv::Mat data;
+	if(containIntensity)
+	{
+		pcl::PointCloud<pcl::PointXYZI>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZI>);
+		pcl::fromROSMsg(scanOut, *pclScan);
+		pclScan->is_dense = true;
+		data = rtabmap::util3d::laserScan2dFromPointCloud(*pclScan, laserToOdom); // put back in laser frame
+		format = rtabmap::LaserScan::kXYI;
+	}
+	else
+	{
+		pcl::PointCloud<pcl::PointXYZ>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZ>);
+		pcl::fromROSMsg(scanOut, *pclScan);
+		pclScan->is_dense = true;
+		data = rtabmap::util3d::laserScan2dFromPointCloud(*pclScan, laserToOdom); // put back in laser frame
+		format = rtabmap::LaserScan::kXY;
+	}
+
+	rtabmap::Transform zAxis(0,0,1,0,0,0);
+	if((scanLocalTransform.rotation()*zAxis).z() < 0)
+	{
+		cv::Mat flipScan;
+		cv::flip(data, flipScan, 1);
+		data = flipScan;
+	}
+
+	scan = rtabmap::LaserScan(
+			data,
+			format,
+			scan2dMsg->range_min,
+			scan2dMsg->range_max,
+			scan2dMsg->angle_min,
+			scan2dMsg->angle_max,
+			scan2dMsg->angle_increment,
+			outputInFrameId?rtabmap::Transform::getIdentity():scanLocalTransform);
 
 	return true;
 }
@@ -1629,13 +1790,15 @@ bool convertScan3dMsg(
 		const std::string & frameId,
 		const std::string & odomFrameId,
 		const ros::Time & odomStamp,
-		cv::Mat & scan,
-		rtabmap::Transform & scanLocalTransform,
+		rtabmap::LaserScan & scan,
 		tf::TransformListener & listener,
-		double waitForTransform)
+		double waitForTransform,
+		int maxPoints,
+		float maxRange)
 {
 	bool containNormals = false;
 	bool containColors = false;
+	bool containIntensity = false;
 	for(unsigned int i=0; i<scan3dMsg->fields.size(); ++i)
 	{
 		if(scan3dMsg->fields[i].name.compare("normal_x") == 0)
@@ -1646,9 +1809,13 @@ bool convertScan3dMsg(
 		{
 			containColors = true;
 		}
+		if(scan3dMsg->fields[i].name.compare("intensity") == 0)
+		{
+			containIntensity = true;
+		}
 	}
 
-	scanLocalTransform = getTransform(frameId, scan3dMsg->header.frame_id, scan3dMsg->header.stamp, listener, waitForTransform);
+	rtabmap::Transform scanLocalTransform = getTransform(frameId, scan3dMsg->header.frame_id, scan3dMsg->header.stamp, listener, waitForTransform);
 	if(scanLocalTransform.isNull())
 	{
 		ROS_ERROR("TF of received scan cloud at time %fs is not set, aborting rtabmap update.", scan3dMsg->header.stamp.toSec());
@@ -1686,7 +1853,17 @@ bool convertScan3dMsg(
 			{
 				pclScan = rtabmap::util3d::removeNaNNormalsFromPointCloud(pclScan);
 			}
-			scan = rtabmap::util3d::laserScanFromPointCloud(*pclScan);
+			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, rtabmap::LaserScan::kXYZRGBNormal, scanLocalTransform);
+		}
+		else if(containIntensity)
+		{
+			pcl::PointCloud<pcl::PointXYZINormal>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZINormal>);
+			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+			if(!pclScan->is_dense)
+			{
+				pclScan = rtabmap::util3d::removeNaNNormalsFromPointCloud(pclScan);
+			}
+			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, rtabmap::LaserScan::kXYZINormal, scanLocalTransform);
 		}
 		else
 		{
@@ -1696,7 +1873,7 @@ bool convertScan3dMsg(
 			{
 				pclScan = rtabmap::util3d::removeNaNNormalsFromPointCloud(pclScan);
 			}
-			scan = rtabmap::util3d::laserScanFromPointCloud(*pclScan);
+			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, rtabmap::LaserScan::kXYZNormal, scanLocalTransform);
 		}
 	}
 	else
@@ -1709,8 +1886,17 @@ bool convertScan3dMsg(
 			{
 				pclScan = rtabmap::util3d::removeNaNFromPointCloud(pclScan);
 			}
-
-			scan = rtabmap::util3d::laserScanFromPointCloud(*pclScan);
+			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, rtabmap::LaserScan::kXYZRGB, scanLocalTransform);
+		}
+		else if(containIntensity)
+		{
+			pcl::PointCloud<pcl::PointXYZI>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZI>);
+			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+			if(!pclScan->is_dense)
+			{
+				pclScan = rtabmap::util3d::removeNaNFromPointCloud(pclScan);
+			}
+			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, rtabmap::LaserScan::kXYZI, scanLocalTransform);
 		}
 		else
 		{
@@ -1720,8 +1906,7 @@ bool convertScan3dMsg(
 			{
 				pclScan = rtabmap::util3d::removeNaNFromPointCloud(pclScan);
 			}
-
-			scan = rtabmap::util3d::laserScanFromPointCloud(*pclScan);
+			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, rtabmap::LaserScan::kXYZ, scanLocalTransform);
 		}
 	}
 	return true;

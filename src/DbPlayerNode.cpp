@@ -31,6 +31,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/LaserScan.h>
 #include <sensor_msgs/CameraInfo.h>
+#include <sensor_msgs/NavSatFix.h>
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
+#include <rosgraph_msgs/Clock.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <nav_msgs/Odometry.h>
 #include <cv_bridge/cv_bridge.h>
@@ -86,6 +89,14 @@ int main(int argc, char** argv)
 	//ULogger::setLevel(ULogger::kDebug);
 	//ULogger::setEventLevel(ULogger::kWarning);
 
+	bool publishClock = false;
+	for(int i=1;i<argc;++i)
+	{
+		if(strcmp(argv[i], "--clock") == 0)
+		{
+			publishClock = true;
+		}
+	}
 
 	ros::NodeHandle nh;
 	ros::NodeHandle pnh("~");
@@ -94,26 +105,26 @@ int main(int argc, char** argv)
 	std::string odomFrameId = "odom";
 	std::string cameraFrameId = "camera_optical_link";
 	std::string scanFrameId = "base_laser_link";
-	double rate = -1.0f;
+	double rate = 1.0f;
 	std::string databasePath = "";
 	bool publishTf = true;
 	int startId = 0;
+	bool useDbStamps = true;
 
 	pnh.param("frame_id", frameId, frameId);
 	pnh.param("odom_frame_id", odomFrameId, odomFrameId);
 	pnh.param("camera_frame_id", cameraFrameId, cameraFrameId);
 	pnh.param("scan_frame_id", scanFrameId, scanFrameId);
-	pnh.param("rate", rate, rate); // Set -1 to use database stamps
+	pnh.param("rate", rate, rate); // Ratio of the database stamps
 	pnh.param("database", databasePath, databasePath);
 	pnh.param("publish_tf", publishTf, publishTf);
 	pnh.param("start_id", startId, startId);
 
-	// based on URG-04LX
-	double scanAngleMin, scanAngleMax, scanAngleIncrement, scanTime, scanRangeMin, scanRangeMax;
+	// A general 360 lidar with 0.5 deg increment
+	double scanAngleMin, scanAngleMax, scanAngleIncrement, scanRangeMin, scanRangeMax;
 	pnh.param<double>("scan_angle_min", scanAngleMin, -M_PI);
 	pnh.param<double>("scan_angle_max", scanAngleMax, M_PI);
 	pnh.param<double>("scan_angle_increment", scanAngleIncrement, M_PI / 720.0);
-	pnh.param<double>("scan_time", scanTime, 0);
 	pnh.param<double>("scan_range_min", scanRangeMin, 0.0);
 	pnh.param<double>("scan_range_max", scanRangeMax, 60);
 
@@ -124,6 +135,7 @@ int main(int argc, char** argv)
 	ROS_INFO("rate = %f", rate);
 	ROS_INFO("publish_tf = %s", publishTf?"true":"false");
 	ROS_INFO("start_id = %d", startId);
+	ROS_INFO("Publish clock (--clock): %s", publishClock?"true":"false");
 
 	if(databasePath.empty())
 	{
@@ -137,7 +149,7 @@ int main(int argc, char** argv)
 	}
 	ROS_INFO("database = %s", databasePath.c_str());
 
-	rtabmap::DBReader reader(databasePath, rate, false, false, false, startId);
+	rtabmap::DBReader reader(databasePath, -rate, false, false, false, startId);
 	if(!reader.init())
 	{
 		ROS_ERROR("Cannot open database \"%s\".", databasePath.c_str());
@@ -159,7 +171,16 @@ int main(int argc, char** argv)
 	ros::Publisher rightCamInfoPub;
 	ros::Publisher odometryPub;
 	ros::Publisher scanPub;
+	ros::Publisher scanCloudPub;
+	ros::Publisher globalPosePub;
+	ros::Publisher gpsFixPub;
+	ros::Publisher clockPub;
 	tf2_ros::TransformBroadcaster tfBroadcaster;
+
+	if(publishClock)
+	{
+		clockPub = nh.advertise<rosgraph_msgs::Clock>("/clock", 1);
+	}
 
 	UTimer timer;
 	rtabmap::CameraInfo cameraInfo;
@@ -172,7 +193,14 @@ int main(int argc, char** argv)
 	{
 		ROS_INFO("Reading sensor data %d...", odom.data().id());
 
-		ros::Time time = ros::Time::now();
+		ros::Time time(odom.data().stamp());
+
+		if(publishClock)
+		{
+			rosgraph_msgs::Clock msg;
+			msg.clock = time;
+			clockPub.publish(msg);
+		}
 
 		sensor_msgs::CameraInfo camInfoA; //rgb or left
 		sensor_msgs::CameraInfo camInfoB; //depth or right
@@ -263,7 +291,48 @@ int main(int argc, char** argv)
 
 		if(!odom.data().laserScanRaw().isEmpty())
 		{
-			if(scanPub.getTopic().empty()) scanPub = nh.advertise<sensor_msgs::LaserScan>("scan", 1);
+			if(scanPub.getTopic().empty() && odom.data().laserScanRaw().is2d())
+			{
+				scanPub = nh.advertise<sensor_msgs::LaserScan>("scan", 1);
+				if(odom.data().laserScanRaw().angleIncrement() > 0.0f)
+				{
+					ROS_INFO("Scan will be published.");
+				}
+				else
+				{
+					ROS_INFO("Scan will be published with those parameters:");
+					ROS_INFO("  scan_angle_min=%f", scanAngleMin);
+					ROS_INFO("  scan_angle_max=%f", scanAngleMax);
+					ROS_INFO("  scan_angle_increment=%f", scanAngleIncrement);
+					ROS_INFO("  scan_range_min=%f", scanRangeMin);
+					ROS_INFO("  scan_range_max=%f", scanRangeMax);
+				}
+			}
+			else if(scanCloudPub.getTopic().empty())
+			{
+				scanCloudPub = nh.advertise<sensor_msgs::PointCloud2>("scan_cloud", 1);
+				ROS_INFO("Scan cloud will be published.");
+			}
+		}
+
+		if(!odom.data().globalPose().isNull() &&
+			odom.data().globalPoseCovariance().cols==6 &&
+			odom.data().globalPoseCovariance().rows==6)
+		{
+			if(globalPosePub.getTopic().empty())
+			{
+				globalPosePub = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>("global_pose", 1);
+				ROS_INFO("Global pose will be published.");
+			}
+		}
+
+		if(odom.data().gps().stamp() > 0.0)
+		{
+			if(gpsFixPub.getTopic().empty())
+			{
+				gpsFixPub = nh.advertise<sensor_msgs::NavSatFix>("gps/fix", 1);
+				ROS_INFO("GPS will be published.");
+			}
 		}
 
 		// publish transforms first
@@ -298,7 +367,7 @@ int main(int argc, char** argv)
 				tfBroadcaster.sendTransform(odomToBase);
 			}
 
-			if(!scanPub.getTopic().empty())
+			if(!scanPub.getTopic().empty() || !scanCloudPub.getTopic().empty())
 			{
 				geometry_msgs::TransformStamped baseToLaserScan;
 				baseToLaserScan.child_frame_id = scanFrameId;
@@ -325,6 +394,33 @@ int main(int argc, char** argv)
 				memcpy(odomMsg.pose.covariance.begin(), odom.covariance().data, 36*sizeof(double));
 				odometryPub.publish(odomMsg);
 			}
+		}
+
+		// Publish async topics first (so that they can catched by rtabmap before the image topics)
+		if(globalPosePub.getNumSubscribers() > 0 &&
+			!odom.data().globalPose().isNull() &&
+			odom.data().globalPoseCovariance().cols==6 &&
+			odom.data().globalPoseCovariance().rows==6)
+		{
+			geometry_msgs::PoseWithCovarianceStamped msg;
+			rtabmap_ros::transformToPoseMsg(odom.data().globalPose(), msg.pose.pose);
+			memcpy(msg.pose.covariance.data(), odom.data().globalPoseCovariance().data, 36*sizeof(double));
+			msg.header.frame_id = frameId;
+			msg.header.stamp = time;
+			globalPosePub.publish(msg);
+		}
+
+		if(odom.data().gps().stamp() > 0.0)
+		{
+			sensor_msgs::NavSatFix msg;
+			msg.longitude = odom.data().gps().longitude();
+			msg.latitude = odom.data().gps().latitude();
+			msg.altitude = odom.data().gps().altitude();
+			msg.position_covariance_type = sensor_msgs::NavSatFix::COVARIANCE_TYPE_DIAGONAL_KNOWN;
+			msg.position_covariance.at(0) = msg.position_covariance.at(4) = msg.position_covariance.at(8)= odom.data().gps().error()* odom.data().gps().error();
+			msg.header.frame_id = frameId;
+			msg.header.stamp.fromSec(odom.data().gps().stamp());
+			gpsFixPub.publish(msg);
 		}
 
 		if(type >= 0)
@@ -411,44 +507,63 @@ int main(int argc, char** argv)
 			rightCamInfoPub.publish(camInfoB);
 		}
 
-		if(scanPub.getNumSubscribers() && !odom.data().laserScanRaw().isEmpty())
+		if(!odom.data().laserScanRaw().isEmpty())
 		{
-			//inspired from pointcloud_to_laserscan package
-			sensor_msgs::LaserScan msg;
-			msg.header.frame_id = scanFrameId;
-			msg.header.stamp = time;
-
-			msg.angle_min = scanAngleMin;
-			msg.angle_max = scanAngleMax;
-			msg.angle_increment = scanAngleIncrement;
-			msg.time_increment = 0.0;
-			msg.scan_time = scanTime;
-			msg.range_min = scanRangeMin;
-			msg.range_max = scanRangeMax;
-
-			uint32_t rangesSize = std::ceil((msg.angle_max - msg.angle_min) / msg.angle_increment);
-			msg.ranges.assign(rangesSize, 0.0);
-
-			const cv::Mat & scan = odom.data().laserScanRaw().data();
-			for (int i=0; i<scan.cols; ++i)
+			if(scanPub.getNumSubscribers() && odom.data().laserScanRaw().is2d())
 			{
-				const float * ptr = scan.ptr<float>(0,i);
-				double range = hypot(ptr[0], ptr[1]);
-				if (range >= scanRangeMin && range <=scanRangeMax)
+				//inspired from pointcloud_to_laserscan package
+				sensor_msgs::LaserScan msg;
+				msg.header.frame_id = scanFrameId;
+				msg.header.stamp = time;
+
+				msg.angle_min = scanAngleMin;
+				msg.angle_max = scanAngleMax;
+				msg.angle_increment = scanAngleIncrement;
+				msg.time_increment = 0.0;
+				msg.scan_time = 0;
+				msg.range_min = scanRangeMin;
+				msg.range_max = scanRangeMax;
+				if(odom.data().laserScanRaw().angleIncrement() > 0.0f)
 				{
-					double angle = atan2(ptr[1], ptr[0]);
-					if (angle >= msg.angle_min && angle <= msg.angle_max)
+					msg.angle_min = odom.data().laserScanRaw().angleMin();
+					msg.angle_max = odom.data().laserScanRaw().angleMax();
+					msg.angle_increment = odom.data().laserScanRaw().angleIncrement();
+					msg.range_min = odom.data().laserScanRaw().rangeMin();
+					msg.range_max = odom.data().laserScanRaw().rangeMax();
+				}
+
+				uint32_t rangesSize = std::ceil((msg.angle_max - msg.angle_min) / msg.angle_increment);
+				msg.ranges.assign(rangesSize, 0.0);
+
+				const cv::Mat & scan = odom.data().laserScanRaw().data();
+				for (int i=0; i<scan.cols; ++i)
+				{
+					const float * ptr = scan.ptr<float>(0,i);
+					double range = hypot(ptr[0], ptr[1]);
+					if (range >= msg.range_min && range <=msg.range_max)
 					{
-						int index = (angle - msg.angle_min) / msg.angle_increment;
-						if (index>=0 && index<rangesSize && (range < msg.ranges[index] || msg.ranges[index]==0))
+						double angle = atan2(ptr[1], ptr[0]);
+						if (angle >= msg.angle_min && angle <= msg.angle_max)
 						{
-							msg.ranges[index] = range;
+							int index = (angle - msg.angle_min) / msg.angle_increment;
+							if (index>=0 && index<rangesSize && (range < msg.ranges[index] || msg.ranges[index]==0))
+							{
+								msg.ranges[index] = range;
+							}
 						}
 					}
 				}
-			}
 
-			scanPub.publish(msg);
+				scanPub.publish(msg);
+			}
+			else if(scanCloudPub.getNumSubscribers())
+			{
+				sensor_msgs::PointCloud2 msg;
+				pcl_conversions::moveFromPCL(*rtabmap::util3d::laserScanToPointCloud2(odom.data().laserScanRaw()), msg);
+				msg.header.frame_id = scanFrameId;
+				msg.header.stamp = time;
+				scanCloudPub.publish(msg);
+			}
 		}
 
 		if(odom.data().userDataRaw().type() == CV_8SC1 &&
