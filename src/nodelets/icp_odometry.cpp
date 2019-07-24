@@ -90,12 +90,14 @@ private:
 
 		NODELET_INFO("IcpOdometry: scan_cloud_max_points  = %d", scanCloudMaxPoints_);
 		NODELET_INFO("IcpOdometry: scan_downsampling_step = %d", scanDownsamplingStep_);
-		NODELET_INFO("IcpOdometry: scan_voxel_size        = %f", scanVoxelSize_);
+		NODELET_INFO("IcpOdometry: scan_voxel_size        = %f m", scanVoxelSize_);
 		NODELET_INFO("IcpOdometry: scan_normal_k          = %d", scanNormalK_);
-		NODELET_INFO("IcpOdometry: scan_normal_radius     = %f", scanNormalRadius_);
+		NODELET_INFO("IcpOdometry: scan_normal_radius     = %f m", scanNormalRadius_);
 
 		scan_sub_ = nh.subscribe("scan", 1, &ICPOdometry::callbackScan, this);
 		cloud_sub_ = nh.subscribe("scan_cloud", 1, &ICPOdometry::callbackCloud, this);
+
+		filtered_scan_pub_ = nh.advertise<sensor_msgs::PointCloud2>("odom_filtered_input_scan", 1);
 	}
 
 	virtual void updateParameters(ParametersMap & parameters)
@@ -175,6 +177,11 @@ private:
 
 	void callbackScan(const sensor_msgs::LaserScanConstPtr& scanMsg)
 	{
+		if(this->isPaused())
+		{
+			return;
+		}
+
 		// make sure the frame of the laser is updated too
 		Transform localScanTransform = getTransform(this->frameId(),
 				scanMsg->header.frame_id,
@@ -224,10 +231,26 @@ private:
 				pcl::PointCloud<pcl::PointNormal>::Ptr pclScanNormal(new pcl::PointCloud<pcl::PointNormal>);
 				pcl::concatenateFields(*pclScan, *normals, *pclScanNormal);
 				scan = util3d::laserScan2dFromPointCloud(*pclScanNormal);
+
+				if(filtered_scan_pub_.getNumSubscribers())
+				{
+					sensor_msgs::PointCloud2 msg;
+					pcl::toROSMsg(*pclScanNormal, msg);
+					msg.header = scanMsg->header;
+					filtered_scan_pub_.publish(msg);
+				}
 			}
 			else
 			{
 				scan = util3d::laserScan2dFromPointCloud(*pclScan);
+
+				if(filtered_scan_pub_.getNumSubscribers())
+				{
+					sensor_msgs::PointCloud2 msg;
+					pcl::toROSMsg(*pclScan, msg);
+					msg.header = scanMsg->header;
+					filtered_scan_pub_.publish(msg);
+				}
 			}
 		}
 
@@ -244,6 +267,10 @@ private:
 
 	void callbackCloud(const sensor_msgs::PointCloud2ConstPtr& cloudMsg)
 	{
+		if(this->isPaused())
+		{
+			return;
+		}
 		cv::Mat scan;
 		bool containNormals = false;
 		if(scanVoxelSize_ == 0.0f)
@@ -264,7 +291,13 @@ private:
 			ROS_ERROR("TF of received scan cloud at time %fs is not set, aborting rtabmap update.", cloudMsg->header.stamp.toSec());
 			return;
 		}
-
+		if(scanCloudMaxPoints_ == 0 && cloudMsg->height > 1)
+		{
+			scanCloudMaxPoints_ = cloudMsg->height * cloudMsg->width;
+			NODELET_WARN("IcpOdometry: \"scan_cloud_max_points\" is not set but input "
+					"cloud is not dense, for convenience it will be set to %d (%dx%d)",
+					scanCloudMaxPoints_, cloudMsg->width, cloudMsg->height);
+		}
 		int maxLaserScans = scanCloudMaxPoints_;
 		if(containNormals)
 		{
@@ -276,6 +309,13 @@ private:
 				maxLaserScans /= scanDownsamplingStep_;
 			}
 			scan = util3d::laserScanFromPointCloud(*pclScan);
+			if(filtered_scan_pub_.getNumSubscribers())
+			{
+				sensor_msgs::PointCloud2 msg;
+				pcl::toROSMsg(*pclScan, msg);
+				msg.header = cloudMsg->header;
+				filtered_scan_pub_.publish(msg);
+			}
 		}
 		else
 		{
@@ -307,10 +347,26 @@ private:
 					pcl::PointCloud<pcl::PointNormal>::Ptr pclScanNormal(new pcl::PointCloud<pcl::PointNormal>);
 					pcl::concatenateFields(*pclScan, *normals, *pclScanNormal);
 					scan = util3d::laserScanFromPointCloud(*pclScanNormal);
+
+					if(filtered_scan_pub_.getNumSubscribers())
+					{
+						sensor_msgs::PointCloud2 msg;
+						pcl::toROSMsg(*pclScanNormal, msg);
+						msg.header = cloudMsg->header;
+						filtered_scan_pub_.publish(msg);
+					}
 				}
 				else
 				{
 					scan = util3d::laserScanFromPointCloud(*pclScan);
+
+					if(filtered_scan_pub_.getNumSubscribers())
+					{
+						sensor_msgs::PointCloud2 msg;
+						pcl::toROSMsg(*pclScan, msg);
+						msg.header = cloudMsg->header;
+						filtered_scan_pub_.publish(msg);
+					}
 				}
 			}
 		}
@@ -335,6 +391,7 @@ protected:
 private:
 	ros::Subscriber scan_sub_;
 	ros::Subscriber cloud_sub_;
+	ros::Publisher filtered_scan_pub_;
 	int scanCloudMaxPoints_;
 	int scanDownsamplingStep_;
 	double scanVoxelSize_;

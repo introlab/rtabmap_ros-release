@@ -32,6 +32,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <tf/transform_listener.h>
 #include <geometry_msgs/Transform.h>
 #include <geometry_msgs/Pose.h>
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <sensor_msgs/LaserScan.h>
 #include <sensor_msgs/Image.h>
@@ -112,7 +113,14 @@ void cameraModelToROS(
 rtabmap::StereoCameraModel stereoCameraModelFromROS(
 		const sensor_msgs::CameraInfo & leftCamInfo,
 		const sensor_msgs::CameraInfo & rightCamInfo,
-		const rtabmap::Transform & localTransform = rtabmap::Transform::getIdentity());
+		const rtabmap::Transform & localTransform = rtabmap::Transform::getIdentity(),
+		const rtabmap::Transform & stereoTransform = rtabmap::Transform());
+rtabmap::StereoCameraModel stereoCameraModelFromROS(
+		const sensor_msgs::CameraInfo & leftCamInfo,
+		const sensor_msgs::CameraInfo & rightCamInfo,
+		const std::string & frameId,
+		tf::TransformListener & listener,
+		double waitForTransform);
 
 void mapDataFromROS(
 		const rtabmap_ros::MapData & msg,
@@ -149,6 +157,16 @@ void odomInfoToROS(const rtabmap::OdometryInfo & info, rtabmap_ros::OdomInfo & m
 
 cv::Mat userDataFromROS(const rtabmap_ros::UserData & dataMsg);
 void userDataToROS(const cv::Mat & data, rtabmap_ros::UserData & dataMsg, bool compress);
+
+rtabmap::Landmarks landmarksFromROS(
+		const std::map<int, geometry_msgs::PoseWithCovarianceStamped> & tags,
+		const std::string & frameId,
+		const std::string & odomFrameId,
+		const ros::Time & odomStamp,
+		tf::TransformListener & listener,
+		double waitForTransform,
+		double defaultLinVariance,
+		double defaultAngVariance);
 
 inline double timestampFromROS(const ros::Time & stamp) {return double(stamp.sec) + double(stamp.nsec)/1000000000.0;}
 
@@ -203,20 +221,21 @@ bool convertScanMsg(
 		const std::string & frameId,
 		const std::string & odomFrameId,
 		const ros::Time & odomStamp,
-		cv::Mat & scan,
-		rtabmap::Transform & scanLocalTransform,
+		rtabmap::LaserScan & scan,
 		tf::TransformListener & listener,
-		double waitForTransform);
+		double waitForTransform,
+		bool outputInFrameId = false);
 
 bool convertScan3dMsg(
 		const sensor_msgs::PointCloud2ConstPtr & scan3dMsg,
 		const std::string & frameId,
 		const std::string & odomFrameId,
 		const ros::Time & odomStamp,
-		cv::Mat & scan,
-		rtabmap::Transform & scanLocalTransform,
+		rtabmap::LaserScan & scan,
 		tf::TransformListener & listener,
-		double waitForTransform);
+		double waitForTransform,
+		int maxPoints = 0,
+		float maxRange = 0.0f);
 
 }
 
