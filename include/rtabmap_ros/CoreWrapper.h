@@ -49,6 +49,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/core/Rtabmap.h>
 #include <rtabmap/core/OdometryInfo.h>
 
+#include "rtabmap_ros/GetNodeData.h"
 #include "rtabmap_ros/GetMap.h"
 #include "rtabmap_ros/ListLabels.h"
 #include "rtabmap_ros/PublishMap.h"
@@ -57,6 +58,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rtabmap_ros/Goal.h"
 #include "rtabmap_ros/GetPlan.h"
 #include "rtabmap_ros/CommonDataSubscriber.h"
+#include "rtabmap_ros/OdomInfo.h"
+#include "rtabmap_ros/AddLink.h"
 
 #include "MapsManager.h"
 
@@ -64,8 +67,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <octomap_msgs/GetOctomap.h>
 #endif
 
-#ifdef WITH_APRILTAGS2_ROS
-#include <apriltags2_ros/AprilTagDetectionArray.h>
+#ifdef WITH_APRILTAG_ROS
+#include <apriltag_ros/AprilTagDetectionArray.h>
 #endif
 
 #include <actionlib/client/simple_action_client.h>
@@ -101,18 +104,26 @@ private:
 				const std::vector<cv_bridge::CvImageConstPtr> & imageMsgs,
 				const std::vector<cv_bridge::CvImageConstPtr> & depthMsgs,
 				const std::vector<sensor_msgs::CameraInfo> & cameraInfoMsgs,
-				const sensor_msgs::LaserScanConstPtr& scanMsg,
-				const sensor_msgs::PointCloud2ConstPtr& scan3dMsg,
-				const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg);
+				const sensor_msgs::LaserScan& scanMsg,
+				const sensor_msgs::PointCloud2& scan3dMsg,
+				const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg,
+				const std::vector<rtabmap_ros::GlobalDescriptor> & globalDescriptorMsgs = std::vector<rtabmap_ros::GlobalDescriptor>(),
+				const std::vector<std::vector<rtabmap_ros::KeyPoint> > & localKeyPoints = std::vector<std::vector<rtabmap_ros::KeyPoint> >(),
+				const std::vector<std::vector<rtabmap_ros::Point3f> > & localPoints3d = std::vector<std::vector<rtabmap_ros::Point3f> >(),
+				const std::vector<cv::Mat> & localDescriptors = std::vector<cv::Mat>());
 	void commonDepthCallbackImpl(
 				const std::string & odomFrameId,
 				const rtabmap_ros::UserDataConstPtr & userDataMsg,
 				const std::vector<cv_bridge::CvImageConstPtr> & imageMsgs,
 				const std::vector<cv_bridge::CvImageConstPtr> & depthMsgs,
 				const std::vector<sensor_msgs::CameraInfo> & cameraInfoMsgs,
-				const sensor_msgs::LaserScanConstPtr& scan2dMsg,
-				const sensor_msgs::PointCloud2ConstPtr& scan3dMsg,
-				const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg);
+				const sensor_msgs::LaserScan& scan2dMsg,
+				const sensor_msgs::PointCloud2& scan3dMsg,
+				const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg,
+				const std::vector<rtabmap_ros::GlobalDescriptor> & globalDescriptorMsgs,
+				const std::vector<std::vector<rtabmap_ros::KeyPoint> > & localKeyPoints,
+				const std::vector<std::vector<rtabmap_ros::Point3f> > & localPoints3d,
+				const std::vector<cv::Mat> & localDescriptors);
 	virtual void commonStereoCallback(
 				const nav_msgs::OdometryConstPtr & odomMsg,
 				const rtabmap_ros::UserDataConstPtr & userDataMsg,
@@ -120,15 +131,20 @@ private:
 				const cv_bridge::CvImageConstPtr& rightImageMsg,
 				const sensor_msgs::CameraInfo& leftCamInfoMsg,
 				const sensor_msgs::CameraInfo& rightCamInfoMsg,
-				const sensor_msgs::LaserScanConstPtr& scanMsg,
-				const sensor_msgs::PointCloud2ConstPtr& scan3dMsg,
-				const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg);
+				const sensor_msgs::LaserScan& scanMsg,
+				const sensor_msgs::PointCloud2& scan3dMsg,
+				const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg,
+				const std::vector<rtabmap_ros::GlobalDescriptor> & globalDescriptorMsgs = std::vector<rtabmap_ros::GlobalDescriptor>(),
+				const std::vector<std::vector<rtabmap_ros::KeyPoint> > & localKeyPoints = std::vector<std::vector<rtabmap_ros::KeyPoint> >(),
+				const std::vector<std::vector<rtabmap_ros::Point3f> > & localPoints3d = std::vector<std::vector<rtabmap_ros::Point3f> >(),
+				const std::vector<cv::Mat> & localDescriptors = std::vector<cv::Mat>());
 	virtual void commonLaserScanCallback(
 				const nav_msgs::OdometryConstPtr & odomMsg,
 				const rtabmap_ros::UserDataConstPtr & userDataMsg,
-				const sensor_msgs::LaserScanConstPtr& scanMsg,
-				const sensor_msgs::PointCloud2ConstPtr& scan3dMsg,
-				const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg);
+				const sensor_msgs::LaserScan& scanMsg,
+				const sensor_msgs::PointCloud2& scan3dMsg,
+				const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg,
+				const rtabmap_ros::GlobalDescriptor & globalDescriptor = rtabmap_ros::GlobalDescriptor());
 	virtual void commonOdomCallback(
 			const nav_msgs::OdometryConstPtr & odomMsg,
 			const rtabmap_ros::UserDataConstPtr & userDataMsg,
@@ -139,10 +155,12 @@ private:
 	void userDataAsyncCallback(const rtabmap_ros::UserDataConstPtr & dataMsg);
 	void globalPoseAsyncCallback(const geometry_msgs::PoseWithCovarianceStampedConstPtr & globalPoseMsg);
 	void gpsFixAsyncCallback(const sensor_msgs::NavSatFixConstPtr & gpsFixMsg);
-#ifdef WITH_APRILTAGS2_ROS
-	void tagDetectionsAsyncCallback(const apriltags2_ros::AprilTagDetectionArray & tagDetections);
+#ifdef WITH_APRILTAG_ROS
+	void tagDetectionsAsyncCallback(const apriltag_ros::AprilTagDetectionArray & tagDetections);
 #endif
 	void imuAsyncCallback(const sensor_msgs::ImuConstPtr & tagDetections);
+	void interOdomCallback(const nav_msgs::OdometryConstPtr & msg);
+	void interOdomInfoCallback(const nav_msgs::OdometryConstPtr & msg1, const rtabmap_ros::OdomInfoConstPtr & msg2);
 
 	void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStampedConstPtr & msg);
 
@@ -176,6 +194,7 @@ private:
 	bool setLogInfo(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
 	bool setLogWarn(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
 	bool setLogError(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
+	bool getNodeDataCallback(rtabmap_ros::GetNodeData::Request& req, rtabmap_ros::GetNodeData::Response& res);
 	bool getMapDataCallback(rtabmap_ros::GetMap::Request& req, rtabmap_ros::GetMap::Response& res);
 	bool getMapCallback(nav_msgs::GetMap::Request  &req, nav_msgs::GetMap::Response &res);
 	bool getProbMapCallback(nav_msgs::GetMap::Request  &req, nav_msgs::GetMap::Response &res);
@@ -188,6 +207,7 @@ private:
 	bool cancelGoalCallback(std_srvs::Empty::Request& req, std_srvs::Empty::Response& res);
 	bool setLabelCallback(rtabmap_ros::SetLabel::Request& req, rtabmap_ros::SetLabel::Response& res);
 	bool listLabelsCallback(rtabmap_ros::ListLabels::Request& req, rtabmap_ros::ListLabels::Response& res);
+	bool addLinkCallback(rtabmap_ros::AddLink::Request&, rtabmap_ros::AddLink::Response&);
 #ifdef WITH_OCTOMAP_MSGS
 	bool octomapBinaryCallback(octomap_msgs::GetOctomap::Request  &req, octomap_msgs::GetOctomap::Response &res);
 	bool octomapFullCallback(octomap_msgs::GetOctomap::Request  &req, octomap_msgs::GetOctomap::Response &res);
@@ -282,6 +302,7 @@ private:
 	ros::ServiceServer setLogInfoSrv_;
 	ros::ServiceServer setLogWarnSrv_;
 	ros::ServiceServer setLogErrorSrv_;
+	ros::ServiceServer getNodeDataSrv_;
 	ros::ServiceServer getMapDataSrv_;
 	ros::ServiceServer getProjMapSrv_;
 	ros::ServiceServer getMapSrv_;
@@ -294,6 +315,7 @@ private:
 	ros::ServiceServer cancelGoalSrv_;
 	ros::ServiceServer setLabelSrv_;
 	ros::ServiceServer listLabelsSrv_;
+	ros::ServiceServer addLinkSrv_;
 #ifdef WITH_OCTOMAP_MSGS
 	ros::ServiceServer octomapBinarySrv_;
 	ros::ServiceServer octomapFullSrv_;
@@ -319,6 +341,14 @@ private:
 	std::map<int, geometry_msgs::PoseWithCovarianceStamped> tags_;
 	ros::Subscriber imuSub_;
 	std::map<double, rtabmap::Transform> imus_;
+	std::string imuFrameId_;
+
+	ros::Subscriber interOdomSub_;
+	std::list<std::pair<nav_msgs::Odometry, rtabmap_ros::OdomInfo> > interOdoms_;
+	message_filters::Subscriber<nav_msgs::Odometry> interOdomSyncSub_;
+	message_filters::Subscriber<rtabmap_ros::OdomInfo> interOdomInfoSyncSub_;
+	typedef message_filters::sync_policies::ExactTime<nav_msgs::Odometry, rtabmap_ros::OdomInfo> MyExactInterOdomSyncPolicy;
+	message_filters::Synchronizer<MyExactInterOdomSyncPolicy> * interOdomSync_;
 
 	bool stereoToDepth_;
 	bool odomSensorSync_;
