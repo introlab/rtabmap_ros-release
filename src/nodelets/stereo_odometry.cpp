@@ -294,7 +294,7 @@ private:
 			int quality = -1;
 			if(!imageRectLeft->image.empty() && !imageRectRight->image.empty())
 			{
-				rtabmap::StereoCameraModel stereoModel = rtabmap_ros::stereoCameraModelFromROS(image->rgbCameraInfo, image->depthCameraInfo, localTransform);
+				rtabmap::StereoCameraModel stereoModel = rtabmap_ros::stereoCameraModelFromROS(image->rgb_camera_info, image->depth_camera_info, localTransform);
 				if(stereoModel.baseline() <= 0)
 				{
 					NODELET_FATAL("The stereo baseline (%f) should be positive (baseline=-Tx/fx). We assume a horizontal left/right stereo "
@@ -365,7 +365,6 @@ private:
 	typedef message_filters::sync_policies::ExactTime<sensor_msgs::Image, sensor_msgs::Image, sensor_msgs::CameraInfo, sensor_msgs::CameraInfo> MyExactSyncPolicy;
 	message_filters::Synchronizer<MyExactSyncPolicy> * exactSync_;
 	ros::Subscriber rgbdSub_;
-	ros::Subscriber imuSub_;
 	int queueSize_;
 };
 

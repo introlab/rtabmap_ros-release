@@ -113,13 +113,17 @@ void transformToPoseMsg(const rtabmap::Transform & transform, geometry_msgs::Pos
 	}
 }
 
-rtabmap::Transform transformFromPoseMsg(const geometry_msgs::Pose & msg)
+rtabmap::Transform transformFromPoseMsg(const geometry_msgs::Pose & msg, bool ignoreRotationIfNotSet)
 {
 	if(msg.orientation.w == 0 &&
 		msg.orientation.x == 0 &&
 		msg.orientation.y == 0 &&
-		msg.orientation.z ==0)
+		msg.orientation.z == 0)
 	{
+		if(ignoreRotationIfNotSet)
+		{
+			return rtabmap::Transform(msg.position.x, msg.position.y, msg.position.z, 0, 0, 0);
+		}
 		return rtabmap::Transform();
 	}
 	Eigen::Affine3d tfPose;
@@ -133,12 +137,12 @@ void toCvCopy(const rtabmap_ros::RGBDImage & image, cv_bridge::CvImagePtr & rgb,
 	{
 		rgb = cv_bridge::toCvCopy(image.rgb);
 	}
-	else if(!image.rgbCompressed.data.empty())
+	else if(!image.rgb_compressed.data.empty())
 	{
 #ifdef CV_BRIDGE_HYDRO
 		ROS_ERROR("Unsupported compressed image copy, please upgrade at least to ROS Indigo to use this.");
 #else
-		rgb = cv_bridge::toCvCopy(image.rgbCompressed);
+		rgb = cv_bridge::toCvCopy(image.rgb_compressed);
 #endif
 	}
 	else
@@ -151,11 +155,11 @@ void toCvCopy(const rtabmap_ros::RGBDImage & image, cv_bridge::CvImagePtr & rgb,
 	{
 		depth = cv_bridge::toCvCopy(image.depth);
 	}
-	else if(!image.depthCompressed.data.empty())
+	else if(!image.depth_compressed.data.empty())
 	{
 		cv_bridge::CvImagePtr ptr = boost::make_shared<cv_bridge::CvImage>();
-		ptr->header = image.depthCompressed.header;
-		ptr->image = rtabmap::uncompressImage(image.depthCompressed.data);
+		ptr->header = image.depth_compressed.header;
+		ptr->image = rtabmap::uncompressImage(image.depth_compressed.data);
 		ROS_ASSERT(ptr->image.empty() || ptr->image.type() == CV_32FC1 || ptr->image.type() == CV_16UC1);
 		ptr->encoding = ptr->image.empty()?"":ptr->image.type() == CV_32FC1?sensor_msgs::image_encodings::TYPE_32FC1:sensor_msgs::image_encodings::TYPE_16UC1;
 		depth = ptr;
@@ -173,12 +177,12 @@ void toCvShare(const rtabmap_ros::RGBDImageConstPtr & image, cv_bridge::CvImageC
 	{
 		rgb = cv_bridge::toCvShare(image->rgb, image);
 	}
-	else if(!image->rgbCompressed.data.empty())
+	else if(!image->rgb_compressed.data.empty())
 	{
 #ifdef CV_BRIDGE_HYDRO
 		ROS_ERROR("Unsupported compressed image copy, please upgrade at least to ROS Indigo to use this.");
 #else
-		rgb = cv_bridge::toCvCopy(image->rgbCompressed);
+		rgb = cv_bridge::toCvCopy(image->rgb_compressed);
 #endif
 	}
 	else
@@ -191,21 +195,21 @@ void toCvShare(const rtabmap_ros::RGBDImageConstPtr & image, cv_bridge::CvImageC
 	{
 		depth = cv_bridge::toCvShare(image->depth, image);
 	}
-	else if(!image->depthCompressed.data.empty())
+	else if(!image->depth_compressed.data.empty())
 	{
-		if(image->depthCompressed.format.compare("jpg")==0)
+		if(image->depth_compressed.format.compare("jpg")==0)
 		{
 #ifdef CV_BRIDGE_HYDRO
 			ROS_ERROR("Unsupported compressed image copy, please upgrade at least to ROS Indigo to use this.");
 #else
-			depth = cv_bridge::toCvCopy(image->depthCompressed);
+			depth = cv_bridge::toCvCopy(image->depth_compressed);
 #endif
 		}
 		else
 		{
 			cv_bridge::CvImagePtr ptr = boost::make_shared<cv_bridge::CvImage>();
-			ptr->header = image->depthCompressed.header;
-			ptr->image = rtabmap::uncompressImage(image->depthCompressed.data);
+			ptr->header = image->depth_compressed.header;
+			ptr->image = rtabmap::uncompressImage(image->depth_compressed.data);
 			ROS_ASSERT(ptr->image.empty() || ptr->image.type() == CV_32FC1 || ptr->image.type() == CV_16UC1);
 			ptr->encoding = ptr->image.empty()?"":ptr->image.type() == CV_32FC1?sensor_msgs::image_encodings::TYPE_32FC1:sensor_msgs::image_encodings::TYPE_16UC1;
 			depth = ptr;
@@ -225,7 +229,7 @@ rtabmap::SensorData rgbdImageFromROS(const rtabmap_ros::RGBDImageConstPtr & imag
 	cv_bridge::CvImageConstPtr depthMsg;
 	toCvShare(image, imageMsg, depthMsg);
 
-	rtabmap::StereoCameraModel stereoModel = stereoCameraModelFromROS(image->rgbCameraInfo, image->depthCameraInfo, rtabmap::Transform::getIdentity());
+	rtabmap::StereoCameraModel stereoModel = stereoCameraModelFromROS(image->rgb_camera_info, image->depth_camera_info, rtabmap::Transform::getIdentity());
 
 	if(stereoModel.isValidForProjection())
 	{
@@ -342,7 +346,7 @@ rtabmap::SensorData rgbdImageFromROS(const rtabmap_ros::RGBDImageConstPtr & imag
 		data = rtabmap::SensorData(
 				ptrImage->image,
 				ptrDepth->image,
-				rtabmap_ros::cameraModelFromROS(image->rgbCameraInfo),
+				rtabmap_ros::cameraModelFromROS(image->rgb_camera_info),
 				0,
 				rtabmap_ros::timestampFromROS(image->header.stamp));
 	}
@@ -386,6 +390,9 @@ void infoFromROS(const rtabmap_ros::Info & info, rtabmap::Statistics & stat)
 	stat.setStamp(info.header.stamp.toSec());
 
 	stat.setLoopClosureTransform(rtabmap_ros::transformFromGeometryMsg(info.loopClosureTransform));
+
+	//wmState
+	stat.setWmState(info.wmState);
 
 	//Posterior, likelihood, childCount
 	std::map<int, float> mapIntFloat;
@@ -444,6 +451,9 @@ void infoToROS(const rtabmap::Statistics & stats, rtabmap_ros::Info & info)
 	// Detailed info
 	if(stats.extended())
 	{
+		//wmState
+		info.wmState = stats.wmState();
+
 		//Posterior, likelihood, childCount
 		info.posteriorKeys = uKeys(stats.posterior());
 		info.posteriorValues = uValues(stats.posterior());
@@ -517,6 +527,45 @@ void keypointsToROS(const std::vector<cv::KeyPoint> & kpts, std::vector<rtabmap_
 	}
 }
 
+rtabmap::GlobalDescriptor globalDescriptorFromROS(const rtabmap_ros::GlobalDescriptor & msg)
+{
+	return rtabmap::GlobalDescriptor(msg.type, rtabmap::uncompressData(msg.data), rtabmap::uncompressData(msg.info));
+}
+
+void globalDescriptorToROS(const rtabmap::GlobalDescriptor & desc, rtabmap_ros::GlobalDescriptor & msg)
+{
+	msg.type = desc.type();
+	msg.info = rtabmap::compressData(desc.info());
+	msg.data = rtabmap::compressData(desc.data());
+}
+
+std::vector<rtabmap::GlobalDescriptor> globalDescriptorsFromROS(const std::vector<rtabmap_ros::GlobalDescriptor> & msg)
+{
+	if(!msg.empty())
+	{
+		std::vector<rtabmap::GlobalDescriptor> v(msg.size());
+		for(unsigned int i=0; i<msg.size(); ++i)
+		{
+			v[i] = globalDescriptorFromROS(msg[i]);
+		}
+		return v;
+	}
+	return std::vector<rtabmap::GlobalDescriptor>();
+}
+
+void globalDescriptorsToROS(const std::vector<rtabmap::GlobalDescriptor> & desc, std::vector<rtabmap_ros::GlobalDescriptor> & msg)
+{
+	msg.clear();
+	if(!desc.empty())
+	{
+		msg.resize(desc.size());
+		for(unsigned int i=0; i<msg.size(); ++i)
+		{
+			globalDescriptorToROS(desc[i], msg[i]);
+		}
+	}
+}
+
 cv::Point2f point2fFromROS(const rtabmap_ros::Point2f & msg)
 {
 	return cv::Point2f(msg.x, msg.y);
@@ -552,11 +601,11 @@ cv::Point3f point3fFromROS(const rtabmap_ros::Point3f & msg)
 	return cv::Point3f(msg.x, msg.y, msg.z);
 }
 
-void point3fToROS(const cv::Point3f & kpt, rtabmap_ros::Point3f & msg)
+void point3fToROS(const cv::Point3f & pt, rtabmap_ros::Point3f & msg)
 {
-	msg.x = kpt.x;
-	msg.y = kpt.y;
-	msg.z = kpt.z;
+	msg.x = pt.x;
+	msg.y = pt.y;
+	msg.z = pt.z;
 }
 
 std::vector<cv::Point3f> points3fFromROS(const std::vector<rtabmap_ros::Point3f> & msg)
@@ -569,12 +618,12 @@ std::vector<cv::Point3f> points3fFromROS(const std::vector<rtabmap_ros::Point3f>
 	return v;
 }
 
-void points3fToROS(const std::vector<cv::Point3f> & kpts, std::vector<rtabmap_ros::Point3f> & msg)
+void points3fToROS(const std::vector<cv::Point3f> & pts, std::vector<rtabmap_ros::Point3f> & msg)
 {
-	msg.resize(kpts.size());
+	msg.resize(pts.size());
 	for(unsigned int i=0; i<msg.size(); ++i)
 	{
-		point3fToROS(kpts[i], msg[i]);
+		point3fToROS(pts[i], msg[i]);
 	}
 }
 
@@ -833,23 +882,16 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 	std::multimap<int, cv::KeyPoint> words;
 	std::multimap<int, cv::Point3f> words3D;
 	std::multimap<int, cv::Mat> wordsDescriptors;
-	pcl::PointCloud<pcl::PointXYZ> cloud;
-	cv::Mat descriptors;
-	if(msg.wordPts.data.size() &&
-	   msg.wordPts.height*msg.wordPts.width == msg.wordIds.size())
-	{
-		pcl::fromROSMsg(msg.wordPts, cloud);
-		descriptors = rtabmap::uncompressData(msg.descriptors);
-	}
+	cv::Mat descriptors = rtabmap::uncompressData(msg.wordDescriptors);
 
 	for(unsigned int i=0; i<msg.wordIds.size() && i<msg.wordKpts.size(); ++i)
 	{
 		cv::KeyPoint pt = keypointFromROS(msg.wordKpts.at(i));
 		int wordId = msg.wordIds.at(i);
 		words.insert(std::make_pair(wordId, pt));
-		if(i< cloud.size())
+		if(i< msg.wordPts.size())
 		{
-			words3D.insert(std::make_pair(wordId, cv::Point3f(cloud[i].x, cloud[i].y, cloud[i].z)));
+			words3D.insert(std::make_pair(wordId, point3fFromROS(msg.wordPts[i])));
 		}
 		if(i < descriptors.rows)
 		{
@@ -889,21 +931,28 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 	{
 		// multi-cameras model
 		if(msg.fx.size() &&
-		   msg.fx.size() == msg.fy.size(),
-		   msg.fx.size() == msg.cx.size(),
-		   msg.fx.size() == msg.cy.size(),
+		   msg.fx.size() == msg.fy.size() &&
+		   msg.fx.size() == msg.cx.size() &&
+		   msg.fx.size() == msg.cy.size() &&
 		   msg.fx.size() == msg.localTransform.size())
 		{
 			for(unsigned int i=0; i<msg.fx.size(); ++i)
 			{
-				models.push_back(rtabmap::CameraModel(
-						msg.fx[i],
-						msg.fy[i],
-						msg.cx[i],
-						msg.cy[i],
-						transformFromGeometryMsg(msg.localTransform[i]),
-						0.0,
-						cv::Size(msg.width[i], msg.height[i])));
+				if(msg.fx[i] == 0)
+				{
+					models.push_back(rtabmap::CameraModel());
+				}
+				else
+				{
+					models.push_back(rtabmap::CameraModel(
+							msg.fx[i],
+							msg.fy[i],
+							msg.cx[i],
+							msg.cy[i],
+							transformFromGeometryMsg(msg.localTransform[i]),
+							0.0,
+							cv::Size(msg.width[i], msg.height[i])));
+				}
 			}
 		}
 	}
@@ -944,6 +993,7 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 	s.setWords(words);
 	s.setWords3(words3D);
 	s.setWordsDescriptors(wordsDescriptors);
+	s.sensorData().setGlobalDescriptors(rtabmap_ros::globalDescriptorsFromROS(msg.globalDescriptors));
 	s.sensorData().setOccupancyGrid(
 			compressedMatFromBytes(msg.grid_ground),
 			compressedMatFromBytes(msg.grid_obstacles),
@@ -1029,18 +1079,14 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 
 	if(signature.getWords3().size() && signature.getWords3().size() == signature.getWords().size())
 	{
-		pcl::PointCloud<pcl::PointXYZ> cloud;
-		cloud.resize(signature.getWords3().size());
-		index = 0;
+		msg.wordPts.resize(signature.getWords3().size());
+		int i=0;
 		for(std::multimap<int, cv::Point3f>::const_iterator jter=signature.getWords3().begin();
 			jter!=signature.getWords3().end();
 			++jter)
 		{
-			cloud[index].x = jter->second.x;
-			cloud[index].y = jter->second.y;
-			cloud[index++].z = jter->second.z;
+			point3fToROS(jter->second, msg.wordPts[i++]);
 		}
-		pcl::toROSMsg(cloud, msg.wordPts);
 	}
 	else if(signature.getWords3().size())
 	{
@@ -1075,7 +1121,7 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 
 		if(valid)
 		{
-			msg.descriptors = rtabmap::compressData(descriptors);
+			msg.wordDescriptors = rtabmap::compressData(descriptors);
 		}
 	}
 	else if(signature.getWordsDescriptors().size())
@@ -1084,6 +1130,8 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 				(int)signature.getWords().size(),
 				(int)signature.getWordsDescriptors().size());
 	}
+
+	rtabmap_ros::globalDescriptorsToROS(signature.sensorData().globalDescriptors(), msg.globalDescriptors);
 }
 
 rtabmap::Signature nodeInfoFromROS(const rtabmap_ros::NodeData & msg)
@@ -1110,6 +1158,95 @@ void nodeInfoToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 	transformToPoseMsg(signature.getGroundTruthPose(), msg.groundTruthPose);
 }
 
+std::map<std::string, float> odomInfoToStatistics(const rtabmap::OdometryInfo & info)
+{
+	std::map<std::string, float> stats;
+
+	stats.insert(std::make_pair("Odometry/TimeRegistration/ms", info.reg.totalTime*1000.0f));
+	stats.insert(std::make_pair("Odometry/RAM_usage/MB", info.memoryUsage));
+
+	// Based on rtabmap/MainWindow.cpp
+	stats.insert(std::make_pair("Odometry/Features/", info.features));
+	stats.insert(std::make_pair("Odometry/Matches/", info.reg.matches));
+	stats.insert(std::make_pair("Odometry/MatchesRatio/", info.features<=0?0.0f:float(info.reg.inliers)/float(info.features)));
+	stats.insert(std::make_pair("Odometry/Inliers/", info.reg.inliers));
+	stats.insert(std::make_pair("Odometry/InliersMeanDistance/m", info.reg.inliersMeanDistance));
+	stats.insert(std::make_pair("Odometry/InliersDistribution/", info.reg.inliersDistribution));
+	stats.insert(std::make_pair("Odometry/InliersRatio/", info.reg.inliers));
+	stats.insert(std::make_pair("Odometry/ICPInliersRatio/", info.reg.icpInliersRatio));
+	stats.insert(std::make_pair("Odometry/ICPRotation/rad", info.reg.icpRotation));
+	stats.insert(std::make_pair("Odometry/ICPTranslation/m", info.reg.icpTranslation));
+	stats.insert(std::make_pair("Odometry/ICPStructuralComplexity/", info.reg.icpStructuralComplexity));
+	stats.insert(std::make_pair("Odometry/ICPStructuralDistribution/", info.reg.icpStructuralDistribution));
+	stats.insert(std::make_pair("Odometry/ICPCorrespondences/", info.reg.icpCorrespondences));
+	stats.insert(std::make_pair("Odometry/StdDevLin/", sqrt((float)info.reg.covariance.at<double>(0,0))));
+	stats.insert(std::make_pair("Odometry/StdDevAng/", sqrt((float)info.reg.covariance.at<double>(5,5))));
+	stats.insert(std::make_pair("Odometry/VarianceLin/", (float)info.reg.covariance.at<double>(0,0)));
+	stats.insert(std::make_pair("Odometry/VarianceAng/", (float)info.reg.covariance.at<double>(5,5)));
+	stats.insert(std::make_pair("Odometry/TimeEstimation/ms", info.timeEstimation*1000.0f));
+	stats.insert(std::make_pair("Odometry/TimeFiltering/ms", info.timeParticleFiltering*1000.0f));
+	stats.insert(std::make_pair("Odometry/LocalMapSize/", info.localMapSize));
+	stats.insert(std::make_pair("Odometry/LocalScanMapSize/", info.localScanMapSize));
+	stats.insert(std::make_pair("Odometry/LocalKeyFrames/", info.localKeyFrames));
+	stats.insert(std::make_pair("Odometry/LocalBundleOutliers/", info.localBundleOutliers));
+	stats.insert(std::make_pair("Odometry/LocalBundleConstraints/", info.localBundleConstraints));
+	stats.insert(std::make_pair("Odometry/LocalBundleTime/ms", info.localBundleTime*1000.0f));
+	stats.insert(std::make_pair("Odometry/KeyFrameAdded/", info.keyFrameAdded?1.0f:0.0f));
+	stats.insert(std::make_pair("Odometry/Interval/ms", (float)info.interval));
+	stats.insert(std::make_pair("Odometry/Distance/m", info.distanceTravelled));
+
+	float x,y,z,roll,pitch,yaw;
+	float dist = 0.0f, speed=0.0f;
+	if(!info.transform.isNull())
+	{
+		info.transform.getTranslationAndEulerAngles(x,y,z,roll,pitch,yaw);
+		dist = info.transform.getNorm();
+		stats.insert(std::make_pair("Odometry/T/m", dist));
+		stats.insert(std::make_pair("Odometry/Tx/m", x));
+		stats.insert(std::make_pair("Odometry/Ty/m", y));
+		stats.insert(std::make_pair("Odometry/Tz/m", z));
+		stats.insert(std::make_pair("Odometry/Troll/deg", roll*180.0/CV_PI));
+		stats.insert(std::make_pair("Odometry/Tpitch/deg", pitch*180.0/CV_PI));
+		stats.insert(std::make_pair("Odometry/Tyaw/deg", yaw*180.0/CV_PI));
+
+		if(info.interval>0.0)
+		{
+			speed = dist/info.interval;
+			stats.insert(std::make_pair("Odometry/Speed/kph", speed*3.6));
+			stats.insert(std::make_pair("Odometry/Speed/mph", speed*2.237));
+			stats.insert(std::make_pair("Odometry/Speed/mps", speed));
+		}
+	}
+	if(!info.transformGroundTruth.isNull())
+	{
+		if(!info.transform.isNull())
+		{
+			rtabmap::Transform diff = info.transformGroundTruth.inverse()*info.transform;
+			stats.insert(std::make_pair("Odometry/TG_error_lin/m", diff.getNorm()));
+			stats.insert(std::make_pair("Odometry/TG_error_ang/deg", diff.getAngle()*180.0/CV_PI));
+		}
+
+		info.transformGroundTruth.getTranslationAndEulerAngles(x,y,z,roll,pitch,yaw);
+		dist = info.transformGroundTruth.getNorm();
+		stats.insert(std::make_pair("Odometry/TG/m", dist));
+		stats.insert(std::make_pair("Odometry/TGx/m", x));
+		stats.insert(std::make_pair("Odometry/TGy/m", y));
+		stats.insert(std::make_pair("Odometry/TGz/m", z));
+		stats.insert(std::make_pair("Odometry/TGroll/deg", roll*180.0/CV_PI));
+		stats.insert(std::make_pair("Odometry/TGpitch/deg", pitch*180.0/CV_PI));
+		stats.insert(std::make_pair("Odometry/TGyaw/deg", yaw*180.0/CV_PI));
+
+		if(info.interval>0.0)
+		{
+			speed = dist/info.interval;
+			stats.insert(std::make_pair("Odometry/SpeedG/kph", speed*3.6));
+			stats.insert(std::make_pair("Odometry/SpeedG/mph", speed*2.237));
+			stats.insert(std::make_pair("Odometry/SpeedG/mps", speed));
+		}
+	}
+	return stats;
+}
+
 rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg)
 {
 	rtabmap::OdometryInfo info;
@@ -1120,6 +1257,8 @@ rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg)
 	info.reg.icpRotation = msg.icpRotation;
 	info.reg.icpTranslation = msg.icpTranslation;
 	info.reg.icpStructuralComplexity = msg.icpStructuralComplexity;
+	info.reg.icpStructuralDistribution = msg.icpStructuralDistribution;
+	info.reg.icpCorrespondences = msg.icpCorrespondences;
 	info.reg.covariance = cv::Mat(6,6,CV_64FC1, (void*)msg.covariance.data()).clone();
 	info.features = msg.features;
 	info.localMapSize = msg.localMapSize;
@@ -1135,6 +1274,8 @@ rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg)
 	info.interval = msg.interval;
 	info.distanceTravelled = msg.distanceTravelled;
 	info.memoryUsage = msg.memoryUsage;
+	info.gravityRollError = msg.gravityRollError;
+	info.gravityPitchError = msg.gravityPitchError;
 
 	info.type = msg.type;
 
@@ -1176,6 +1317,8 @@ void odomInfoToROS(const rtabmap::OdometryInfo & info, rtabmap_ros::OdomInfo & m
 	msg.icpRotation = info.reg.icpRotation;
 	msg.icpTranslation = info.reg.icpTranslation;
 	msg.icpStructuralComplexity = info.reg.icpStructuralComplexity;
+	msg.icpStructuralDistribution = info.reg.icpStructuralDistribution;
+	msg.icpCorrespondences = info.reg.icpCorrespondences;
 	if(info.reg.covariance.type() == CV_64FC1 && info.reg.covariance.cols == 6 && info.reg.covariance.rows == 6)
 	{
 		memcpy(msg.covariance.data(), info.reg.covariance.data, 36*sizeof(double));
@@ -1194,6 +1337,8 @@ void odomInfoToROS(const rtabmap::OdometryInfo & info, rtabmap_ros::OdomInfo & m
 	msg.interval = info.interval;
 	msg.distanceTravelled = info.distanceTravelled;
 	msg.memoryUsage = info.memoryUsage;
+	msg.gravityRollError = info.gravityRollError;
+	msg.gravityPitchError = info.gravityPitchError;
 
 	msg.type = info.type;
 
@@ -1660,7 +1805,7 @@ bool convertStereoMsg(
 }
 
 bool convertScanMsg(
-		const sensor_msgs::LaserScanConstPtr& scan2dMsg,
+		const sensor_msgs::LaserScan & scan2dMsg,
 		const std::string & frameId,
 		const std::string & odomFrameId,
 		const ros::Time & odomStamp,
@@ -1672,8 +1817,8 @@ bool convertScanMsg(
 	// make sure the frame of the laser is updated too
 	rtabmap::Transform tmpT = getTransform(
 			odomFrameId.empty()?frameId:odomFrameId,
-			scan2dMsg->header.frame_id,
-			scan2dMsg->header.stamp + ros::Duration().fromSec(scan2dMsg->ranges.size()*scan2dMsg->time_increment),
+			scan2dMsg.header.frame_id,
+			scan2dMsg.header.stamp + ros::Duration().fromSec(scan2dMsg.ranges.size()*scan2dMsg.time_increment),
 			listener,
 			waitForTransform);
 	if(tmpT.isNull())
@@ -1683,8 +1828,8 @@ bool convertScanMsg(
 
 	rtabmap::Transform scanLocalTransform = getTransform(
 			frameId,
-			scan2dMsg->header.frame_id,
-			scan2dMsg->header.stamp,
+			scan2dMsg.header.frame_id,
+			scan2dMsg.header.stamp,
 			listener,
 			waitForTransform);
 	if(scanLocalTransform.isNull())
@@ -1695,13 +1840,13 @@ bool convertScanMsg(
 	//transform in frameId_ frame
 	sensor_msgs::PointCloud2 scanOut;
 	laser_geometry::LaserProjection projection;
-	projection.transformLaserScanToPointCloud(odomFrameId.empty()?frameId:odomFrameId, *scan2dMsg, scanOut, listener);
+	projection.transformLaserScanToPointCloud(odomFrameId.empty()?frameId:odomFrameId, scan2dMsg, scanOut, listener);
 
 	//transform back in laser frame
 	rtabmap::Transform laserToOdom = getTransform(
-			scan2dMsg->header.frame_id,
+			scan2dMsg.header.frame_id,
 			odomFrameId.empty()?frameId:odomFrameId,
-			scan2dMsg->header.stamp,
+			scan2dMsg.header.stamp,
 			listener,
 			waitForTransform);
 	if(laserToOdom.isNull())
@@ -1710,19 +1855,19 @@ bool convertScanMsg(
 	}
 
 	// sync with odometry stamp
-	if(!odomFrameId.empty() && odomStamp != scan2dMsg->header.stamp)
+	if(!odomFrameId.empty() && odomStamp != scan2dMsg.header.stamp)
 	{
 		rtabmap::Transform sensorT = getTransform(
 				frameId,
 				odomFrameId,
 				odomStamp,
-				scan2dMsg->header.stamp,
+				scan2dMsg.header.stamp,
 				listener,
 				waitForTransform);
 		if(sensorT.isNull())
 		{
 			ROS_WARN("Could not get odometry value for laser scan stamp (%fs). Latest odometry "
-					"stamp is %fs. The laser scan pose will not be synchronized with odometry.", scan2dMsg->header.stamp.toSec(), odomStamp.toSec());
+					"stamp is %fs. The laser scan pose will not be synchronized with odometry.", scan2dMsg.header.stamp.toSec(), odomStamp.toSec());
 		}
 		else
 		{
@@ -1736,18 +1881,32 @@ bool convertScanMsg(
 		laserToOdom *= scanLocalTransform;
 	}
 
-	bool containIntensity = false;
+	bool hasIntensity = false;
 	for(unsigned int i=0; i<scanOut.fields.size(); ++i)
 	{
 		if(scanOut.fields[i].name.compare("intensity") == 0)
 		{
-			containIntensity = true;
+			if(scanOut.fields[i].datatype == sensor_msgs::PointField::FLOAT32)
+			{
+				hasIntensity = true;
+			}
+			else
+			{
+				static bool warningShown = false;
+				if(!warningShown)
+				{
+					ROS_WARN("The input scan cloud has an \"intensity\" field "
+							"but the datatype (%d) is not supported. Intensity will be ignored. "
+							"This message is only shown once.", scanOut.fields[i].datatype);
+					warningShown = true;
+				}
+			}
 		}
 	}
 
 	rtabmap::LaserScan::Format format;
 	cv::Mat data;
-	if(containIntensity)
+	if(hasIntensity)
 	{
 		pcl::PointCloud<pcl::PointXYZI>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZI>);
 		pcl::fromROSMsg(scanOut, *pclScan);
@@ -1775,18 +1934,18 @@ bool convertScanMsg(
 	scan = rtabmap::LaserScan(
 			data,
 			format,
-			scan2dMsg->range_min,
-			scan2dMsg->range_max,
-			scan2dMsg->angle_min,
-			scan2dMsg->angle_max,
-			scan2dMsg->angle_increment,
+			scan2dMsg.range_min,
+			scan2dMsg.range_max,
+			scan2dMsg.angle_min,
+			scan2dMsg.angle_max,
+			scan2dMsg.angle_increment,
 			outputInFrameId?rtabmap::Transform::getIdentity():scanLocalTransform);
 
 	return true;
 }
 
 bool convertScan3dMsg(
-		const sensor_msgs::PointCloud2ConstPtr & scan3dMsg,
+		const sensor_msgs::PointCloud2 & scan3dMsg,
 		const std::string & frameId,
 		const std::string & odomFrameId,
 		const ros::Time & odomStamp,
@@ -1796,46 +1955,60 @@ bool convertScan3dMsg(
 		int maxPoints,
 		float maxRange)
 {
-	bool containNormals = false;
-	bool containColors = false;
-	bool containIntensity = false;
-	for(unsigned int i=0; i<scan3dMsg->fields.size(); ++i)
+	bool hasNormals = false;
+	bool hasColors = false;
+	bool hasIntensity = false;
+	for(unsigned int i=0; i<scan3dMsg.fields.size(); ++i)
 	{
-		if(scan3dMsg->fields[i].name.compare("normal_x") == 0)
+		if(scan3dMsg.fields[i].name.compare("normal_x") == 0)
 		{
-			containNormals = true;
+			hasNormals = true;
 		}
-		if(scan3dMsg->fields[i].name.compare("rgb") == 0 || scan3dMsg->fields[i].name.compare("rgba") == 0)
+		if(scan3dMsg.fields[i].name.compare("rgb") == 0 || scan3dMsg.fields[i].name.compare("rgba") == 0)
 		{
-			containColors = true;
+			hasColors = true;
 		}
-		if(scan3dMsg->fields[i].name.compare("intensity") == 0)
+		if(scan3dMsg.fields[i].name.compare("intensity") == 0)
 		{
-			containIntensity = true;
+			if(scan3dMsg.fields[i].datatype == sensor_msgs::PointField::FLOAT32)
+			{
+				hasIntensity = true;
+			}
+			else
+			{
+				static bool warningShown = false;
+				if(!warningShown)
+				{
+					ROS_WARN("The input scan cloud has an \"intensity\" field "
+							"but the datatype (%d) is not supported. Intensity will be ignored. "
+							"This message is only shown once.", scan3dMsg.fields[i].datatype);
+					warningShown = true;
+				}
+			}
 		}
 	}
 
-	rtabmap::Transform scanLocalTransform = getTransform(frameId, scan3dMsg->header.frame_id, scan3dMsg->header.stamp, listener, waitForTransform);
+	rtabmap::Transform scanLocalTransform = getTransform(frameId, scan3dMsg.header.frame_id, scan3dMsg.header.stamp, listener, waitForTransform);
 	if(scanLocalTransform.isNull())
 	{
-		ROS_ERROR("TF of received scan cloud at time %fs is not set, aborting rtabmap update.", scan3dMsg->header.stamp.toSec());
+		ROS_ERROR("TF of received scan cloud at time %fs is not set, aborting rtabmap update.", scan3dMsg.header.stamp.toSec());
 		return false;
 	}
 
 	// sync with odometry stamp
-	if(!odomFrameId.empty() && odomStamp != scan3dMsg->header.stamp)
+	if(!odomFrameId.empty() && odomStamp != scan3dMsg.header.stamp)
 	{
 		rtabmap::Transform sensorT = getTransform(
 				frameId,
 				odomFrameId,
 				odomStamp,
-				scan3dMsg->header.stamp,
+				scan3dMsg.header.stamp,
 				listener,
 				waitForTransform);
 		if(sensorT.isNull())
 		{
 			ROS_WARN("Could not get odometry value for laser scan stamp (%fs). Latest odometry "
-					"stamp is %fs. The 3d laser scan pose will not be synchronized with odometry.", scan3dMsg->header.stamp.toSec(), odomStamp.toSec());
+					"stamp is %fs. The 3d laser scan pose will not be synchronized with odometry.", scan3dMsg.header.stamp.toSec(), odomStamp.toSec());
 		}
 		else
 		{
@@ -1843,22 +2016,22 @@ bool convertScan3dMsg(
 		}
 	}
 
-	if(containNormals)
+	if(hasNormals)
 	{
-		if(containColors)
+		if(hasColors)
 		{
 			pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
-			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+			pcl::fromROSMsg(scan3dMsg, *pclScan);
 			if(!pclScan->is_dense)
 			{
 				pclScan = rtabmap::util3d::removeNaNNormalsFromPointCloud(pclScan);
 			}
 			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, rtabmap::LaserScan::kXYZRGBNormal, scanLocalTransform);
 		}
-		else if(containIntensity)
+		else if(hasIntensity)
 		{
 			pcl::PointCloud<pcl::PointXYZINormal>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZINormal>);
-			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+			pcl::fromROSMsg(scan3dMsg, *pclScan);
 			if(!pclScan->is_dense)
 			{
 				pclScan = rtabmap::util3d::removeNaNNormalsFromPointCloud(pclScan);
@@ -1868,7 +2041,7 @@ bool convertScan3dMsg(
 		else
 		{
 			pcl::PointCloud<pcl::PointNormal>::Ptr pclScan(new pcl::PointCloud<pcl::PointNormal>);
-			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+			pcl::fromROSMsg(scan3dMsg, *pclScan);
 			if(!pclScan->is_dense)
 			{
 				pclScan = rtabmap::util3d::removeNaNNormalsFromPointCloud(pclScan);
@@ -1878,20 +2051,20 @@ bool convertScan3dMsg(
 	}
 	else
 	{
-		if(containColors)
+		if(hasColors)
 		{
 			pcl::PointCloud<pcl::PointXYZRGB>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZRGB>);
-			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+			pcl::fromROSMsg(scan3dMsg, *pclScan);
 			if(!pclScan->is_dense)
 			{
 				pclScan = rtabmap::util3d::removeNaNFromPointCloud(pclScan);
 			}
 			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, rtabmap::LaserScan::kXYZRGB, scanLocalTransform);
 		}
-		else if(containIntensity)
+		else if(hasIntensity)
 		{
 			pcl::PointCloud<pcl::PointXYZI>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZI>);
-			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+			pcl::fromROSMsg(scan3dMsg, *pclScan);
 			if(!pclScan->is_dense)
 			{
 				pclScan = rtabmap::util3d::removeNaNFromPointCloud(pclScan);
@@ -1901,7 +2074,7 @@ bool convertScan3dMsg(
 		else
 		{
 			pcl::PointCloud<pcl::PointXYZ>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZ>);
-			pcl::fromROSMsg(*scan3dMsg, *pclScan);
+			pcl::fromROSMsg(scan3dMsg, *pclScan);
 			if(!pclScan->is_dense)
 			{
 				pclScan = rtabmap::util3d::removeNaNFromPointCloud(pclScan);
