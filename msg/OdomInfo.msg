@@ -8,6 +8,8 @@ float32 icpInliersRatio
 float32 icpRotation
 float32 icpTranslation
 float32 icpStructuralComplexity
+float32 icpStructuralDistribution
+int32 icpCorrespondences
 float64[36] covariance
 int32 features
 int32 localMapSize
@@ -23,6 +25,8 @@ float32 stamp
 float32 interval
 float32 distanceTravelled
 int32 memoryUsage # MB
+float32 gravityRollError
+float32 gravityPitchError
 
 geometry_msgs/Transform transform
 geometry_msgs/Transform transformFiltered
