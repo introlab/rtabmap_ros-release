@@ -33,6 +33,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/io/pcd_io.h>
+#include <pcl/filters/voxel_grid.h>
 
 #include <pcl_ros/transforms.h>
 
@@ -45,6 +46,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <message_filters/sync_policies/exact_time.h>
 
 #include <rtabmap_ros/MsgConversion.h>
+#include <rtabmap_ros/OdomInfo.h>
+#include <rtabmap/core/util3d.h>
+#include <rtabmap/core/util3d_filtering.h>
 
 namespace rtabmap_ros
 {
@@ -64,15 +68,23 @@ public:
 		warningThread_(0),
 		callbackCalled_(false),
 		exactSync_(0),
-		maxClouds_(1),
+		exactInfoSync_(0),
+		maxClouds_(0),
+		assemblingTime_(0),
 		skipClouds_(0),
 		cloudsSkipped_(0),
+		circularBuffer_(false),
+		waitForTransformDuration_(0.1),
+		rangeMin_(0),
+		rangeMax_(0),
+		voxelSize_(0),
 		fixedFrameId_("odom")
 	{}
 
 	virtual ~PointCloudAssembler()
 	{
 		delete exactSync_;
+		delete exactInfoSync_;
 
 		if(warningThread_)
 		{
@@ -89,11 +101,31 @@ private:
 		ros::NodeHandle & pnh = getPrivateNodeHandle();
 
 		int queueSize = 5;
+		bool subscribeOdomInfo = false;
+
 		pnh.param("queue_size", queueSize, queueSize);
 		pnh.param("fixed_frame_id", fixedFrameId_, fixedFrameId_);
 		pnh.param("max_clouds", maxClouds_, maxClouds_);
+		pnh.param("assembling_time", assemblingTime_, assemblingTime_);
 		pnh.param("skip_clouds", skipClouds_, skipClouds_);
-		ROS_ASSERT(maxClouds_>0);
+		pnh.param("circular_buffer", circularBuffer_, circularBuffer_);
+		pnh.param("wait_for_transform_duration", waitForTransformDuration_, waitForTransformDuration_);
+		pnh.param("range_min", rangeMin_, rangeMin_);
+		pnh.param("range_max", rangeMax_, rangeMax_);
+		pnh.param("voxel_size", voxelSize_, voxelSize_);
+		pnh.param("subscribe_odom_info", subscribeOdomInfo, subscribeOdomInfo);
+		ROS_ASSERT(maxClouds_>0 || assemblingTime_ >0.0);
+
+		ROS_INFO("%s: queue_size=%d", getName().c_str(), queueSize);
+		ROS_INFO("%s: fixed_frame_id=%s", getName().c_str(), fixedFrameId_.c_str());
+		ROS_INFO("%s: max_clouds=%d", getName().c_str(), maxClouds_);
+		ROS_INFO("%s: assembling_time=%fs", getName().c_str(), assemblingTime_);
+		ROS_INFO("%s: skip_clouds=%d", getName().c_str(), skipClouds_);
+		ROS_INFO("%s: circular_buffer=%s", getName().c_str(), circularBuffer_?"true":"false");
+		ROS_INFO("%s: wait_for_transform_duration=%f", getName().c_str(), waitForTransformDuration_);
+		ROS_INFO("%s: range_min=%f", getName().c_str(), rangeMin_);
+		ROS_INFO("%s: range_max=%f", getName().c_str(), rangeMax_);
+		ROS_INFO("%s: voxel_size=%fm", getName().c_str(), voxelSize_);
 
 		cloudsSkipped_ = skipClouds_;
 
@@ -104,6 +136,21 @@ private:
 			subscribedTopicsMsg = uFormat("\n%s subscribed to %s",
 								getName().c_str(),
 								cloudSub_.getTopic().c_str());
+		}
+		else if(subscribeOdomInfo)
+		{
+			syncCloudSub_.subscribe(nh, "cloud", 1);
+			syncOdomSub_.subscribe(nh, "odom", 1);
+			syncOdomInfoSub_.subscribe(nh, "odom_info", 1);
+			exactInfoSync_ = new message_filters::Synchronizer<syncInfoPolicy>(syncInfoPolicy(queueSize), syncCloudSub_, syncOdomSub_, syncOdomInfoSub_);
+			exactInfoSync_->registerCallback(boost::bind(&rtabmap_ros::PointCloudAssembler::callbackCloudOdomInfo, this, _1, _2, _3));
+			subscribedTopicsMsg = uFormat("\n%s subscribed to (exact sync):\n   %s,\n   %s",
+								getName().c_str(),
+								syncCloudSub_.getTopic().c_str(),
+								syncOdomSub_.getTopic().c_str(),
+								syncOdomInfoSub_.getTopic().c_str());
+
+			warningThread_ = new boost::thread(boost::bind(&PointCloudAssembler::warningLoop, this, subscribedTopicsMsg));
 		}
 		else
 		{
@@ -142,6 +189,32 @@ private:
 		}
 	}
 
+	void callbackCloudOdomInfo(
+			const sensor_msgs::PointCloud2ConstPtr & cloudMsg,
+			const nav_msgs::OdometryConstPtr & odomMsg,
+			const rtabmap_ros::OdomInfoConstPtr & odomInfoMsg)
+	{
+		callbackCalled_ = true;
+		rtabmap::Transform odom = rtabmap_ros::transformFromPoseMsg(odomMsg->pose.pose);
+		if(!odom.isNull())
+		{
+			if(odomInfoMsg->keyFrameAdded)
+			{
+				fixedFrameId_ = odomMsg->header.frame_id;
+				callbackCloud(cloudMsg);
+			}
+			else
+			{
+				NODELET_INFO("Skipping non keyframe...");
+			}
+		}
+		else
+		{
+			NODELET_WARN("Reseting point cloud assembler as null odometry has been received.");
+			clouds_.clear();
+		}
+	}
+
 	void callbackCloud(const sensor_msgs::PointCloud2ConstPtr & cloudMsg)
 	{
 		if(cloudPub_.getNumSubscribers())
@@ -150,39 +223,103 @@ private:
 			{
 				cloudsSkipped_ = 0;
 
-				sensor_msgs::PointCloud2Ptr cpy(new sensor_msgs::PointCloud2);
-				*cpy = *cloudMsg;
-				clouds_.push_back(cpy);
+				rtabmap::Transform t = rtabmap_ros::getTransform(
+						fixedFrameId_, //fromFrame
+						cloudMsg->header.frame_id, //toFrame
+						cloudMsg->header.stamp,
+						tfListener_,
+						waitForTransformDuration_);
 
-				if((int)clouds_.size() >= maxClouds_)
+				if(t.isNull())
+				{
+					ROS_ERROR("Cloud not transform all clouds! Resetting...");
+					clouds_.clear();
+					return;
+				}
+
+				pcl::PCLPointCloud2::Ptr newCloud(new pcl::PCLPointCloud2);
+				if(rangeMin_ > 0.0 || rangeMax_ > 0.0 || voxelSize_ > 0.0f)
+				{
+					pcl_conversions::toPCL(*cloudMsg, *newCloud);
+					rtabmap::LaserScan scan = rtabmap::util3d::laserScanFromPointCloud(*newCloud);
+					scan = rtabmap::util3d::commonFiltering(scan, 1, rangeMin_, rangeMax_, voxelSize_);
+#if PCL_VERSION_COMPARE(>=, 1, 10, 0)
+					std::uint64_t stamp = newCloud->header.stamp;
+#else
+					pcl::uint64_t stamp = newCloud->header.stamp;
+#endif
+					newCloud = rtabmap::util3d::laserScanToPointCloud2(scan, t);
+					newCloud->header.stamp = stamp;
+				}
+				else
+				{
+					sensor_msgs::PointCloud2 output;
+					pcl_ros::transformPointCloud(t.toEigen4f(), *cloudMsg, output);
+					pcl_conversions::toPCL(output, *newCloud);
+				}
+
+				clouds_.push_back(newCloud);
+
+#if PCL_VERSION_COMPARE(>=, 1, 10, 0)
+				bool reachedMaxSize =
+						((int)clouds_.size() >= maxClouds_ && maxClouds_ > 0)
+						||
+						((*newCloud).header.stamp >= clouds_.front()->header.stamp + static_cast<std::uint64_t>(assemblingTime_*1000000.0) && assemblingTime_ > 0.0);
+#else
+				bool reachedMaxSize =
+						((int)clouds_.size() >= maxClouds_ && maxClouds_ > 0)
+						||
+						((*newCloud).header.stamp >= clouds_.front()->header.stamp + static_cast<pcl::uint64_t>(assemblingTime_*1000000.0) && assemblingTime_ > 0.0);
+#endif
+
+				if( circularBuffer_ || reachedMaxSize )
 				{
 					pcl::PCLPointCloud2Ptr assembled(new pcl::PCLPointCloud2);
-					pcl_conversions::toPCL(*clouds_.back(), *assembled);
-
-					for(size_t i=0; i<clouds_.size()-1; ++i)
+					for(std::list<pcl::PCLPointCloud2::Ptr>::iterator iter=clouds_.begin(); iter!=clouds_.end(); ++iter)
 					{
-						rtabmap::Transform t = rtabmap_ros::getTransform(
-								clouds_[i]->header.frame_id, //sourceTargetFrame
-								fixedFrameId_, //fixedFrame
-								clouds_[i]->header.stamp, //stampSource
-								clouds_.back()->header.stamp, //stampTarget
-								tfListener_,
-								0.1);
-
-						sensor_msgs::PointCloud2 output;
-						pcl_ros::transformPointCloud(t.toEigen4f(), *clouds_[i], output);
-						pcl::PCLPointCloud2 output2;
-						pcl_conversions::toPCL(output, output2);
-						pcl::PCLPointCloud2Ptr assembledTmp(new pcl::PCLPointCloud2);
-						pcl::concatenatePointCloud(*assembled, output2, *assembledTmp);
-						assembled = assembledTmp;
+						if(assembled->data.empty())
+						{
+							*assembled = *(*iter);
+						}
+						else
+						{
+							pcl::PCLPointCloud2Ptr assembledTmp(new pcl::PCLPointCloud2);
+#if PCL_VERSION_COMPARE(>=, 1, 10, 0)
+							pcl::concatenate(*assembled, *(*iter), *assembledTmp);
+#else
+							pcl::concatenatePointCloud(*assembled, *(*iter), *assembledTmp);
+#endif
+							assembled = assembledTmp;
+						}
 					}
 
 					sensor_msgs::PointCloud2 rosCloud;
+					if(voxelSize_>0.0)
+					{
+						pcl::VoxelGrid<pcl::PCLPointCloud2> filter;
+						filter.setLeafSize(voxelSize_, voxelSize_, voxelSize_);
+						filter.setInputCloud(assembled);
+						pcl::PCLPointCloud2Ptr output(new pcl::PCLPointCloud2);
+						filter.filter(*output);
+						assembled = output;
+					}
+
 					pcl_conversions::moveFromPCL(*assembled, rosCloud);
+					pcl_ros::transformPointCloud(t.toEigen4f().inverse(), rosCloud, rosCloud);
+
 					rosCloud.header = cloudMsg->header;
 					cloudPub_.publish(rosCloud);
-					clouds_.clear();
+					if(circularBuffer_)
+					{
+						if(reachedMaxSize)
+						{
+							clouds_.pop_front();
+						}
+					}
+					else
+					{
+						clouds_.clear();
+					}
 				}
 			}
 			else
@@ -217,17 +354,26 @@ private:
 	ros::Publisher cloudPub_;
 
 	typedef message_filters::sync_policies::ExactTime<sensor_msgs::PointCloud2, nav_msgs::Odometry> syncPolicy;
+	typedef message_filters::sync_policies::ExactTime<sensor_msgs::PointCloud2, nav_msgs::Odometry, rtabmap_ros::OdomInfo> syncInfoPolicy;
 	message_filters::Synchronizer<syncPolicy>* exactSync_;
+	message_filters::Synchronizer<syncInfoPolicy>* exactInfoSync_;
 	message_filters::Subscriber<sensor_msgs::PointCloud2> syncCloudSub_;
 	message_filters::Subscriber<nav_msgs::Odometry> syncOdomSub_;
+	message_filters::Subscriber<rtabmap_ros::OdomInfo> syncOdomInfoSub_;
 
 	int maxClouds_;
 	int skipClouds_;
 	int cloudsSkipped_;
+	bool circularBuffer_;
+	double assemblingTime_;
+	double waitForTransformDuration_;
+	double rangeMin_;
+	double rangeMax_;
+	double voxelSize_;
 	std::string fixedFrameId_;
 	tf::TransformListener tfListener_;
 
-	std::vector<sensor_msgs::PointCloud2Ptr> clouds_;
+	std::list<pcl::PCLPointCloud2::Ptr> clouds_;
 };
 
 PLUGINLIB_EXPORT_CLASS(rtabmap_ros::PointCloudAssembler, nodelet::Nodelet);

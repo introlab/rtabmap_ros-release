@@ -25,47 +25,20 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifndef INFO_DISPLAY_H
-#define INFO_DISPLAY_H
+#include "ros/ros.h"
+#include "nodelet/loader.h"
 
-#include <rtabmap_ros/Info.h>
-
-#include <rviz/message_filter_display.h>
-#include <rtabmap/core/Transform.h>
-#include <ros/callback_queue.h>
-
-namespace rtabmap_ros
+int main(int argc, char **argv)
 {
+	ros::init(argc, argv, "point_cloud_assembler");
 
-class InfoDisplay: public rviz::MessageFilterDisplay<rtabmap_ros::Info>
-{
-Q_OBJECT
-public:
-	InfoDisplay();
-	virtual ~InfoDisplay();
+	nodelet::Loader nodelet;
+	nodelet::V_string nargv;
+	nodelet::M_string remap(ros::names::getRemappings());
+	std::string nodelet_name = ros::this_node::getName();
+	nodelet.load(nodelet_name, "rtabmap_ros/point_cloud_assembler", remap, nargv);
+	ros::spin();
+	return 0;
+}
 
-	virtual void reset();
-	virtual void update( float wall_dt, float ros_dt );
 
-protected:
-	/** @brief Do initialization. Overridden from MessageFilterDisplay. */
-	virtual void onInitialize();
-
-	/** @brief Process a single message.  Overridden from MessageFilterDisplay. */
-	virtual void processMessage( const rtabmap_ros::InfoConstPtr& cloud );
-
-private:
-	ros::AsyncSpinner spinner_;
-	ros::CallbackQueue cbqueue_;
-
-	QString info_;
-	int globalCount_;
-	int localCount_;
-	std::map<std::string, float> statistics_;
-	rtabmap::Transform loopTransform_;
-	boost::mutex info_mutex_;
-};
-
-} // namespace rtabmap_ros
-
-#endif
