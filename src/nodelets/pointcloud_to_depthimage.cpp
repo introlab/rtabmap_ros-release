@@ -46,6 +46,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl_ros/transforms.h>
 
 #include <message_filters/sync_policies/approximate_time.h>
 #include <message_filters/sync_policies/exact_time.h>
@@ -121,6 +122,7 @@ private:
 		image_transport::ImageTransport it(nh);
 		depthImage16Pub_ = it.advertise("image_raw", 1); // 16 bits unsigned in mm
 		depthImage32Pub_ = it.advertise("image", 1);     // 32 bits float in meters
+		pointCloudTransformedPub_ = nh.advertise<sensor_msgs::PointCloud2>(nh.resolveName("cloud")+"_transformed", 1);
 
 		if(approx)
 		{
@@ -154,8 +156,8 @@ private:
 				cloudDisplacement = rtabmap_ros::getTransform(
 						pointCloud2Msg->header.frame_id,
 						fixedFrameId_,
-						pointCloud2Msg->header.stamp,
 						cameraInfoMsg->header.stamp,
+						pointCloud2Msg->header.stamp,
 						*listener_,
 						waitForTransform_);
 			}
@@ -177,7 +179,7 @@ private:
 				return;
 			}
 
-			rtabmap::Transform localTransform = cloudDisplacement.inverse()*cloudToCamera;
+			rtabmap::Transform localTransform = cloudDisplacement*cloudToCamera;
 
 			rtabmap::CameraModel model = rtabmap_ros::cameraModelFromROS(*cameraInfoMsg, localTransform);
 
@@ -200,13 +202,30 @@ private:
 			pcl_conversions::toPCL(*pointCloud2Msg, *cloud);
 
 			cv_bridge::CvImage depthImage;
-			depthImage.image = rtabmap::util3d::projectCloudToCamera(model.imageSize(), model.K(), cloud, model.localTransform());
 
-			if(fillHolesSize_ > 0 && fillIterations_ > 0)
+			if(cloud->data.empty())
 			{
-				for(int i=0; i<fillIterations_;++i)
+				ROS_WARN("Received an empty cloud on topic \"%s\"! A depth image with all zeros is returned.", pointCloudSub_.getTopic().c_str());
+				depthImage.image = cv::Mat::zeros(model.imageSize(), CV_32FC1);
+			}
+			else
+			{
+				depthImage.image = rtabmap::util3d::projectCloudToCamera(model.imageSize(), model.K(), cloud, model.localTransform());
+
+				if(fillHolesSize_ > 0 && fillIterations_ > 0)
 				{
-					depthImage.image = rtabmap::util2d::fillDepthHoles(depthImage.image, fillHolesSize_, fillHolesError_);
+					for(int i=0; i<fillIterations_;++i)
+					{
+						depthImage.image = rtabmap::util2d::fillDepthHoles(depthImage.image, fillHolesSize_, fillHolesError_);
+					}
+				}
+
+				if(pointCloudTransformedPub_.getNumSubscribers()>0)
+				{
+					sensor_msgs::PointCloud2 pointCloud2Out;
+					pcl_ros::transformPointCloud(model.localTransform().inverse().toEigen4f(), *pointCloud2Msg, pointCloud2Out);
+					pointCloud2Out.header = cameraInfoMsg->header;
+					pointCloudTransformedPub_.publish(pointCloud2Out);
 				}
 			}
 
@@ -241,6 +260,7 @@ private:
 private:
 	image_transport::Publisher depthImage16Pub_;
 	image_transport::Publisher depthImage32Pub_;
+	ros::Publisher pointCloudTransformedPub_;
 	message_filters::Subscriber<sensor_msgs::PointCloud2> pointCloudSub_;
 	message_filters::Subscriber<sensor_msgs::CameraInfo> cameraInfoSub_;
 	std::string fixedFrameId_;

@@ -14,8 +14,10 @@
         Example:
            $ roslaunch rtabmap_ros bumblebee.launch -->
      
-  <!-- Choose between RGB-D and stereo -->      
-  <arg name="stereo"          default="false"/>
+  <!-- Choose between depth and stereo, set both to false to do only scan -->      
+  <arg name="stereo"                    default="false"/>
+  <arg     if="$(arg stereo)" name="depth"  default="false"/>
+  <arg unless="$(arg stereo)" name="depth"  default="true"/>
  
   <!-- Choose visualization -->
   <arg name="rtabmapviz"              default="true" /> 
@@ -50,7 +52,7 @@
 
   <!-- if timestamps of the input topics are synchronized using approximate or exact time policy-->
   <arg     if="$(arg stereo)" name="approx_sync"  default="false"/>
-  <arg unless="$(arg stereo)" name="approx_sync"  default="true"/>         
+  <arg unless="$(arg stereo)" name="approx_sync"  default="$(arg depth)"/>         
    
   <!-- RGB-D related topics -->
   <arg name="rgb_topic"               default="/camera/rgb/image_rect_color" />
@@ -70,7 +72,9 @@
   <arg name="approx_rgbd_sync"        default="true"/>          <!-- false=exact synchronization -->
   <arg name="subscribe_rgbd"          default="$(arg rgbd_sync)"/>
   <arg name="rgbd_topic"              default="rgbd_image" />
-  <arg name="depth_scale"             default="1.0" />
+  <arg name="depth_scale"             default="1.0" />         <!-- Deprecated, use rgbd_depth_scale instead -->
+  <arg name="rgbd_depth_scale"        default="$(arg depth_scale)" />
+  <arg name="rgbd_decimation"         default="1" />
   
   <arg name="compressed"              default="false"/>         <!-- If you want to subscribe to compressed image topics -->
   <arg name="rgb_image_transport"     default="compressed"/>    <!-- Common types: compressed, theora (see "rosrun image_transport list_transports") -->
@@ -80,7 +84,10 @@
   <arg name="scan_topic"              default="/scan"/>
   <arg name="subscribe_scan_cloud"    default="false"/>
   <arg name="scan_cloud_topic"        default="/scan_cloud"/>
-  <arg name="scan_normal_k"           default="0"/>
+  <arg name="subscribe_scan_descriptor" default="false"/>
+  <arg name="scan_descriptor_topic"   default="/scan_descriptor"/>
+  <arg name="scan_cloud_max_points"   default="0"/>
+  <arg name="scan_cloud_filtered"     default="false"/> <!-- use filtered cloud from icp_odometry for mapping -->
    
   <arg name="visual_odometry"          default="true"/>          <!-- Launch rtabmap visual odometry node -->
   <arg name="icp_odometry"             default="false"/>         <!-- Launch rtabmap icp odometry node -->
@@ -93,9 +100,16 @@
   <arg name="odom_sensor_sync"         default="false"/>
   <arg name="odom_guess_frame_id"        default=""/>
   <arg name="odom_guess_min_translation" default="0"/>
-  <arg name="odom_guess_min_rotation"    default="0"/> 
+  <arg name="odom_guess_min_rotation"    default="0"/>
+  <arg name="odom_max_rate"            default="0"/>
+  <arg name="odom_expected_rate"       default="0"/>
   <arg name="imu_topic"                default="/imu/data"/>          <!-- only used with VIO approaches -->
   <arg name="wait_imu_to_init"         default="false"/>
+  
+  <arg name="scan_cloud_assembling"              default="false"/>
+  <arg name="scan_cloud_assembling_time"         default="1"/>
+  <arg name="scan_cloud_assembling_fixed_frame"  default=""/>
+  <arg name="scan_cloud_assembling_voxel_size"   default="0.05"/>
   
   <arg name="subscribe_user_data"      default="false"/>             <!-- user data synchronized subscription -->
   <arg name="user_data_topic"          default="/user_data"/>
@@ -123,7 +137,7 @@
   <group ns="$(arg namespace)">
      
     <!-- relays -->
-    <group unless="$(arg stereo)">
+    <group if="$(arg depth)">
       <group unless="$(arg subscribe_rgbd)">
         <node if="$(arg compressed)" name="republish_rgb" type="republish" pkg="image_transport" args="$(arg rgb_image_transport) in:=$(arg rgb_topic) raw out:=$(arg rgb_topic_relay)" />
         <node if="$(arg compressed)" name="republish_depth" type="republish" pkg="image_transport" args="$(arg depth_image_transport) in:=$(arg depth_topic) raw out:=$(arg depth_topic_relay)" />
@@ -138,7 +152,8 @@
           <remap from="rgbd_image"      to="$(arg rgbd_topic_relay)"/>
           <param name="approx_sync"     type="bool"   value="$(arg approx_rgbd_sync)"/>
           <param name="queue_size"      type="int"    value="$(arg queue_size)"/>
-          <param name="depth_scale"     type="double" value="$(arg depth_scale)"/>
+          <param name="depth_scale"     type="double" value="$(arg rgbd_depth_scale)"/>
+          <param name="decimation"     type="double" value="$(arg rgbd_decimation)"/>
         </node>
       </group>
     </group>
@@ -184,6 +199,7 @@
           <remap from="rgb/camera_info" to="$(arg camera_info_topic)"/>
           <remap from="rgbd_image"      to="$(arg rgbd_topic_relay)"/>
           <remap from="odom"            to="$(arg odom_topic)"/>
+          <remap from="imu"             to="$(arg imu_topic)"/>
       
           <param name="frame_id"                    type="string" value="$(arg frame_id)"/>
           <param name="odom_frame_id"               type="string" value="$(arg vo_frame_id)"/>
@@ -199,6 +215,8 @@
           <param name="guess_frame_id"              type="string" value="$(arg odom_guess_frame_id)"/>
           <param name="guess_min_translation"       type="double" value="$(arg odom_guess_min_translation)"/>
           <param name="guess_min_rotation"          type="double" value="$(arg odom_guess_min_rotation)"/>
+          <param name="expected_update_rate"        type="double" value="$(arg odom_expected_rate)"/>
+          <param name="max_update_rate"             type="double" value="$(arg odom_max_rate)"/>
         </node>
 
         <!-- Stereo Odometry -->
@@ -225,6 +243,8 @@
           <param name="guess_frame_id"              type="string" value="$(arg odom_guess_frame_id)"/>
           <param name="guess_min_translation"       type="double" value="$(arg odom_guess_min_translation)"/>
           <param name="guess_min_rotation"          type="double" value="$(arg odom_guess_min_rotation)"/>
+          <param name="expected_update_rate"        type="double" value="$(arg odom_expected_rate)"/>
+          <param name="max_update_rate"             type="double" value="$(arg odom_max_rate)"/>
         </node>
       </group>
     </group>
@@ -234,6 +254,7 @@
       <remap from="scan"                   to="$(arg scan_topic)"/>
       <remap from="scan_cloud"             to="$(arg scan_cloud_topic)"/>
       <remap from="odom"                   to="$(arg odom_topic)"/>
+      <remap from="imu"                    to="$(arg imu_topic)"/>
       
       <param name="frame_id"                    type="string" value="$(arg frame_id)"/>
       <param name="odom_frame_id"               type="string" value="$(arg vo_frame_id)"/>
@@ -247,17 +268,32 @@
       <param name="guess_frame_id"              type="string" value="$(arg odom_guess_frame_id)"/>
       <param name="guess_min_translation"       type="double" value="$(arg odom_guess_min_translation)"/>
       <param name="guess_min_rotation"          type="double" value="$(arg odom_guess_min_rotation)"/>
+      <param name="scan_cloud_max_points"       type="int"    value="$(arg scan_cloud_max_points)"/>
+      <param name="expected_update_rate"        type="double" value="$(arg odom_expected_rate)"/>
+      <param name="max_update_rate"             type="double" value="$(arg odom_max_rate)"/>
+    </node>
+    
+    <node if="$(arg scan_cloud_assembling)" pkg="rtabmap_ros" type="point_cloud_assembler" name="point_cloud_assembler" output="screen">
+      <remap     if="$(arg scan_cloud_filtered)" from="cloud" to="odom_filtered_input_scan"/>
+      <remap unless="$(arg scan_cloud_filtered)" from="cloud" to="$(arg scan_cloud_topic)"/>
+
+      <remap from="odom"            to="$(arg odom_topic)"/>
+      <param name="assembling_time" type="double" value="$(arg scan_cloud_assembling_time)"/>
+      <param name="fixed_frame_id"  type="string" value="$(arg scan_cloud_assembling_fixed_frame)"/>
+      <param name="voxel_size"      type="double" value="$(arg scan_cloud_assembling_voxel_size)"/>
     </node>
   
     <!-- Visual SLAM (robot side) -->
     <!-- args: "delete_db_on_start" and "udebug" -->
     <node name="rtabmap" pkg="rtabmap_ros" type="rtabmap" output="$(arg output)" args="$(arg rtabmap_args)" launch-prefix="$(arg launch_prefix)">
       <param     if="$(arg stereo)" name="subscribe_depth"  type="bool" value="false"/>
-      <param unless="$(arg stereo)" name="subscribe_depth"  type="bool" value="true"/>
+      <param unless="$(arg stereo)" name="subscribe_depth"  type="bool" value="$(arg depth)"/>
+      <param name="subscribe_rgb"        type="bool"   value="$(arg depth)"/>
       <param name="subscribe_rgbd"       type="bool"   value="$(arg subscribe_rgbd)"/>
       <param name="subscribe_stereo"     type="bool"   value="$(arg stereo)"/>
       <param name="subscribe_scan"       type="bool"   value="$(arg subscribe_scan)"/>
       <param name="subscribe_scan_cloud" type="bool"   value="$(arg subscribe_scan_cloud)"/>
+      <param name="subscribe_scan_descriptor" type="bool" value="$(arg subscribe_scan_descriptor)"/>
       <param name="subscribe_user_data"  type="bool"   value="$(arg subscribe_user_data)"/>
       <param if="$(arg visual_odometry)" name="subscribe_odom_info" type="bool" value="true"/>
       <param if="$(arg icp_odometry)"    name="subscribe_odom_info" type="bool" value="true"/>
@@ -275,7 +311,7 @@
       <param name="approx_sync"          type="bool"   value="$(arg approx_sync)"/>
       <param name="config_path"          type="string" value="$(arg cfg)"/>
       <param name="queue_size"           type="int" value="$(arg queue_size)"/>
-      <param name="scan_normal_k"        type="int" value="$(arg scan_normal_k)"/>
+      <param name="scan_cloud_max_points"     type="int" value="$(arg scan_cloud_max_points)"/>
       <param name="landmark_linear_variance"   type="double" value="$(arg tag_linear_variance)"/>
       <param name="landmark_angular_variance"  type="double" value="$(arg tag_angular_variance)"/>      
       
@@ -291,7 +327,10 @@
       <remap from="right/camera_info"      to="$(arg right_camera_info_topic)"/>
       
       <remap from="scan"                   to="$(arg scan_topic)"/>
-      <remap from="scan_cloud"             to="$(arg scan_cloud_topic)"/>
+      <remap if="$(eval scan_cloud_assembling)" from="scan_cloud" to="assembled_cloud"/>
+      <remap if="$(eval scan_cloud_filtered and not scan_cloud_assembling)" from="scan_cloud" to="odom_filtered_input_scan"/>
+      <remap if="$(eval not scan_cloud_filtered and not scan_cloud_assembling)" from="scan_cloud" to="$(arg scan_cloud_topic)"/>
+      <remap from="scan_descriptor"        to="$(arg scan_descriptor_topic)"/>
       <remap from="user_data"              to="$(arg user_data_topic)"/>
       <remap from="user_data_async"        to="$(arg user_data_async_topic)"/>
       <remap from="gps/fix"                to="$(arg gps_topic)"/>
@@ -308,11 +347,12 @@
     <!-- Visualisation RTAB-Map -->
     <node if="$(arg rtabmapviz)" pkg="rtabmap_ros" type="rtabmapviz" name="rtabmapviz" args="-d $(arg gui_cfg)" output="$(arg output)" launch-prefix="$(arg launch_prefix)">
       <param     if="$(arg stereo)" name="subscribe_depth"  type="bool" value="false"/>
-      <param unless="$(arg stereo)" name="subscribe_depth"  type="bool" value="true"/>
+      <param unless="$(arg stereo)" name="subscribe_depth"  type="bool" value="$(arg depth)"/>
       <param name="subscribe_rgbd"       type="bool"   value="$(arg subscribe_rgbd)"/>
       <param name="subscribe_stereo"     type="bool"   value="$(arg stereo)"/>
       <param name="subscribe_scan"       type="bool"   value="$(arg subscribe_scan)"/>
       <param name="subscribe_scan_cloud" type="bool"   value="$(arg subscribe_scan_cloud)"/>
+      <param name="subscribe_scan_descriptor" type="bool" value="$(arg subscribe_scan_descriptor)"/>
       <param if="$(arg visual_odometry)" name="subscribe_odom_info" type="bool" value="true"/>
       <param if="$(arg icp_odometry)"    name="subscribe_odom_info" type="bool" value="true"/>
       <param name="frame_id"             type="string" value="$(arg frame_id)"/>
@@ -333,7 +373,9 @@
       <remap from="right/camera_info"      to="$(arg right_camera_info_topic)"/>
       
       <remap from="scan"                   to="$(arg scan_topic)"/>
-      <remap from="scan_cloud"             to="$(arg scan_cloud_topic)"/>
+      <remap     if="$(arg scan_cloud_filtered)" from="scan_cloud" to="odom_filtered_input_scan"/>
+      <remap unless="$(arg scan_cloud_filtered)" from="scan_cloud" to="$(arg scan_cloud_topic)"/>
+      <remap from="scan_descriptor"        to="$(arg scan_descriptor_topic)"/>
       <remap from="odom"                   to="$(arg odom_topic)"/>
     </node>
   
