@@ -84,8 +84,8 @@ tracks:
     - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
       :{release_inc}
     devel_branch: kinetic-devel
-    last_release: 0.19.3-kinetic
-    last_version: 0.19.3
+    last_release: 0.20.0-kinetic
+    last_version: 0.20.0
     name: rtabmap_ros
     patches: null
     release_inc: '1'
