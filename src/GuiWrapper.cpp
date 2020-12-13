@@ -607,9 +607,9 @@ void GuiWrapper::commonStereoCallback(
 		const sensor_msgs::PointCloud2& scan3dMsg,
 		const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg,
 		const std::vector<rtabmap_ros::GlobalDescriptor> & globalDescriptorMsgs,
-		const std::vector<std::vector<rtabmap_ros::KeyPoint> > & localKeyPoints,
-		const std::vector<std::vector<rtabmap_ros::Point3f> > & localPoints3d,
-		const std::vector<cv::Mat> & localDescriptors)
+		const std::vector<rtabmap_ros::KeyPoint> & localKeyPoints,
+		const std::vector<rtabmap_ros::Point3f> & localPoints3d,
+		const cv::Mat & localDescriptors)
 {
 	std_msgs::Header odomHeader;
 	if(odomMsg.get())
@@ -693,7 +693,8 @@ void GuiWrapper::commonStereoCallback(
 				right,
 				stereoModel,
 				tfListener_,
-				waitForTransform_?waitForTransformDuration_:0.0))
+				waitForTransform_?waitForTransformDuration_:0.0,
+				true))
 		{
 			ROS_ERROR("Could not convert stereo msgs! Aborting rtabmapviz update...");
 			return;
