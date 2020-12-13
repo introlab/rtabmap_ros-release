@@ -51,6 +51,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "rtabmap_ros/GetNodeData.h"
 #include "rtabmap_ros/GetMap.h"
+#include "rtabmap_ros/GetMap2.h"
 #include "rtabmap_ros/ListLabels.h"
 #include "rtabmap_ros/PublishMap.h"
 #include "rtabmap_ros/SetGoal.h"
@@ -60,6 +61,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rtabmap_ros/CommonDataSubscriber.h"
 #include "rtabmap_ros/OdomInfo.h"
 #include "rtabmap_ros/AddLink.h"
+#include "rtabmap_ros/GetNodesInRadius.h"
 
 #include "MapsManager.h"
 
@@ -135,9 +137,9 @@ private:
 				const sensor_msgs::PointCloud2& scan3dMsg,
 				const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg,
 				const std::vector<rtabmap_ros::GlobalDescriptor> & globalDescriptorMsgs = std::vector<rtabmap_ros::GlobalDescriptor>(),
-				const std::vector<std::vector<rtabmap_ros::KeyPoint> > & localKeyPoints = std::vector<std::vector<rtabmap_ros::KeyPoint> >(),
-				const std::vector<std::vector<rtabmap_ros::Point3f> > & localPoints3d = std::vector<std::vector<rtabmap_ros::Point3f> >(),
-				const std::vector<cv::Mat> & localDescriptors = std::vector<cv::Mat>());
+				const std::vector<rtabmap_ros::KeyPoint> & localKeyPoints = std::vector<rtabmap_ros::KeyPoint>(),
+				const std::vector<rtabmap_ros::Point3f> & localPoints3d = std::vector<rtabmap_ros::Point3f>(),
+				const cv::Mat & localDescriptors = cv::Mat());
 	virtual void commonLaserScanCallback(
 				const nav_msgs::OdometryConstPtr & odomMsg,
 				const rtabmap_ros::UserDataConstPtr & userDataMsg,
@@ -196,6 +198,7 @@ private:
 	bool setLogError(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
 	bool getNodeDataCallback(rtabmap_ros::GetNodeData::Request& req, rtabmap_ros::GetNodeData::Response& res);
 	bool getMapDataCallback(rtabmap_ros::GetMap::Request& req, rtabmap_ros::GetMap::Response& res);
+	bool getMapData2Callback(rtabmap_ros::GetMap2::Request& req, rtabmap_ros::GetMap2::Response& res);
 	bool getMapCallback(nav_msgs::GetMap::Request  &req, nav_msgs::GetMap::Response &res);
 	bool getProbMapCallback(nav_msgs::GetMap::Request  &req, nav_msgs::GetMap::Response &res);
 	bool getProjMapCallback(nav_msgs::GetMap::Request  &req, nav_msgs::GetMap::Response &res);
@@ -208,6 +211,7 @@ private:
 	bool setLabelCallback(rtabmap_ros::SetLabel::Request& req, rtabmap_ros::SetLabel::Response& res);
 	bool listLabelsCallback(rtabmap_ros::ListLabels::Request& req, rtabmap_ros::ListLabels::Response& res);
 	bool addLinkCallback(rtabmap_ros::AddLink::Request&, rtabmap_ros::AddLink::Response&);
+	bool getNodesInRadiusCallback(rtabmap_ros::GetNodesInRadius::Request&, rtabmap_ros::GetNodesInRadius::Response&);
 #ifdef WITH_OCTOMAP_MSGS
 	bool octomapBinaryCallback(octomap_msgs::GetOctomap::Request  &req, octomap_msgs::GetOctomap::Response &res);
 	bool octomapFullCallback(octomap_msgs::GetOctomap::Request  &req, octomap_msgs::GetOctomap::Response &res);
@@ -257,6 +261,11 @@ private:
 	bool genScan_;
 	double genScanMaxDepth_;
 	double genScanMinDepth_;
+	bool genDepth_;
+	int genDepthDecimation_;
+	int genDepthFillHolesSize_;
+	int genDepthFillIterations_;
+	double genDepthFillHolesError_;
 	int scanCloudMaxPoints_;
 
 	rtabmap::Transform mapToOdom_;
@@ -304,6 +313,7 @@ private:
 	ros::ServiceServer setLogErrorSrv_;
 	ros::ServiceServer getNodeDataSrv_;
 	ros::ServiceServer getMapDataSrv_;
+	ros::ServiceServer getMapData2Srv_;
 	ros::ServiceServer getProjMapSrv_;
 	ros::ServiceServer getMapSrv_;
 	ros::ServiceServer getProbMapSrv_;
@@ -316,6 +326,7 @@ private:
 	ros::ServiceServer setLabelSrv_;
 	ros::ServiceServer listLabelsSrv_;
 	ros::ServiceServer addLinkSrv_;
+	ros::ServiceServer getNodesInRadiusSrv_;
 #ifdef WITH_OCTOMAP_MSGS
 	ros::ServiceServer octomapBinarySrv_;
 	ros::ServiceServer octomapFullSrv_;
@@ -355,6 +366,7 @@ private:
 	float rate_;
 	bool createIntermediateNodes_;
 	int maxMappingNodes_;
+	bool alreadyRectifiedImages_;
 	ros::Time previousStamp_;
 };
 
