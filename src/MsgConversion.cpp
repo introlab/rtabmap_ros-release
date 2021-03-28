@@ -1381,7 +1381,7 @@ std::map<std::string, float> odomInfoToStatistics(const rtabmap::OdometryInfo & 
 	return stats;
 }
 
-rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg)
+rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg, bool ignoreData)
 {
 	rtabmap::OdometryInfo info;
 	info.lost = msg.lost;
@@ -1413,31 +1413,34 @@ rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg)
 
 	info.type = msg.type;
 
-	UASSERT(msg.wordsKeys.size() == msg.wordsValues.size());
-	for(unsigned int i=0; i<msg.wordsKeys.size(); ++i)
-	{
-		info.words.insert(std::make_pair(msg.wordsKeys[i], keypointFromROS(msg.wordsValues[i])));
-	}
-
 	info.reg.matchesIDs = msg.wordMatches;
 	info.reg.inliersIDs = msg.wordInliers;
 
-	info.refCorners = points2fFromROS(msg.refCorners);
-	info.newCorners = points2fFromROS(msg.newCorners);
-	info.cornerInliers = msg.cornerInliers;
-
-	info.transform = transformFromGeometryMsg(msg.transform);
-	info.transformFiltered = transformFromGeometryMsg(msg.transformFiltered);
-	info.transformGroundTruth = transformFromGeometryMsg(msg.transformGroundTruth);
-	info.guessVelocity = transformFromGeometryMsg(msg.guessVelocity);
-
-	UASSERT(msg.localMapKeys.size() == msg.localMapValues.size());
-	for(unsigned int i=0; i<msg.localMapKeys.size(); ++i)
+	if(!ignoreData)
 	{
-		info.localMap.insert(std::make_pair(msg.localMapKeys[i], point3fFromROS(msg.localMapValues[i])));
-	}
+		UASSERT(msg.wordsKeys.size() == msg.wordsValues.size());
+		for(unsigned int i=0; i<msg.wordsKeys.size(); ++i)
+		{
+			info.words.insert(std::make_pair(msg.wordsKeys[i], keypointFromROS(msg.wordsValues[i])));
+		}
 
-	info.localScanMap = rtabmap::LaserScan(rtabmap::uncompressData(msg.localScanMap), 0, 0, (rtabmap::LaserScan::Format)msg.localScanMapFormat);
+		info.refCorners = points2fFromROS(msg.refCorners);
+		info.newCorners = points2fFromROS(msg.newCorners);
+		info.cornerInliers = msg.cornerInliers;
+
+		info.transform = transformFromGeometryMsg(msg.transform);
+		info.transformFiltered = transformFromGeometryMsg(msg.transformFiltered);
+		info.transformGroundTruth = transformFromGeometryMsg(msg.transformGroundTruth);
+		info.guess = transformFromGeometryMsg(msg.guess);
+
+		UASSERT(msg.localMapKeys.size() == msg.localMapValues.size());
+		for(unsigned int i=0; i<msg.localMapKeys.size(); ++i)
+		{
+			info.localMap.insert(std::make_pair(msg.localMapKeys[i], point3fFromROS(msg.localMapValues[i])));
+		}
+
+		info.localScanMap = rtabmap::LaserScan(rtabmap::uncompressData(msg.localScanMap), 0, 0, (rtabmap::LaserScan::Format)msg.localScanMapFormat);
+	}
 	return info;
 }
 
@@ -1488,7 +1491,7 @@ void odomInfoToROS(const rtabmap::OdometryInfo & info, rtabmap_ros::OdomInfo & m
 	transformToGeometryMsg(info.transform, msg.transform);
 	transformToGeometryMsg(info.transformFiltered, msg.transformFiltered);
 	transformToGeometryMsg(info.transformGroundTruth, msg.transformGroundTruth);
-	transformToGeometryMsg(info.guessVelocity, msg.guessVelocity);
+	transformToGeometryMsg(info.guess, msg.guess);
 
 	msg.localMapKeys = uKeys(info.localMap);
 	points3fToROS(uValues(info.localMap), msg.localMapValues);
@@ -2102,7 +2105,7 @@ bool convertScanMsg(
 		pcl::PointCloud<pcl::PointXYZI>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZI>);
 		pcl::fromROSMsg(scanOut, *pclScan);
 		pclScan->is_dense = true;
-		data = rtabmap::util3d::laserScan2dFromPointCloud(*pclScan, laserToOdom); // put back in laser frame
+		data = rtabmap::util3d::laserScan2dFromPointCloud(*pclScan, laserToOdom).data(); // put back in laser frame
 		format = rtabmap::LaserScan::kXYI;
 	}
 	else
@@ -2110,7 +2113,7 @@ bool convertScanMsg(
 		pcl::PointCloud<pcl::PointXYZ>::Ptr pclScan(new pcl::PointCloud<pcl::PointXYZ>);
 		pcl::fromROSMsg(scanOut, *pclScan);
 		pclScan->is_dense = true;
-		data = rtabmap::util3d::laserScan2dFromPointCloud(*pclScan, laserToOdom); // put back in laser frame
+		data = rtabmap::util3d::laserScan2dFromPointCloud(*pclScan, laserToOdom).data(); // put back in laser frame
 		format = rtabmap::LaserScan::kXY;
 	}
 
@@ -2146,6 +2149,9 @@ bool convertScan3dMsg(
 		int maxPoints,
 		float maxRange)
 {
+	UASSERT_MSG(scan3dMsg.data.size() == scan3dMsg.row_step*scan3dMsg.height,
+			uFormat("data=%d row_step=%d height=%d", scan3dMsg.data.size(), scan3dMsg.row_step, scan3dMsg.height).c_str());
+
 	bool hasNormals = false;
 	bool hasColors = false;
 	bool hasIntensity = false;
@@ -2217,7 +2223,7 @@ bool convertScan3dMsg(
 			{
 				pclScan = rtabmap::util3d::removeNaNNormalsFromPointCloud(pclScan);
 			}
-			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, rtabmap::LaserScan::kXYZRGBNormal, scanLocalTransform);
+			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, scanLocalTransform);
 		}
 		else if(hasIntensity)
 		{
@@ -2227,7 +2233,7 @@ bool convertScan3dMsg(
 			{
 				pclScan = rtabmap::util3d::removeNaNNormalsFromPointCloud(pclScan);
 			}
-			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, rtabmap::LaserScan::kXYZINormal, scanLocalTransform);
+			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, scanLocalTransform);
 		}
 		else
 		{
@@ -2237,7 +2243,7 @@ bool convertScan3dMsg(
 			{
 				pclScan = rtabmap::util3d::removeNaNNormalsFromPointCloud(pclScan);
 			}
-			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, rtabmap::LaserScan::kXYZNormal, scanLocalTransform);
+			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, scanLocalTransform);
 		}
 	}
 	else
@@ -2250,7 +2256,7 @@ bool convertScan3dMsg(
 			{
 				pclScan = rtabmap::util3d::removeNaNFromPointCloud(pclScan);
 			}
-			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, rtabmap::LaserScan::kXYZRGB, scanLocalTransform);
+			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, scanLocalTransform);
 		}
 		else if(hasIntensity)
 		{
@@ -2260,7 +2266,7 @@ bool convertScan3dMsg(
 			{
 				pclScan = rtabmap::util3d::removeNaNFromPointCloud(pclScan);
 			}
-			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, rtabmap::LaserScan::kXYZI, scanLocalTransform);
+			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, scanLocalTransform);
 		}
 		else
 		{
@@ -2270,7 +2276,7 @@ bool convertScan3dMsg(
 			{
 				pclScan = rtabmap::util3d::removeNaNFromPointCloud(pclScan);
 			}
-			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, rtabmap::LaserScan::kXYZ, scanLocalTransform);
+			scan = rtabmap::LaserScan(rtabmap::util3d::laserScanFromPointCloud(*pclScan), maxPoints, maxRange, scanLocalTransform);
 		}
 	}
 	return true;
