@@ -28,7 +28,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap_ros/OdometryROS.h>
 
 #include <pluginlib/class_list_macros.h>
-#include <pluginlib/class_loader.hpp>
+#include <pluginlib/class_loader.h>
 
 #include <nodelet/nodelet.h>
 
@@ -339,7 +339,7 @@ private:
 			pclScan->is_dense = true;
 		}
 
-		cv::Mat scan;
+		LaserScan scan;
 		int maxLaserScans = (int)scanMsg->ranges.size();
 		if(!pclScan->empty() || !pclScanI->empty())
 		{
@@ -401,7 +401,7 @@ private:
 					}
 				}
 				pcl::PointCloud<pcl::PointXYZINormal>::Ptr pclScanINormal;
-				pcl::PointCloud<pcl::PointXYZINormal>::Ptr pclScanNormal;
+				pcl::PointCloud<pcl::PointNormal>::Ptr pclScanNormal;
 				if(hasIntensity)
 				{
 					pclScanINormal.reset(new pcl::PointCloud<pcl::PointXYZINormal>);
@@ -410,24 +410,9 @@ private:
 				}
 				else
 				{
-					pclScanNormal.reset(new pcl::PointCloud<pcl::PointXYZINormal>);
+					pclScanNormal.reset(new pcl::PointCloud<pcl::PointNormal>);
 					pcl::concatenateFields(*pclScan, *normals, *pclScanNormal);
 					scan = util3d::laserScan2dFromPointCloud(*pclScanNormal);
-				}
-
-				if(filtered_scan_pub_.getNumSubscribers())
-				{
-					sensor_msgs::PointCloud2 msg;
-					if(hasIntensity)
-					{
-						pcl::toROSMsg(*pclScanINormal, msg);
-					}
-					else
-					{
-						pcl::toROSMsg(*pclScanNormal, msg);
-					}
-					msg.header = scanMsg->header;
-					filtered_scan_pub_.publish(msg);
 				}
 			}
 			else
@@ -440,29 +425,18 @@ private:
 				{
 					scan = util3d::laserScan2dFromPointCloud(*pclScan);
 				}
-
-				if(filtered_scan_pub_.getNumSubscribers())
-				{
-					sensor_msgs::PointCloud2 msg;
-					if(hasIntensity)
-					{
-						pcl::toROSMsg(*pclScanI, msg);
-					}
-					else
-					{
-						pcl::toROSMsg(*pclScan, msg);
-					}
-					msg.header = scanMsg->header;
-					filtered_scan_pub_.publish(msg);
-				}
 			}
 		}
 
+		if(scanRangeMin_ > 0 || scanRangeMax_ > 0)
+		{
+			scan = util3d::rangeFiltering(scan, scanRangeMin_, scanRangeMax_);
+		}
+
 		rtabmap::SensorData data(
-				LaserScan(scan, maxLaserScans, scanMsg->range_max,
-						scan.channels()==6?LaserScan::kXYINormal:
-						scan.channels()==5?LaserScan::kXYNormal:
-						scan.channels()==3?LaserScan::kXYI:LaserScan::kXY,
+				LaserScan(scan,
+						maxLaserScans,
+						scanRangeMax_>0&&scanRangeMax_<scanMsg->range_max?scanRangeMax_:scanMsg->range_max,
 						localScanTransform),
 				cv::Mat(),
 				cv::Mat(),
@@ -470,11 +444,14 @@ private:
 				0,
 				rtabmap_ros::timestampFromROS(scanMsg->header.stamp));
 
-		this->processData(data, scanMsg->header.stamp, "");
+		this->processData(data, scanMsg->header);
 	}
 
 	void callbackCloud(const sensor_msgs::PointCloud2ConstPtr& pointCloudMsg)
 	{
+		UASSERT_MSG(pointCloudMsg->data.size() == pointCloudMsg->row_step*pointCloudMsg->height,
+				uFormat("data=%d row_step=%d height=%d", pointCloudMsg->data.size(), pointCloudMsg->row_step, pointCloudMsg->height).c_str());
+		
 		if(scanReceived_)
 		{
 			ROS_ERROR("%s is already receiving scans on \"%s\", but also "
@@ -516,7 +493,7 @@ private:
 			cloudMsg = *pointCloudMsg;
 		}
 
-		cv::Mat scan;
+		LaserScan scan;
 		bool hasNormals = false;
 		bool hasIntensity = false;
 		for(unsigned int i=0; i<cloudMsg.fields.size(); ++i)
@@ -584,13 +561,6 @@ private:
 				}
 			}
 			scan = util3d::laserScanFromPointCloud(*pclScan);
-			if(filtered_scan_pub_.getNumSubscribers())
-			{
-				sensor_msgs::PointCloud2 msg;
-				pcl::toROSMsg(*pclScan, msg);
-				msg.header = cloudMsg.header;
-				filtered_scan_pub_.publish(msg);
-			}
 		}
 		else if(hasNormals)
 		{
@@ -609,13 +579,6 @@ private:
 				}
 			}
 			scan = util3d::laserScanFromPointCloud(*pclScan);
-			if(filtered_scan_pub_.getNumSubscribers())
-			{
-				sensor_msgs::PointCloud2 msg;
-				pcl::toROSMsg(*pclScan, msg);
-				msg.header = cloudMsg.header;
-				filtered_scan_pub_.publish(msg);
-			}
 		}
 		else if(hasIntensity)
 		{
@@ -654,26 +617,10 @@ private:
 					pcl::PointCloud<pcl::PointXYZINormal>::Ptr pclScanNormal(new pcl::PointCloud<pcl::PointXYZINormal>);
 					pcl::concatenateFields(*pclScan, *normals, *pclScanNormal);
 					scan = util3d::laserScanFromPointCloud(*pclScanNormal);
-
-					if(filtered_scan_pub_.getNumSubscribers())
-					{
-						sensor_msgs::PointCloud2 msg;
-						pcl::toROSMsg(*pclScanNormal, msg);
-						msg.header = cloudMsg.header;
-						filtered_scan_pub_.publish(msg);
-					}
 				}
 				else
 				{
 					scan = util3d::laserScanFromPointCloud(*pclScan);
-
-					if(filtered_scan_pub_.getNumSubscribers())
-					{
-						sensor_msgs::PointCloud2 msg;
-						pcl::toROSMsg(*pclScan, msg);
-						msg.header = cloudMsg.header;
-						filtered_scan_pub_.publish(msg);
-					}
 				}
 			}
 		}
@@ -714,34 +661,17 @@ private:
 					pcl::PointCloud<pcl::PointNormal>::Ptr pclScanNormal(new pcl::PointCloud<pcl::PointNormal>);
 					pcl::concatenateFields(*pclScan, *normals, *pclScanNormal);
 					scan = util3d::laserScanFromPointCloud(*pclScanNormal);
-
-					if(filtered_scan_pub_.getNumSubscribers())
-					{
-						sensor_msgs::PointCloud2 msg;
-						pcl::toROSMsg(*pclScanNormal, msg);
-						msg.header = cloudMsg.header;
-						filtered_scan_pub_.publish(msg);
-					}
 				}
 				else
 				{
 					scan = util3d::laserScanFromPointCloud(*pclScan);
-
-					if(filtered_scan_pub_.getNumSubscribers())
-					{
-						sensor_msgs::PointCloud2 msg;
-						pcl::toROSMsg(*pclScan, msg);
-						msg.header = cloudMsg.header;
-						filtered_scan_pub_.publish(msg);
-					}
 				}
 			}
 		}
 
-		LaserScan laserScan(scan, maxLaserScans, 0,
-				scan.channels()==7?LaserScan::kXYZINormal:
-				scan.channels()==6?LaserScan::kXYZNormal:
-				scan.channels()==4?LaserScan::kXYZI:LaserScan::kXYZ,
+		LaserScan laserScan(scan,
+				maxLaserScans,
+				0,
 				localScanTransform);
 		if(scanRangeMin_ > 0 || scanRangeMax_ > 0)
 		{
@@ -760,13 +690,24 @@ private:
 				0,
 				rtabmap_ros::timestampFromROS(cloudMsg.header.stamp));
 
-		this->processData(data, cloudMsg.header.stamp, cloudMsg.header.frame_id);
+		this->processData(data, cloudMsg.header);
 	}
 
 protected:
 	virtual void flushCallbacks()
 	{
 		// flush callbacks
+	}
+
+	void postProcessData(const SensorData & data, const std_msgs::Header & header) const
+	{
+		if(filtered_scan_pub_.getNumSubscribers())
+		{
+			sensor_msgs::PointCloud2 msg;
+			pcl_conversions::fromPCL(*rtabmap::util3d::laserScanToPointCloud2(data.laserScanRaw()), msg);
+			msg.header = header;
+			filtered_scan_pub_.publish(msg);
+		}
 	}
 
 private:

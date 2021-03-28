@@ -436,9 +436,18 @@ void GuiWrapper::commonDepthCallback(
 	UASSERT(imageMsgs.size() == 0 || (imageMsgs.size() == cameraInfoMsgs.size()));
 
 	std_msgs::Header odomHeader;
+	std::string frameId = frameId_;
 	if(odomMsg.get())
 	{
 		odomHeader = odomMsg->header;
+		if(!odomMsg->child_frame_id.empty())
+		{
+			frameId = odomMsg->child_frame_id;
+		}
+		else
+		{
+			ROS_WARN("Received odom topic with child_frame_id not set! Using \"%s\" as base frame.", frameId_.c_str());
+		}
 	}
 	else
 	{
@@ -465,7 +474,7 @@ void GuiWrapper::commonDepthCallback(
 		odomHeader.frame_id = odomFrameId_;
 	}
 
-	Transform odomT = rtabmap_ros::getTransform(odomHeader.frame_id, frameId_, odomHeader.stamp, tfListener_, waitForTransform_?waitForTransformDuration_:0);
+	Transform odomT = rtabmap_ros::getTransform(odomHeader.frame_id, frameId, odomHeader.stamp, tfListener_, waitForTransform_?waitForTransformDuration_:0);
 	cv::Mat covariance = cv::Mat::eye(6,6,CV_64FC1);
 	if(odomMsg.get())
 	{
@@ -519,7 +528,7 @@ void GuiWrapper::commonDepthCallback(
 					imageMsgs,
 					depthMsgs,
 					cameraInfoMsgs,
-					frameId_,
+					frameId,
 					odomSensorSync_?odomHeader.frame_id:"",
 					odomHeader.stamp,
 					rgb,
@@ -537,7 +546,7 @@ void GuiWrapper::commonDepthCallback(
 		{
 			if(!rtabmap_ros::convertScanMsg(
 					scan2dMsg,
-					frameId_,
+					frameId,
 					odomSensorSync_?odomHeader.frame_id:"",
 					odomHeader.stamp,
 					scan,
@@ -552,7 +561,7 @@ void GuiWrapper::commonDepthCallback(
 		{
 			if(!rtabmap_ros::convertScan3dMsg(
 					scan3dMsg,
-					frameId_,
+					frameId,
 					odomSensorSync_?odomHeader.frame_id:"",
 					odomHeader.stamp,
 					scan,
@@ -612,9 +621,18 @@ void GuiWrapper::commonStereoCallback(
 		const cv::Mat & localDescriptors)
 {
 	std_msgs::Header odomHeader;
+	std::string frameId = frameId_;
 	if(odomMsg.get())
 	{
 		odomHeader = odomMsg->header;
+		if(!odomMsg->child_frame_id.empty())
+		{
+			frameId = odomMsg->child_frame_id;
+		}
+		else
+		{
+			ROS_WARN("Received odom topic with child_frame_id not set! Using \"%s\" as base frame.", frameId_.c_str());
+		}
 	}
 	else
 	{
@@ -633,7 +651,7 @@ void GuiWrapper::commonStereoCallback(
 		odomHeader.frame_id = odomFrameId_;
 	}
 
-	Transform odomT = rtabmap_ros::getTransform(odomHeader.frame_id, frameId_, odomHeader.stamp, tfListener_, waitForTransform_?waitForTransformDuration_:0);
+	Transform odomT = rtabmap_ros::getTransform(odomHeader.frame_id, frameId, odomHeader.stamp, tfListener_, waitForTransform_?waitForTransformDuration_:0);
 	cv::Mat covariance = cv::Mat::eye(6,6,CV_64FC1);
 	if(odomMsg.get())
 	{
@@ -686,7 +704,7 @@ void GuiWrapper::commonStereoCallback(
 				rightImageMsg,
 				leftCamInfoMsg,
 				rightCamInfoMsg,
-				frameId_,
+				frameId,
 				odomSensorSync_?odomHeader.frame_id:"",
 				odomHeader.stamp,
 				left,
@@ -704,7 +722,7 @@ void GuiWrapper::commonStereoCallback(
 		{
 			if(!rtabmap_ros::convertScanMsg(
 					scan2dMsg,
-					frameId_,
+					frameId,
 					odomSensorSync_?odomHeader.frame_id:"",
 					odomHeader.stamp,
 					scan,
@@ -719,7 +737,7 @@ void GuiWrapper::commonStereoCallback(
 		{
 			if(!rtabmap_ros::convertScan3dMsg(
 					scan3dMsg,
-					frameId_,
+					frameId,
 					odomSensorSync_?odomHeader.frame_id:"",
 					odomHeader.stamp,
 					scan,
@@ -772,9 +790,18 @@ void GuiWrapper::commonLaserScanCallback(
 		const rtabmap_ros::GlobalDescriptor & globalDescriptor)
 {
 	std_msgs::Header odomHeader;
+	std::string frameId = frameId_;
 	if(odomMsg.get())
 	{
 		odomHeader = odomMsg->header;
+		if(!odomMsg->child_frame_id.empty())
+		{
+			frameId = odomMsg->child_frame_id;
+		}
+		else
+		{
+			ROS_WARN("Received odom topic with child_frame_id not set! Using \"%s\" as base frame.", frameId_.c_str());
+		}
 	}
 	else
 	{
@@ -793,7 +820,7 @@ void GuiWrapper::commonLaserScanCallback(
 		odomHeader.frame_id = odomFrameId_;
 	}
 
-	Transform odomT = rtabmap_ros::getTransform(odomHeader.frame_id, frameId_, odomHeader.stamp, tfListener_, waitForTransform_?waitForTransformDuration_:0);
+	Transform odomT = rtabmap_ros::getTransform(odomHeader.frame_id, frameId, odomHeader.stamp, tfListener_, waitForTransform_?waitForTransformDuration_:0);
 	cv::Mat covariance = cv::Mat::eye(6,6,CV_64FC1);
 	if(odomMsg.get())
 	{
@@ -829,7 +856,6 @@ void GuiWrapper::commonLaserScanCallback(
 	LaserScan scan;
 	rtabmap::OdometryInfo info;
 	bool ignoreData = false;
-	Transform fakeCameraLocalTransform;
 
 	// limit update rate
 	if(maxOdomUpdateRate_<=0.0 ||
@@ -843,7 +869,7 @@ void GuiWrapper::commonLaserScanCallback(
 		{
 			if(!rtabmap_ros::convertScanMsg(
 					scan2dMsg,
-					frameId_,
+					frameId,
 					odomSensorSync_?odomHeader.frame_id:"",
 					odomHeader.stamp,
 					scan,
@@ -858,7 +884,7 @@ void GuiWrapper::commonLaserScanCallback(
 		{
 			if(!rtabmap_ros::convertScan3dMsg(
 					scan3dMsg,
-					frameId_,
+					frameId,
 					odomSensorSync_?odomHeader.frame_id:"",
 					odomHeader.stamp,
 					scan,
@@ -878,16 +904,6 @@ void GuiWrapper::commonLaserScanCallback(
 	}
 	else if(odomInfoMsg.get())
 	{
-		//just get scan local transform to adjust camera frame
-		if(!scan2dMsg.ranges.empty())
-		{
-			fakeCameraLocalTransform = getTransform(frameId_, scan2dMsg.header.frame_id, scan2dMsg.header.stamp, tfListener_, waitForTransform_?waitForTransformDuration_:0);
-		}
-		else if(!scan3dMsg.data.empty())
-		{
-			fakeCameraLocalTransform = getTransform(frameId_, scan3dMsg.header.frame_id, scan3dMsg.header.stamp, tfListener_, waitForTransform_?waitForTransformDuration_:0);
-		}
-
 		info = rtabmap_ros::odomInfoFromROS(*odomInfoMsg).copyWithoutData();
 		ignoreData = true;
 	}
@@ -897,24 +913,13 @@ void GuiWrapper::commonLaserScanCallback(
 		return;
 	}
 
-	cv::Mat rgb;
-	cv::Mat depth;
-	CameraModel model(
-			2,
-			2,
-			2,
-			1.5,
-			(fakeCameraLocalTransform.isNull()?scan.localTransform():fakeCameraLocalTransform)*Transform(0,0,1,0, -1,0,0,0, 0,-1,0,0),
-			0,
-			cv::Size(4,3));
-
 	info.reg.covariance = covariance;
 	rtabmap::OdometryEvent odomEvent(
 		rtabmap::SensorData(
 				scan,
-				rgb,
-				depth,
-				model,
+				cv::Mat(),
+				cv::Mat(),
+				CameraModel(),
 				odomHeader.seq,
 				rtabmap_ros::timestampFromROS(odomHeader.stamp)),
 		odomMsg.get()?rtabmap_ros::transformFromPoseMsg(odomMsg->pose.pose):odomT,
@@ -932,7 +937,7 @@ void GuiWrapper::commonOdomCallback(
 
 	std_msgs::Header odomHeader = odomMsg->header;
 
-	Transform odomT = rtabmap_ros::getTransform(odomHeader.frame_id, frameId_, odomHeader.stamp, tfListener_, waitForTransform_?waitForTransformDuration_:0);
+	Transform odomT = rtabmap_ros::getTransform(odomHeader.frame_id, odomMsg->child_frame_id, odomHeader.stamp, tfListener_, waitForTransform_?waitForTransformDuration_:0);
 	cv::Mat covariance = cv::Mat::eye(6,6,CV_64FC1);
 	if(odomMsg.get())
 	{
@@ -981,23 +986,12 @@ void GuiWrapper::commonOdomCallback(
 		return;
 	}
 
-	cv::Mat rgb;
-	cv::Mat depth;
-	CameraModel model(
-			2,
-			2,
-			2,
-			1.5,
-			Transform(0,0,1,0, -1,0,0,0, 0,-1,0,0),
-			0,
-			cv::Size(4,3));
-
 	info.reg.covariance = covariance;
 	rtabmap::OdometryEvent odomEvent(
 		rtabmap::SensorData(
-				rgb,
-				depth,
-				model,
+				cv::Mat(),
+				cv::Mat(),
+				CameraModel(),
 				odomHeader.seq,
 				rtabmap_ros::timestampFromROS(odomHeader.stamp)),
 		odomMsg.get()?rtabmap_ros::transformFromPoseMsg(odomMsg->pose.pose):odomT,

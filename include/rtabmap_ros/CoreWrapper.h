@@ -62,6 +62,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rtabmap_ros/OdomInfo.h"
 #include "rtabmap_ros/AddLink.h"
 #include "rtabmap_ros/GetNodesInRadius.h"
+#include "rtabmap_ros/LoadDatabase.h"
 
 #include "MapsManager.h"
 
@@ -182,12 +183,17 @@ private:
 			const rtabmap::Transform & odom = rtabmap::Transform(),
 			const std::string & odomFrameId = "",
 			const cv::Mat & odomCovariance = cv::Mat::eye(6,6,CV_64FC1),
-			const rtabmap::OdometryInfo & odomInfo = rtabmap::OdometryInfo());
+			const rtabmap::OdometryInfo & odomInfo = rtabmap::OdometryInfo(),
+			double timeMsgConversion = 0.0);
+	std::map<int, rtabmap::Transform> filterNodesToAssemble(
+			const std::map<int, rtabmap::Transform> & nodes,
+			const rtabmap::Transform & currentPose);
 
 	bool updateRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
 	bool resetRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
 	bool pauseRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
 	bool resumeRtabmapCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
+	bool loadDatabaseCallback(rtabmap_ros::LoadDatabase::Request&, rtabmap_ros::LoadDatabase::Response&);
 	bool triggerNewMapCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
 	bool backupDatabaseCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
 	bool setModeLocalizationCallback(std_srvs::Empty::Request&, std_srvs::Empty::Response&);
@@ -303,6 +309,7 @@ private:
 	ros::ServiceServer resetSrv_;
 	ros::ServiceServer pauseSrv_;
 	ros::ServiceServer resumeSrv_;
+	ros::ServiceServer loadDatabaseSrv_;
 	ros::ServiceServer triggerNewMapSrv_;
 	ros::ServiceServer backupDatabase_;
 	ros::ServiceServer setModeLocalizationSrv_;
@@ -365,8 +372,10 @@ private:
 	bool odomSensorSync_;
 	float rate_;
 	bool createIntermediateNodes_;
-	int maxMappingNodes_;
+	int mappingMaxNodes_;
+	double mappingAltitudeDelta_;
 	bool alreadyRectifiedImages_;
+	bool twoDMapping_;
 	ros::Time previousStamp_;
 };
 
