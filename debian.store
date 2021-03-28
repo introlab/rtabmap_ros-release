@@ -1,1 +1,1 @@
-{"trim": "", "base": "de861ee", "trimbase": "", "parent": "debian/noetic/rtabmap_ros", "previous": "4666ae5"}
+{"base": "67db04c", "parent": "debian/noetic/rtabmap_ros", "previous": "5644ff2", "trim": "", "trimbase": ""}
