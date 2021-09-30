@@ -138,11 +138,11 @@ tracks:
     - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
       :{release_inc} --os-name rhel
     devel_branch: melodic-devel
-    last_release: 0.20.9-melodic
-    last_version: 0.20.9
+    last_release: 0.20.14-melodic
+    last_version: 0.20.14
     name: rtabmap_ros
     patches: null
-    release_inc: '2'
+    release_inc: '1'
     release_repo_url: null
     release_tag: :{version}-melodic
     ros_distro: melodic
