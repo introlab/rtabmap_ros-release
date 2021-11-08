@@ -1,0 +1,13 @@
+Source: ros-galactic-rtabmap-ros
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), libpcl-dev, ros-galactic-ament-cmake, ros-galactic-ament-lint-auto, ros-galactic-ament-lint-common, ros-galactic-builtin-interfaces, ros-galactic-class-loader, ros-galactic-cv-bridge, ros-galactic-geometry-msgs, ros-galactic-image-geometry, ros-galactic-image-transport, ros-galactic-laser-geometry, ros-galactic-message-filters, ros-galactic-nav-msgs, ros-galactic-octomap, ros-galactic-octomap-msgs, ros-galactic-pcl-conversions, ros-galactic-pluginlib, ros-galactic-rclcpp, ros-galactic-rclcpp-components, ros-galactic-rclpy, ros-galactic-rosgraph-msgs, ros-galactic-rosidl-default-generators, ros-galactic-rtabmap, ros-galactic-rviz-common, ros-galactic-rviz-default-plugins, ros-galactic-rviz-rendering, ros-galactic-sensor-msgs, ros-galactic-std-msgs, ros-galactic-std-srvs, ros-galactic-stereo-msgs, ros-galactic-tf2, ros-galactic-tf2-ros, ros-galactic-visualization-msgs, ros-galactic-ros-workspace, ros-galactic-rosidl-typesupport-fastrtps-c, ros-galactic-rosidl-typesupport-fastrtps-cpp
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-galactic-rtabmap-ros
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-galactic-builtin-interfaces, ros-galactic-class-loader, ros-galactic-compressed-depth-image-transport, ros-galactic-compressed-image-transport, ros-galactic-cv-bridge, ros-galactic-geometry-msgs, ros-galactic-image-geometry, ros-galactic-image-transport, ros-galactic-laser-geometry, ros-galactic-message-filters, ros-galactic-nav-msgs, ros-galactic-nav2-common, ros-galactic-octomap, ros-galactic-octomap-msgs, ros-galactic-pcl-conversions, ros-galactic-pluginlib, ros-galactic-rclcpp, ros-galactic-rclcpp-components, ros-galactic-rclpy, ros-galactic-rosgraph-msgs, ros-galactic-rosidl-default-runtime, ros-galactic-rtabmap, ros-galactic-rviz-common, ros-galactic-rviz-default-plugins, ros-galactic-rviz-rendering, ros-galactic-sensor-msgs, ros-galactic-std-msgs, ros-galactic-std-srvs, ros-galactic-stereo-msgs, ros-galactic-tf2, ros-galactic-tf2-eigen, ros-galactic-tf2-ros, ros-galactic-visualization-msgs, ros-galactic-ros-workspace
+Description: RTAB-Map's ros-pkg.
+ RTAB-Map is a RGB-D SLAM approach with real-time constraints.
