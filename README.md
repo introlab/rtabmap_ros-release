@@ -1,3 +1,26 @@
+## rtabmap_ros (foxy) - 0.20.15-1
+
+The packages in the `rtabmap_ros` repository were released into the `foxy` distro by running `/usr/bin/bloom-release rtabmap_ros --track foxy --new-track --rosdistro foxy` on `Mon, 08 Nov 2021 16:38:49 -0000`
+
+The `rtabmap_ros` package was released.
+
+Version of package(s) in repository `rtabmap_ros`:
+
+- upstream repository: https://github.com/introlab/rtabmap_ros.git
+- release repository: unknown
+- rosdistro version: `null`
+- old version: `null`
+- new version: `0.20.15-1`
+
+Versions of tools used:
+
+- bloom version: `0.10.7`
+- catkin_pkg version: `0.4.23`
+- rosdep version: `0.21.0`
+- rosdistro version: `0.8.3`
+- vcstools version: `0.1.42`
+
+
 ## rtabmap_ros (melodic) - 0.20.14-1
 
 The packages in the `rtabmap_ros` repository were released into the `melodic` distro by running `/usr/bin/bloom-release rtabmap_ros --rosdistro melodic` on `Thu, 30 Sep 2021 14:39:36 -0000`
