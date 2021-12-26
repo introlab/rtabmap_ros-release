@@ -19,7 +19,7 @@ tracks:
     last_version: 0.20.15
     name: rtabmap_ros
     patches: null
-    release_inc: '2'
+    release_inc: '3'
     release_repo_url: null
     release_tag: :{version}-foxy
     ros_distro: foxy
