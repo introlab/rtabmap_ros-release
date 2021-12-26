@@ -25,11 +25,21 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <rviz_common/display_context.hpp>
-#include "rviz_common/properties/color_property.hpp"
-#include "rviz_common/properties/float_property.hpp"
-#include "rviz_common/properties/int_property.hpp"
-#include "rviz_common/logging.hpp"
+#include <boost/bind.hpp>
+
+#include <OgreSceneNode.h>
+#include <OgreSceneManager.h>
+#include <OgreManualObject.h>
+#include <OgreBillboardSet.h>
+#include <OgreMatrix4.h>
+
+#include <tf/transform_listener.h>
+
+#include <rviz/display_context.h>
+#include <rviz/frame_manager.h>
+#include "rviz/properties/color_property.h"
+#include "rviz/properties/float_property.h"
+#include "rviz/properties/int_property.h"
 
 #include "MapGraphDisplay.h"
 
@@ -41,22 +51,22 @@ namespace rtabmap_ros
 
 MapGraphDisplay::MapGraphDisplay()
 {
-	color_neighbor_property_ = new rviz_common::properties::ColorProperty( "Neighbor", Qt::blue,
+	color_neighbor_property_ = new rviz::ColorProperty( "Neighbor", Qt::blue,
 	                                       "Color to draw neighbor links.", this );
-	color_neighbor_merged_property_ = new rviz_common::properties::ColorProperty( "Merged neighbor", QColor(255,170,0),
+	color_neighbor_merged_property_ = new rviz::ColorProperty( "Merged neighbor", QColor(255,170,0),
 	                                       "Color to draw merged neighbor links.", this );
-	color_global_property_ = new rviz_common::properties::ColorProperty( "Global loop closure", Qt::red,
+	color_global_property_ = new rviz::ColorProperty( "Global loop closure", Qt::red,
 	                                       "Color to draw global loop closure links.", this );
-	color_local_property_ = new rviz_common::properties::ColorProperty( "Local loop closure", Qt::yellow,
+	color_local_property_ = new rviz::ColorProperty( "Local loop closure", Qt::yellow,
 	                                       "Color to draw local loop closure links.", this );
-	color_landmark_property_ = new rviz_common::properties::ColorProperty( "Landmark", Qt::darkGreen,
+	color_landmark_property_ = new rviz::ColorProperty( "Landmark", Qt::darkGreen,
 	                                       "Color to draw landmark links.", this );
-	color_user_property_ = new rviz_common::properties::ColorProperty( "User", Qt::red,
+	color_user_property_ = new rviz::ColorProperty( "User", Qt::red,
 	                                       "Color to draw user links.", this );
-	color_virtual_property_ = new rviz_common::properties::ColorProperty( "Virtual", Qt::magenta,
+	color_virtual_property_ = new rviz::ColorProperty( "Virtual", Qt::magenta,
 	                                       "Color to draw virtual links.", this );
 
-	alpha_property_ = new rviz_common::properties::FloatProperty( "Alpha", 1.0,
+	alpha_property_ = new rviz::FloatProperty( "Alpha", 1.0,
                                        "Amount of transparency to apply to the path.", this );
 }
 
@@ -87,11 +97,11 @@ void MapGraphDisplay::destroyObjects()
 	manual_objects_.clear();
 }
 
-void MapGraphDisplay::processMessage( const rtabmap_ros::msg::MapGraph::ConstSharedPtr msg )
+void MapGraphDisplay::processMessage( const rtabmap_ros::MapGraph::ConstPtr& msg )
 {
-	if(!(msg->poses.size() == msg->poses_id.size()))
+	if(!(msg->poses.size() == msg->posesId.size()))
 	{
-		RVIZ_COMMON_LOG_ERROR("rtabmap_ros::MapGraph: Error pose ids and poses must have all the same size.");
+		ROS_ERROR("rtabmap_ros::MapGraph: Error pose ids and poses must have all the same size.");
 		return;
 	}
 
@@ -107,8 +117,7 @@ void MapGraphDisplay::processMessage( const rtabmap_ros::msg::MapGraph::ConstSha
 	Ogre::Quaternion orientation;
 	if( !context_->getFrameManager()->getTransform( msg->header, position, orientation ))
 	{
-		RVIZ_COMMON_LOG_ERROR( uFormat("Error transforming from frame '%s' to frame '%s'",
-				msg->header.frame_id.c_str(), qPrintable( fixed_frame_ )));
+		ROS_DEBUG( "Error transforming from frame '%s' to frame '%s'", msg->header.frame_id.c_str(), qPrintable( fixed_frame_ ));
 	}
 
 	Ogre::Matrix4 transform( orientation );
@@ -175,5 +184,5 @@ void MapGraphDisplay::processMessage( const rtabmap_ros::msg::MapGraph::ConstSha
 
 } // namespace rtabmap_ros
 
-#include <pluginlib/class_list_macros.hpp>
-PLUGINLIB_EXPORT_CLASS( rtabmap_ros::MapGraphDisplay, rviz_common::Display )
+#include <pluginlib/class_list_macros.h>
+PLUGINLIB_EXPORT_CLASS( rtabmap_ros::MapGraphDisplay, rviz::Display )

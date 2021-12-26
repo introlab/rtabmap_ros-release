@@ -278,7 +278,7 @@ int main(int argc, char** argv)
 
 	dynamic_reconfigure::Server<rtabmap_ros::CameraConfig> server;
 	dynamic_reconfigure::Server<rtabmap_ros::CameraConfig>::CallbackType f;
-	f = std::bind(&callback, std::placeholders::_1, std::placeholders::_2);
+	f = boost::bind(&callback, _1, _2);
 	server.setCallback(f);
 
 	ros::spin();
