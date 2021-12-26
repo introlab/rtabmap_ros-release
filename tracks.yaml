@@ -219,11 +219,11 @@ tracks:
     - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
       :{release_inc} --os-name rhel
     devel_branch: noetic-devel
-    last_release: 0.20.14-noetic
-    last_version: 0.20.14
+    last_release: 0.20.16-noetic
+    last_version: 0.20.16
     name: rtabmap_ros
     patches: null
-    release_inc: '2'
+    release_inc: '1'
     release_repo_url: null
     release_tag: :{version}-noetic
     ros_distro: noetic
