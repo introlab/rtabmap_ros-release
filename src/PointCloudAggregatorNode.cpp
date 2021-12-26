@@ -25,13 +25,18 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include "rtabmap_ros/point_cloud_aggregator.hpp"
+#include "ros/ros.h"
+#include "nodelet/loader.h"
 
 int main(int argc, char **argv)
 {
-	rclcpp::init(argc, argv);
-	rclcpp::spin(std::make_shared<rtabmap_ros::PointCloudAggregator>(rclcpp::NodeOptions()));
-	rclcpp::shutdown();
+	ros::init(argc, argv, "point_cloud_aggregator");
+
+	nodelet::Loader nodelet;
+	nodelet::V_string nargv;
+	nodelet::M_string remap(ros::names::getRemappings());
+	std::string nodelet_name = ros::this_node::getName();
+	nodelet.load(nodelet_name, "rtabmap_ros/point_cloud_aggregator", remap, nargv);
+	ros::spin();
 	return 0;
 }
-

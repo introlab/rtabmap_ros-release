@@ -1,68 +1,46 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 2.8.3)
 project(rtabmap_ros)
 
-# Default to C99
-if(NOT CMAKE_C_STANDARD)
-  set(CMAKE_C_STANDARD 99)
-endif()
+# Policy CMP0043 introduced in cmake version 3.0 IGNORES the use of COMPILE_DEFINITIONS suffixed variables, e.g. COMPILE_DEFINITIONS_DEBUG
+# Set to OLD behavior until minimum cmake version >= 2.8.10 (version that COMPILE_DEFINITIONS can be set by generator expressions instead)
+if (POLICY CMP0043)
+    cmake_policy(SET CMP0043 OLD)
+endif (POLICY CMP0043)
+# Policy CMP0042 introduced in cmake version 3.0 enables the use of @rpath in an install name via MACOSX_RPATH by default
+# Set to OLD behavior so that all versions use the same behavior, or until minimum cmake version >= 2.8.12 (version where @rpath is available)
+if (POLICY CMP0042)
+    cmake_policy(SET CMP0042 OLD)
+endif (POLICY CMP0042)
 
-# Default to C++14
-if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 14)
-endif()
-
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
-endif()
-
-# find dependencies
-find_package(ament_cmake REQUIRED)
-find_package(builtin_interfaces REQUIRED)
-find_package(rosidl_default_generators REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(rclcpp_components REQUIRED)
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
-find_package(cv_bridge REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(std_srvs REQUIRED)
-find_package(nav_msgs REQUIRED)
-find_package(stereo_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(visualization_msgs REQUIRED)
-find_package(image_transport REQUIRED)
-find_package(tf2 REQUIRED)
-find_package(tf2_eigen REQUIRED)
-find_package(tf2_ros REQUIRED)
-#find_package(eigen_conversions REQUIRED)
-find_package(laser_geometry REQUIRED)
-find_package(pcl_conversions REQUIRED)
-#find_package(pcl_ros REQUIRED)
-#find_package(dynamic_reconfigure REQUIRED)
-find_package(message_filters REQUIRED)
-find_package(class_loader REQUIRED)
-#find_package(rosgraph_msgs REQUIRED)
-find_package(image_geometry REQUIRED)
-#find_package(pluginlib REQUIRED)
+## Find catkin macros and libraries
+## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
+## is used, also find other catkin packages
+find_package(catkin REQUIRED COMPONENTS
+             cv_bridge roscpp rospy sensor_msgs std_msgs std_srvs nav_msgs geometry_msgs visualization_msgs
+             image_transport tf tf_conversions tf2_ros eigen_conversions laser_geometry pcl_conversions 
+             pcl_ros nodelet dynamic_reconfigure message_filters class_loader rosgraph_msgs
+             genmsg stereo_msgs move_base_msgs image_geometry pluginlib
+)
 
 # Optional components
-#find_package(costmap_2d)
+find_package(costmap_2d)
 find_package(octomap_msgs)
-#find_package(apriltag_msgs)
-#find_package(find_object_2d)
-find_package(move_base_msgs)
+find_package(apriltag_ros)
+find_package(rviz)
+find_package(find_object_2d)
 
 ## System dependencies are found with CMake's conventions
-find_package(RTABMap 0.20.15 REQUIRED)
-find_package(Boost REQUIRED COMPONENTS system) # dependencies from PCL
-find_package(PCL 1.7 REQUIRED COMPONENTS kdtree) #This crashes idl generation if all components are found?! see https://github.com/ros2/rosidl/issues/402#issuecomment-565586908
+# find_package(Boost REQUIRED COMPONENTS system)
+find_package(RTABMap 0.20.14 REQUIRED)
 
-# optional
-find_package(rviz_common)
-find_package(rviz_rendering)
-find_package(rviz_default_plugins)
+find_package(OpenCV REQUIRED)
+
+IF(RTABMAP_GUI)
+FIND_PACKAGE(PCL 1.7 REQUIRED QUIET COMPONENTS common io kdtree search surface filters registration sample_consensus segmentation visualization)
+ELSE()
+FIND_PACKAGE(PCL 1.7 REQUIRED QUIET COMPONENTS common io kdtree search surface filters registration sample_consensus segmentation )
+ENDIF()
+add_definitions(${PCL_DEFINITIONS}) # To include -march=native if set
 
 IF(WIN32)
 add_compile_options(-bigobj)
@@ -95,7 +73,7 @@ ENDIF(RTABMAP_SYNC_USER_DATA)
 #Qt stuff
 # If librtabmap_gui.so is found, rtabmapviz will be built
 # If rviz is found, plugins will be built
-IF(RTABMAP_GUI OR rviz_default_plugins_FOUND)
+IF(RTABMAP_GUI OR rviz_FOUND)
    IF(RTABMAP_QT_VERSION EQUAL 4)
       FIND_PACKAGE(Qt4 COMPONENTS QtCore QtGui REQUIRED)
       INCLUDE(${QT_USE_FILE})
@@ -111,63 +89,70 @@ IF(RTABMAP_GUI OR rviz_default_plugins_FOUND)
          ENDIF(NOT Qt5_FOUND)
       ENDIF()
    ENDIF()   
-ENDIF(RTABMAP_GUI OR rviz_default_plugins_FOUND)
+ENDIF(RTABMAP_GUI OR rviz_FOUND)
+
+## Uncomment this if the package has a setup.py. This macro ensures
+## modules and global scripts declared therein get installed
+## See http://ros.org/doc/api/catkin/html/user_guide/setup_dot_py.html
+catkin_python_setup()
 
 #######################################
 ## Declare ROS messages and services ##
 #######################################
 
-# declare the message files to generate code for
- set(msg_files
-   "msg/Info.msg"
-   "msg/KeyPoint.msg"
-   "msg/GlobalDescriptor.msg"
-   "msg/ScanDescriptor.msg"
-   "msg/MapData.msg"
-   "msg/MapGraph.msg"
-   "msg/NodeData.msg"
-   "msg/Link.msg"
-   "msg/OdomInfo.msg"
-   "msg/Point2f.msg"
-   "msg/Point3f.msg"
-   "msg/Goal.msg"
-   "msg/RGBDImage.msg"
-   "msg/RGBDImages.msg"
-   "msg/UserData.msg"
-   "msg/GPS.msg"
-   "msg/Path.msg"
-   "msg/EnvSensor.msg"
+## Generate messages in the 'msg' folder
+add_message_files(
+   FILES
+   Info.msg
+   KeyPoint.msg
+   GlobalDescriptor.msg
+   ScanDescriptor.msg
+   MapData.msg
+   MapGraph.msg
+   NodeData.msg
+   Link.msg
+   OdomInfo.msg
+   Point2f.msg
+   Point3f.msg
+   Goal.msg
+   RGBDImage.msg
+   RGBDImages.msg
+   UserData.msg
+   GPS.msg
+   Path.msg
+   EnvSensor.msg
+)
+
+## Generate services in the 'srv' folder
+ add_service_files(
+   FILES
+   GetMap.srv
+   GetMap2.srv
+   ListLabels.srv
+   PublishMap.srv
+   ResetPose.srv
+   SetGoal.srv
+   SetLabel.srv
+   GetPlan.srv
+   AddLink.srv
+   GetNodeData.srv
+   GetNodesInRadius.srv
+   LoadDatabase.srv
+   DetectMoreLoopClosures.srv
+   GlobalBundleAdjustment.srv
+   CleanupLocalGrids.srv
  )
 
-# declare the service files to generate code for
- set(srv_files
-   "srv/GetMap.srv"
-   "srv/GetMap2.srv"
-   "srv/ListLabels.srv"
-   "srv/PublishMap.srv"
-   "srv/ResetPose.srv"
-   "srv/SetGoal.srv"
-   "srv/SetLabel.srv"
-   "srv/GetPlan.srv"
-   "srv/AddLink.srv"
-   "srv/GetNodeData.srv"
-   "srv/GetNodesInRadius.srv"
-   "srv/LoadDatabase.srv"
-   "srv/DetectMoreLoopClosures.srv"
-   "srv/GlobalBundleAdjustment.srv"
-   "srv/CleanupLocalGrids.srv"
- )
-
-## Generate messages and services
- rosidl_generate_interfaces(${PROJECT_NAME}
-   ${msg_files}
-   ${srv_files}
-   DEPENDENCIES geometry_msgs std_msgs sensor_msgs std_srvs visualization_msgs image_geometry
- )
-ament_export_dependencies(rosidl_default_runtime)
+## Generate added messages and services with any dependencies listed here
+generate_messages(
+   DEPENDENCIES
+   std_msgs
+   geometry_msgs
+   sensor_msgs
+)
 
 #add dynamic reconfigure api
-#generate_dynamic_reconfigure_options(cfg/Camera.cfg)
+generate_dynamic_reconfigure_options(cfg/Camera.cfg)
 
 ###################################
 ## catkin specific configuration ##
@@ -179,19 +164,29 @@ ament_export_dependencies(rosidl_default_runtime)
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 
-#SET(optional_dependencies "")
-#IF(costmap_2d_FOUND)
-#   SET(optional_dependencies ${optional_dependencies} costmap_2d)
-#ENDIF(costmap_2d_FOUND)
-#IF(octomap_msgs_FOUND)
-#   SET(optional_dependencies ${optional_dependencies} octomap_msgs)
-#ENDIF(octomap_msgs_FOUND)
-#IF(rviz_default_plugins_FOUND)
-#   SET(optional_dependencies ${optional_dependencies} rviz)
-#ENDIF(rviz_default_plugins_FOUND)
-#IF(find_object_2d_FOUND)
-#   SET(optional_dependencies ${optional_dependencies} find_object_2d)
-#ENDIF(find_object_2d_FOUND)
+SET(optional_dependencies "")
+IF(costmap_2d_FOUND)
+   SET(optional_dependencies ${optional_dependencies} costmap_2d)
+ENDIF(costmap_2d_FOUND)
+IF(octomap_msgs_FOUND)
+   SET(optional_dependencies ${optional_dependencies} octomap_msgs)
+ENDIF(octomap_msgs_FOUND)
+IF(rviz_FOUND)
+   SET(optional_dependencies ${optional_dependencies} rviz)
+ENDIF(rviz_FOUND)
+IF(find_object_2d_FOUND)
+   SET(optional_dependencies ${optional_dependencies} find_object_2d)
+ENDIF(find_object_2d_FOUND)
+
+catkin_package(
+  INCLUDE_DIRS include
+  LIBRARIES rtabmap_ros
+  CATKIN_DEPENDS cv_bridge roscpp rospy sensor_msgs std_msgs std_srvs nav_msgs geometry_msgs visualization_msgs
+                 image_transport tf tf_conversions tf2_ros eigen_conversions laser_geometry pcl_conversions 
+                 pcl_ros nodelet dynamic_reconfigure message_filters class_loader rosgraph_msgs
+                 stereo_msgs move_base_msgs image_geometry ${optional_dependencies}
+  DEPENDS RTABMap OpenCV
+)
 
 ###########
 ## Build ##
@@ -203,31 +198,19 @@ ament_export_dependencies(rosidl_default_runtime)
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${RTABMap_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
+  ${catkin_INCLUDE_DIRS}
 )
 
 # libraries
 SET(Libraries
-   pcl_conversions
-   cv_bridge
-   rclcpp
-   rclcpp_components
-   sensor_msgs
-   std_msgs
-   nav_msgs
-   geometry_msgs
-   image_transport
-   tf2
-   tf2_eigen
-   tf2_ros
-   laser_geometry
-   message_filters
-   class_loader
-   visualization_msgs
-   image_geometry
-   stereo_msgs
+   ${OpenCV_LIBRARIES}
+   ${PCL_LIBRARIES}
+   ${catkin_LIBRARIES}
+   ${RTABMap_LIBRARIES}
 )
-
+ 
 SET(rtabmap_sync_lib_src
    src/CommonDataSubscriber.cpp
    src/impl/CommonDataSubscriberDepth.cpp
@@ -254,33 +237,35 @@ SET(rtabmap_ros_lib_src
    src/MsgConversion.cpp
    src/MapsManager.cpp
    src/OdometryROS.cpp
-#   src/PluginInterface.cpp
+   src/PluginInterface.cpp
 )
   
 SET(rtabmap_plugins_lib_src
-    src/nodelets/rgbd_odometry.cpp
-    src/nodelets/stereo_odometry.cpp
-#   src/nodelets/rgbdicp_odometry.cpp
-    src/nodelets/icp_odometry.cpp
-#   src/nodelets/data_throttle.cpp
-#   src/nodelets/stereo_throttle.cpp
-#   src/nodelets/data_odom_sync.cpp
-    src/nodelets/point_cloud_xyzrgb.cpp 
-    src/nodelets/point_cloud_xyz.cpp
-#   src/nodelets/disparity_to_depth.cpp 
-    src/nodelets/pointcloud_to_depthimage.cpp 
-    src/nodelets/obstacles_detection.cpp
-#   src/nodelets/obstacles_detection_old.cpp
-    src/nodelets/point_cloud_aggregator.cpp
-    src/nodelets/point_cloud_assembler.cpp
-#   src/nodelets/undistort_depth.cpp
-#   src/nodelets/imu_to_tf.cpp
-    src/nodelets/rgbdx_sync.cpp
-    src/nodelets/rgbd_sync.cpp 
-    src/nodelets/stereo_sync.cpp 
-    src/nodelets/rgb_sync.cpp 
-    src/nodelets/rgbd_relay.cpp
+   src/nodelets/rgbd_odometry.cpp
+   src/nodelets/stereo_odometry.cpp
+   src/nodelets/rgbdicp_odometry.cpp
+   src/nodelets/icp_odometry.cpp
+   src/nodelets/data_throttle.cpp
+   src/nodelets/stereo_throttle.cpp
+   src/nodelets/data_odom_sync.cpp
+   src/nodelets/point_cloud_xyzrgb.cpp 
+   src/nodelets/point_cloud_xyz.cpp
+   src/nodelets/disparity_to_depth.cpp 
+   src/nodelets/pointcloud_to_depthimage.cpp 
+   src/nodelets/obstacles_detection.cpp
+   src/nodelets/obstacles_detection_old.cpp
+   src/nodelets/point_cloud_aggregator.cpp
+   src/nodelets/point_cloud_assembler.cpp
+   src/nodelets/undistort_depth.cpp
+   src/nodelets/imu_to_tf.cpp
+   src/nodelets/rgbdx_sync.cpp
 )
+
+IF(${cv_bridge_VERSION_MAJOR} GREATER 1 OR ${cv_bridge_VERSION_MINOR} GREATER 10)
+   SET(rtabmap_plugins_lib_src ${rtabmap_plugins_lib_src} src/nodelets/rgbd_sync.cpp src/nodelets/stereo_sync.cpp src/nodelets/rgb_sync.cpp src/nodelets/rgbd_relay.cpp)
+ELSE()
+   ADD_DEFINITIONS("-DCV_BRIDGE_HYDRO")
+ENDIF()   
 
 # If octomap is found, add definition
 IF(octomap_msgs_FOUND)
@@ -289,191 +274,135 @@ include_directories(
   ${octomap_msgs_INCLUDE_DIRS}
 )
 SET(Libraries
-  octomap_msgs
+  ${octomap_msgs_LIBRARIES}
   ${Libraries}
 )
 ADD_DEFINITIONS("-DWITH_OCTOMAP_MSGS")
 ENDIF(octomap_msgs_FOUND)
 
-# If apriltag_msgs is found, add definition
-#IF(apriltag_msgs_FOUND)
-#MESSAGE(STATUS "WITH apriltag_msgs")
-#include_directories(
-#  ${apriltag_msgs_INCLUDE_DIRS}
-#)
-#SET(Libraries
-#  apriltag_msgs
-#  ${Libraries}
-#)
-#ADD_DEFINITIONS("-DWITH_APRILTAG_MSGS")
-#ENDIF(apriltag_msgs_FOUND)
-
-# If move_base_msgs is found, add definition
-IF(move_base_msgs_FOUND)
-MESSAGE(STATUS "WITH move_base_msgs")
+# If apriltag_ros is found, add definition
+IF(apriltag_ros_FOUND)
+MESSAGE(STATUS "WITH apriltag_ros")
 include_directories(
-  ${move_base_msgs_INCLUDE_DIRS}
+  ${apriltag_ros_INCLUDE_DIRS}
 )
 SET(Libraries
-  move_base_msgs
+  ${apriltag_ros_LIBRARIES}
   ${Libraries}
 )
-ADD_DEFINITIONS("-DWITH_MOVE_BASE_MSGS")
-ENDIF(move_base_msgs_FOUND)
+ADD_DEFINITIONS("-DWITH_APRILTAG_ROS")
+ENDIF(apriltag_ros_FOUND)
 
 ############################
 ## Declare a cpp library
 ############################
-add_library(rtabmap_common SHARED ${rtabmap_ros_lib_src})
-add_library(rtabmap_sync SHARED ${rtabmap_sync_lib_src})
-add_library(rtabmap_plugins SHARED ${rtabmap_plugins_lib_src})
+add_library(rtabmap_sync
+   ${rtabmap_sync_lib_src}
+)
+add_library(rtabmap_ros
+   ${rtabmap_ros_lib_src}
+)
+add_library(rtabmap_plugins
+   ${rtabmap_plugins_lib_src}
+)
 
-ament_target_dependencies(rtabmap_common ${Libraries})
-ament_target_dependencies(rtabmap_sync ${Libraries})
-ament_target_dependencies(rtabmap_plugins ${Libraries})
-
-target_link_libraries(rtabmap_common ${RTABMap_LIBRARIES})
-target_link_libraries(rtabmap_sync rtabmap_common ${RTABMap_LIBRARIES})
-target_link_libraries(rtabmap_plugins rtabmap_common ${RTABMap_LIBRARIES})
-
-rosidl_target_interfaces(rtabmap_common ${PROJECT_NAME} "rosidl_typesupport_cpp")
-rosidl_target_interfaces(rtabmap_sync ${PROJECT_NAME} "rosidl_typesupport_cpp")
-rosidl_target_interfaces(rtabmap_plugins ${PROJECT_NAME} "rosidl_typesupport_cpp")
-
-rclcpp_components_register_nodes(rtabmap_plugins "rtabmap_ros::RGBDOdometry")
-rclcpp_components_register_nodes(rtabmap_plugins "rtabmap_ros::StereoOdometry")
-rclcpp_components_register_nodes(rtabmap_plugins "rtabmap_ros::ICPOdometry")
-rclcpp_components_register_nodes(rtabmap_plugins "rtabmap_ros::RGBDRelay")
-rclcpp_components_register_nodes(rtabmap_plugins "rtabmap_ros::RGBDSync")
-rclcpp_components_register_nodes(rtabmap_plugins "rtabmap_ros::StereoSync")
-rclcpp_components_register_nodes(rtabmap_plugins "rtabmap_ros::PointCloudXYZ")
-rclcpp_components_register_nodes(rtabmap_plugins "rtabmap_ros::PointCloudXYZRGB")
-rclcpp_components_register_nodes(rtabmap_plugins "rtabmap_ros::PointCloudToDepthImage")
-rclcpp_components_register_nodes(rtabmap_plugins "rtabmap_ros::ObstaclesDetection")
-rclcpp_components_register_nodes(rtabmap_plugins "rtabmap_ros::PointCloudAggregator")
-rclcpp_components_register_nodes(rtabmap_plugins "rtabmap_ros::PointCloudAssembler")
-
-rclcpp_components_register_nodes(rtabmap_sync "rtabmap_ros::CoreWrapper")
+target_link_libraries(rtabmap_sync
+  rtabmap_ros
+)
+target_link_libraries(rtabmap_ros
+  ${Libraries}
+)
+target_link_libraries(rtabmap_plugins
+  rtabmap_ros
+)
+add_dependencies(rtabmap_ros ${${PROJECT_NAME}_EXPORTED_TARGETS})
+add_dependencies(rtabmap_plugins ${${PROJECT_NAME}_EXPORTED_TARGETS})
 
 add_executable(rtabmap src/CoreNode.cpp)
-ament_target_dependencies(rtabmap ${Libraries})
-target_link_libraries(rtabmap rtabmap_sync rtabmap_common ${RTABMap_LIBRARIES} ${Boost_LIBRARIES} ${PCL_LBRARIES})
+target_link_libraries(rtabmap ${Libraries})
 
 add_executable(rtabmap_rgbd_odometry src/RGBDOdometryNode.cpp)
-ament_target_dependencies(rtabmap_rgbd_odometry ${Libraries})
-target_link_libraries(rtabmap_rgbd_odometry rtabmap_plugins ${RTABMap_LIBRARIES} ${Boost_LIBRARIES} ${PCL_LBRARIES})
+target_link_libraries(rtabmap_rgbd_odometry ${Libraries})
 set_target_properties(rtabmap_rgbd_odometry PROPERTIES OUTPUT_NAME "rgbd_odometry")
 
 add_executable(rtabmap_stereo_odometry src/StereoOdometryNode.cpp)
-ament_target_dependencies(rtabmap_stereo_odometry ${Libraries})
-target_link_libraries(rtabmap_stereo_odometry rtabmap_plugins ${RTABMap_LIBRARIES} ${Boost_LIBRARIES} ${PCL_LBRARIES})
+target_link_libraries(rtabmap_stereo_odometry ${Libraries})
 set_target_properties(rtabmap_stereo_odometry PROPERTIES OUTPUT_NAME "stereo_odometry")
 
-#add_executable(rtabmap_rgbdicp_odometry src/RGBDICPOdometryNode.cpp)
-#ament_target_dependencies(rtabmap_rgbdicp_odometry ${Libraries})
-#set_target_properties(rtabmap_rgbdicp_odometry PROPERTIES OUTPUT_NAME "rgbdicp_odometry")
+add_executable(rtabmap_rgbdicp_odometry src/RGBDICPOdometryNode.cpp)
+target_link_libraries(rtabmap_rgbdicp_odometry ${Libraries})
+set_target_properties(rtabmap_rgbdicp_odometry PROPERTIES OUTPUT_NAME "rgbdicp_odometry")
 
 add_executable(rtabmap_icp_odometry src/ICPOdometryNode.cpp)
-ament_target_dependencies(rtabmap_icp_odometry ${Libraries})
-target_link_libraries(rtabmap_icp_odometry rtabmap_plugins ${RTABMap_LIBRARIES} ${Boost_LIBRARIES} ${PCL_LBRARIES})
+target_link_libraries(rtabmap_icp_odometry ${Libraries})
 set_target_properties(rtabmap_icp_odometry PROPERTIES OUTPUT_NAME "icp_odometry")
 
 add_executable(rtabmap_rgbd_sync src/RGBDSyncNode.cpp)
-ament_target_dependencies(rtabmap_rgbd_sync ${Libraries})
-target_link_libraries(rtabmap_rgbd_sync rtabmap_plugins ${RTABMap_LIBRARIES})
+target_link_libraries(rtabmap_rgbd_sync ${Libraries})
 set_target_properties(rtabmap_rgbd_sync PROPERTIES OUTPUT_NAME "rgbd_sync")
 
 add_executable(rtabmap_rgbdx_sync src/RGBDXSyncNode.cpp)
-ament_target_dependencies(rtabmap_rgbdx_sync ${Libraries})
-target_link_libraries(rtabmap_rgbdx_sync rtabmap_plugins ${RTABMap_LIBRARIES})
+target_link_libraries(rtabmap_rgbdx_sync ${Libraries})
 set_target_properties(rtabmap_rgbdx_sync PROPERTIES OUTPUT_NAME "rgbdx_sync")
 
 add_executable(rtabmap_stereo_sync src/StereoSyncNode.cpp)
-ament_target_dependencies(rtabmap_stereo_sync ${Libraries})
-target_link_libraries(rtabmap_stereo_sync rtabmap_plugins ${RTABMap_LIBRARIES})
+target_link_libraries(rtabmap_stereo_sync ${Libraries})
 set_target_properties(rtabmap_stereo_sync PROPERTIES OUTPUT_NAME "stereo_sync")
 
 add_executable(rtabmap_rgb_sync src/RGBSyncNode.cpp)
-ament_target_dependencies(rtabmap_rgb_sync ${Libraries})
-target_link_libraries(rtabmap_rgb_sync rtabmap_plugins ${RTABMap_LIBRARIES})
+target_link_libraries(rtabmap_rgb_sync ${Libraries})
 set_target_properties(rtabmap_rgb_sync PROPERTIES OUTPUT_NAME "rgb_sync")
 
 add_executable(rtabmap_rgbd_relay src/RGBDRelayNode.cpp)
-ament_target_dependencies(rtabmap_rgbd_relay ${Libraries})
-target_link_libraries(rtabmap_rgbd_relay rtabmap_plugins ${RTABMap_LIBRARIES})
+target_link_libraries(rtabmap_rgbd_relay ${Libraries})
 set_target_properties(rtabmap_rgbd_relay PROPERTIES OUTPUT_NAME "rgbd_relay")
 
-add_executable(rtabmap_point_cloud_xyz src/PointCloudXYZNode.cpp)
-ament_target_dependencies(rtabmap_point_cloud_xyz ${Libraries})
-target_link_libraries(rtabmap_point_cloud_xyz rtabmap_plugins ${RTABMap_LIBRARIES})
-set_target_properties(rtabmap_point_cloud_xyz PROPERTIES OUTPUT_NAME "point_cloud_xyz")
+add_executable(rtabmap_map_optimizer src/MapOptimizerNode.cpp)
+target_link_libraries(rtabmap_map_optimizer rtabmap_ros)
+set_target_properties(rtabmap_map_optimizer PROPERTIES OUTPUT_NAME "map_optimizer")
 
-add_executable(rtabmap_point_cloud_xyzrgb src/PointCloudXYZRGBNode.cpp)
-ament_target_dependencies(rtabmap_point_cloud_xyzrgb ${Libraries})
-target_link_libraries(rtabmap_point_cloud_xyzrgb rtabmap_plugins ${RTABMap_LIBRARIES})
-set_target_properties(rtabmap_point_cloud_xyzrgb PROPERTIES OUTPUT_NAME "point_cloud_xyzrgb")
+add_executable(rtabmap_map_assembler src/MapAssemblerNode.cpp)
+target_link_libraries(rtabmap_map_assembler rtabmap_ros)
+set_target_properties(rtabmap_map_assembler PROPERTIES OUTPUT_NAME "map_assembler")
 
-add_executable(rtabmap_obstacles_detection src/ObstaclesDetectionNode.cpp)
-ament_target_dependencies(rtabmap_obstacles_detection ${Libraries})
-target_link_libraries(rtabmap_obstacles_detection rtabmap_plugins ${RTABMap_LIBRARIES})
-set_target_properties(rtabmap_obstacles_detection PROPERTIES OUTPUT_NAME "obstacles_detection")
+add_executable(rtabmap_imu_to_tf src/ImuToTFNode.cpp)
+target_link_libraries(rtabmap_imu_to_tf ${Libraries})
+set_target_properties(rtabmap_imu_to_tf PROPERTIES OUTPUT_NAME "imu_to_tf")
 
-add_executable(rtabmap_point_cloud_aggregator src/PointCloudAggregatorNode.cpp)
-ament_target_dependencies(rtabmap_point_cloud_aggregator ${Libraries})
-target_link_libraries(rtabmap_point_cloud_aggregator rtabmap_plugins ${RTABMap_LIBRARIES})
-set_target_properties(rtabmap_point_cloud_aggregator PROPERTIES OUTPUT_NAME "point_cloud_aggregator")
-
-add_executable(rtabmap_point_cloud_assembler src/PointCloudAssemblerNode.cpp)
-ament_target_dependencies(rtabmap_point_cloud_assembler ${Libraries})
-target_link_libraries(rtabmap_point_cloud_assembler rtabmap_plugins ${RTABMap_LIBRARIES})
-set_target_properties(rtabmap_point_cloud_assembler PROPERTIES OUTPUT_NAME "point_cloud_assembler")
-
-#add_executable(rtabmap_map_optimizer src/MapOptimizerNode.cpp)
-#ament_target_dependencies(rtabmap_map_optimizer rtabmap_common)
-#set_target_properties(rtabmap_map_optimizer PROPERTIES OUTPUT_NAME "map_optimizer")
-
-#add_executable(rtabmap_map_assembler src/MapAssemblerNode.cpp)
-#ament_target_dependencies(rtabmap_map_assembler rtabmap_common)
-#set_target_properties(rtabmap_map_assembler PROPERTIES OUTPUT_NAME "map_assembler")
-
-#add_executable(rtabmap_imu_to_tf src/ImuToTFNode.cpp)
-#ament_target_dependencies(rtabmap_imu_to_tf ${Libraries})
-#set_target_properties(rtabmap_imu_to_tf PROPERTIES OUTPUT_NAME "imu_to_tf")
-
-#add_executable(rtabmap_wifi_signal_pub src/WifiSignalPubNode.cpp)
-#ament_target_dependencies(rtabmap_wifi_signal_pub rtabmap_common)
-#set_target_properties(rtabmap_wifi_signal_pub PROPERTIES OUTPUT_NAME "wifi_signal_pub")
-#add_executable(rtabmap_wifi_signal_sub src/WifiSignalSubNode.cpp)
-#ament_target_dependencies(rtabmap_wifi_signal_sub rtabmap_common)
-#set_target_properties(rtabmap_wifi_signal_sub PROPERTIES OUTPUT_NAME "wifi_signal_sub")
+IF(NOT WIN32)
+add_executable(rtabmap_wifi_signal_pub src/WifiSignalPubNode.cpp)
+target_link_libraries(rtabmap_wifi_signal_pub rtabmap_ros)
+set_target_properties(rtabmap_wifi_signal_pub PROPERTIES OUTPUT_NAME "wifi_signal_pub")
+ENDIF(NOT WIN32)
+add_executable(rtabmap_wifi_signal_sub src/WifiSignalSubNode.cpp)
+target_link_libraries(rtabmap_wifi_signal_sub rtabmap_ros)
+set_target_properties(rtabmap_wifi_signal_sub PROPERTIES OUTPUT_NAME "wifi_signal_sub")
 
 # If find_object_2d is found, add save objects example
-#IF(find_object_2d_FOUND)
-#    MESSAGE(STATUS "WITH find_object_2d")
-#    include_directories(${find_object_2d_INCLUDE_DIRS})
-#    add_executable(rtabmap_save_objects_example src/SaveObjectsExample.cpp)
-#    ament_target_dependencies(rtabmap_save_objects_example ${Libraries} rtabmap_common ${find_object_2d_LIBRARIES})
-#    set_target_properties(rtabmap_save_objects_example PROPERTIES OUTPUT_NAME "save_objects_example")
-#ENDIF(find_object_2d_FOUND)
+IF(find_object_2d_FOUND)
+    MESSAGE(STATUS "WITH find_object_2d")
+    include_directories(${find_object_2d_INCLUDE_DIRS})
+    add_executable(rtabmap_save_objects_example src/SaveObjectsExample.cpp)
+    target_link_libraries(rtabmap_save_objects_example ${Libraries} rtabmap_ros ${find_object_2d_LIBRARIES})
+    set_target_properties(rtabmap_save_objects_example PROPERTIES OUTPUT_NAME "save_objects_example")
+ENDIF(find_object_2d_FOUND)
 
-#add_executable(rtabmap_external_loop_detectionexample src/ExternalLoopDetectionExample.cpp)
-#add_dependencies(rtabmap_external_loop_detectionexample ${${PROJECT_NAME}_EXPORTED_TARGETS})
-#ament_target_dependencies(rtabmap_external_loop_detectionexample ${Libraries} rtabmap_common)
-#set_target_properties(rtabmap_external_loop_detectionexample PROPERTIES OUTPUT_NAME "external_loop_detection_example")
+add_executable(rtabmap_external_loop_detectionexample src/ExternalLoopDetectionExample.cpp)
+target_link_libraries(rtabmap_external_loop_detectionexample ${Libraries} rtabmap_ros)
+set_target_properties(rtabmap_external_loop_detectionexample PROPERTIES OUTPUT_NAME "external_loop_detection_example")
 
-#add_executable(rtabmap_camera src/CameraNode.cpp)
-#add_dependencies(rtabmap_camera ${${PROJECT_NAME}_EXPORTED_TARGETS})
-#ament_target_dependencies(rtabmap_camera ${Libraries})
-#set_target_properties(rtabmap_camera PROPERTIES OUTPUT_NAME "camera")
+add_executable(rtabmap_camera src/CameraNode.cpp)
+add_dependencies(rtabmap_camera ${${PROJECT_NAME}_EXPORTED_TARGETS})
+target_link_libraries(rtabmap_camera ${Libraries})
+set_target_properties(rtabmap_camera PROPERTIES OUTPUT_NAME "camera")
 
-#add_executable(rtabmap_stereo_camera src/StereoCameraNode.cpp)
-#ament_target_dependencies(rtabmap_stereo_camera rtabmap_common)
-#set_target_properties(rtabmap_stereo_camera PROPERTIES OUTPUT_NAME "stereo_camera")
+add_executable(rtabmap_stereo_camera src/StereoCameraNode.cpp)
+target_link_libraries(rtabmap_stereo_camera rtabmap_ros)
+set_target_properties(rtabmap_stereo_camera PROPERTIES OUTPUT_NAME "stereo_camera")
 
 IF(RTABMAP_GUI)
     add_executable(rtabmapviz src/GuiNode.cpp src/GuiWrapper.cpp src/PreferencesDialogROS.cpp)
-    ament_target_dependencies(rtabmapviz ${Libraries})
-    target_link_libraries(rtabmapviz rtabmap_sync rtabmap_common ${RTABMap_LIBRARIES} ${Boost_LIBRARIES} ${PCL_LBRARIES} ${QT_LIBRARIES})
+    target_link_libraries(rtabmapviz rtabmap_sync ${QT_LIBRARIES})
     IF(Qt5_FOUND)
         QT5_USE_MODULES(rtabmapviz Widgets Core Gui)
     ENDIF()
@@ -481,159 +410,139 @@ ELSE()
     MESSAGE(WARNING "Found RTAB-Map built without its GUI library. Node rtabmapviz will not be built!")
 ENDIF()
 
-#add_executable(rtabmap_data_player src/DbPlayerNode.cpp)
-#ament_target_dependencies(rtabmap_data_player rtabmap_common)
-#set_target_properties(rtabmap_data_player PROPERTIES OUTPUT_NAME "data_player")
+add_executable(rtabmap_data_player src/DbPlayerNode.cpp)
+target_link_libraries(rtabmap_data_player rtabmap_ros)
+set_target_properties(rtabmap_data_player PROPERTIES OUTPUT_NAME "data_player")
 
-#add_executable(rtabmap_odom_msg_to_tf src/OdomMsgToTFNode.cpp)
-#ament_target_dependencies(rtabmap_odom_msg_to_tf rtabmap_common)
-#set_target_properties(rtabmap_odom_msg_to_tf PROPERTIES OUTPUT_NAME "odom_msg_to_tf")
+add_executable(rtabmap_odom_msg_to_tf src/OdomMsgToTFNode.cpp)
+target_link_libraries(rtabmap_odom_msg_to_tf rtabmap_ros)
+set_target_properties(rtabmap_odom_msg_to_tf PROPERTIES OUTPUT_NAME "odom_msg_to_tf")
 
 add_executable(rtabmap_pointcloud_to_depthimage src/PointCloudToDepthImageNode.cpp)
-ament_target_dependencies(rtabmap_pointcloud_to_depthimage ${Libraries})
-target_link_libraries(rtabmap_pointcloud_to_depthimage rtabmap_plugins ${RTABMap_LIBRARIES})
+target_link_libraries(rtabmap_pointcloud_to_depthimage ${Libraries})
 set_target_properties(rtabmap_pointcloud_to_depthimage PROPERTIES OUTPUT_NAME "pointcloud_to_depthimage")
 
-# Only required when using messages built from the same package
-# https://index.ros.org/doc/ros2/Tutorials/Rosidl-Tutorial/
-get_default_rmw_implementation(rmw_implementation)
-find_package("${rmw_implementation}" REQUIRED)
-get_rmw_typesupport(typesupport_impls "${rmw_implementation}" LANGUAGE "cpp")
+add_executable(rtabmap_point_cloud_aggregator src/PointCloudAggregatorNode.cpp)
+target_link_libraries(rtabmap_point_cloud_aggregator ${Libraries})
+set_target_properties(rtabmap_point_cloud_aggregator PROPERTIES OUTPUT_NAME "rtabmap_point_cloud_aggregator")
 
-foreach(typesupport_impl ${typesupport_impls})
-  rosidl_target_interfaces(rtabmap_rgbd_odometry
-    ${PROJECT_NAME} ${typesupport_impl}
-  )
-  rosidl_target_interfaces(rtabmap_stereo_odometry
-    ${PROJECT_NAME} ${typesupport_impl}
-  )
-  rosidl_target_interfaces(rtabmap_icp_odometry
-    ${PROJECT_NAME} ${typesupport_impl}
-  )
-  rosidl_target_interfaces(rtabmap_rgbd_relay
-    ${PROJECT_NAME} ${typesupport_impl}
-  )
-  rosidl_target_interfaces(rtabmap_rgbd_sync
-    ${PROJECT_NAME} ${typesupport_impl}
-  )
-  rosidl_target_interfaces(rtabmap_rgbdx_sync
-    ${PROJECT_NAME} ${typesupport_impl}
-  )
-  rosidl_target_interfaces(rtabmap_rgb_sync
-    ${PROJECT_NAME} ${typesupport_impl}
-  )
-  rosidl_target_interfaces(rtabmap_stereo_sync
-    ${PROJECT_NAME} ${typesupport_impl}
-  )
-  rosidl_target_interfaces(rtabmap_pointcloud_to_depthimage
-    ${PROJECT_NAME} ${typesupport_impl}
-  )
-  rosidl_target_interfaces(rtabmap_point_cloud_xyzrgb
-    ${PROJECT_NAME} ${typesupport_impl}
-  )
-  rosidl_target_interfaces(rtabmap
-    ${PROJECT_NAME} ${typesupport_impl}
-  )
-  IF(RTABMAP_GUI)
-    rosidl_target_interfaces(rtabmapviz
-      ${PROJECT_NAME} ${typesupport_impl}
-    )
-  ENDIF()
-endforeach()
+add_executable(rtabmap_point_cloud_assembler src/PointCloudAssemblerNode.cpp)
+target_link_libraries(rtabmap_point_cloud_assembler ${Libraries})
+set_target_properties(rtabmap_point_cloud_assembler PROPERTIES OUTPUT_NAME "point_cloud_assembler")
 
 # If rviz is found, add plugins
-IF(rviz_default_plugins_FOUND)
+IF(rviz_FOUND)
 
     ## We also use Ogre for rviz plugins
-    #include($ENV{ROS_ROOT}/core/rosbuild/FindPkgConfig.cmake)
-    #pkg_check_modules(OGRE OGRE)
+    include($ENV{ROS_ROOT}/core/rosbuild/FindPkgConfig.cmake)
+    pkg_check_modules(OGRE OGRE)
     include_directories( ${OGRE_INCLUDE_DIRS} )
-    #link_directories( ${OGRE_LIBRARY_DIRS} )
+    link_directories( ${OGRE_LIBRARY_DIRS} )
 
     MESSAGE(STATUS "WITH rviz")
-
+    include_directories(
+      ${rviz_INCLUDE_DIRS}
+    )
+    SET(Libraries
+      ${Libraries}
+      ${rviz_LIBRARIES}
+      ${rviz_DEFAULT_PLUGIN_LIBRARIES}
+    )
+    
     ## RVIZ plugin
     IF(QT4_FOUND)
+	  IF(WIN32)
+        qt4_wrap_cpp(MOC_FILES
+          src/rviz/MapCloudDisplay.h
+          src/rviz/MapGraphDisplay.h
+          src/rviz/InfoDisplay.h
+        )
+	  ELSE()
 	    qt4_wrap_cpp(MOC_FILES
-	      src/rviz/MapCloudDisplay.h
-	      src/rviz/MapGraphDisplay.h
-	      src/rviz/InfoDisplay.h
-	      #src/rviz/OrbitOrientedViewController.h
-	    )
+          src/rviz/MapCloudDisplay.h
+          src/rviz/MapGraphDisplay.h
+          src/rviz/InfoDisplay.h
+          src/rviz/OrbitOrientedViewController.h
+        )
+	  ENDIF()
     ELSE()
-	   qt5_wrap_cpp(MOC_FILES
-	      src/rviz/MapCloudDisplay.h
-	      src/rviz/MapGraphDisplay.h
-	      src/rviz/InfoDisplay.h
-	      #src/rviz/OrbitOrientedViewController.h
-	    )
+	  IF(WIN32)
+        qt5_wrap_cpp(MOC_FILES
+          src/rviz/MapCloudDisplay.h
+          src/rviz/MapGraphDisplay.h
+          src/rviz/InfoDisplay.h
+        )
+	  ELSE()
+	    qt5_wrap_cpp(MOC_FILES
+          src/rviz/MapCloudDisplay.h
+          src/rviz/MapGraphDisplay.h
+          src/rviz/InfoDisplay.h
+          src/rviz/OrbitOrientedViewController.h
+        )
+	  ENDIF()
     ENDIF()
     
     # tf:message_filters, mixing boost and Qt signals
-    set_property(
-       SOURCE src/rviz/MapCloudDisplay.cpp src/rviz/MapGraphDisplay.cpp src/rviz/InfoDisplay.cpp src/rviz/OrbitOrientedViewController.cpp
-       PROPERTY COMPILE_DEFINITIONS QT_NO_KEYWORDS
-    )
-    add_library(rtabmap_rviz_plugins SHARED
-       src/rviz/MapCloudDisplay.cpp
+	IF(WIN32)
+      set_property(
+        SOURCE src/rviz/MapCloudDisplay.cpp src/rviz/MapGraphDisplay.cpp src/rviz/InfoDisplay.cpp
+        PROPERTY COMPILE_DEFINITIONS QT_NO_KEYWORDS
+      )
+	ELSE()
+	  set_property(
+        SOURCE src/rviz/MapCloudDisplay.cpp src/rviz/MapGraphDisplay.cpp src/rviz/InfoDisplay.cpp src/rviz/OrbitOrientedViewController.cpp
+        PROPERTY COMPILE_DEFINITIONS QT_NO_KEYWORDS
+      )
+	ENDIF()
+	SET(SRC_FILES 
+	   src/rviz/MapCloudDisplay.cpp
        src/rviz/MapGraphDisplay.cpp
        src/rviz/InfoDisplay.cpp
-       #src/rviz/OrbitOrientedViewController.cpp
        ${MOC_FILES}
+	)
+	IF(NOT WIN32)
+	  SET(SRC_FILES 
+	    ${SRC_FILES} 
+	    src/rviz/OrbitOrientedViewController.cpp
+	  )
+	ENDIF(NOT WIN32)
+    add_library(rtabmap_rviz_plugins
+       ${SRC_FILES}
     )
-    
-    ament_target_dependencies(rtabmap_rviz_plugins
-      ${Libraries} 
-      rviz_common 
-      rviz_rendering 
-      rviz_default_plugins
+    target_link_libraries(rtabmap_rviz_plugins
+      rtabmap_ros
+	  ${Libraries}
     )
-    #ament_export_interfaces(rtabmap_rviz_plugins HAS_LIBRARY_TARGET)
-    target_link_libraries(rtabmap_rviz_plugins rtabmap_common)
     IF(Qt5_FOUND)
         QT5_USE_MODULES(rtabmap_rviz_plugins Widgets Core Gui)
     ENDIF(Qt5_FOUND)
+    add_dependencies(rtabmap_rviz_plugins ${${PROJECT_NAME}_EXPORTED_TARGETS})
 
-    foreach(typesupport_impl ${typesupport_impls})
-	  rosidl_target_interfaces(rtabmap_rviz_plugins
-	    ${PROJECT_NAME} ${typesupport_impl}
-	  )
-    endforeach()
-    
-    # Causes the visibility macros to use dllexport rather than dllimport,
-    # which is appropriate when building the dll but not consuming it.
-    target_compile_definitions(rtabmap_rviz_plugins PRIVATE "RTABMAP_ROS_BUILDING_LIBRARY")
-
-    # prevent pluginlib from using boost
-    target_compile_definitions(rtabmap_rviz_plugins PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
-    
-    pluginlib_export_plugin_description_file(rviz_common rviz_plugins.xml)
-
-ENDIF(rviz_default_plugins_FOUND)
+ENDIF(rviz_FOUND)
 
 # If costmap_2d is found, add the plugins
-#IF(costmap_2d_FOUND)
-#    MESSAGE(STATUS "WITH costmap_2d")
-#    IF(${costmap_2d_VERSION_MAJOR} GREATER 1 OR ${costmap_2d_VERSION_MINOR} GREATER 15)
-#      ADD_DEFINITIONS("-DCOSTMAP_2D_POINTCLOUD2")
-#    ENDIF(${costmap_2d_VERSION_MAJOR} GREATER 1 OR ${costmap_2d_VERSION_MINOR} GREATER 15)
-#    include_directories(${costmap_2d_INCLUDE_DIRS})
-#    add_library(rtabmap_costmap_plugins
-#       src/costmap_2d/static_layer.cpp
-#    )
-#    add_library(rtabmap_costmap_plugins2
-#       src/costmap_2d/voxel_layer.cpp
-#    )
-#    ament_target_dependencies(rtabmap_costmap_plugins
-#      ${costmap_2d_LIBRARIES}
-#    )
-#    ament_target_dependencies(rtabmap_costmap_plugins2
-#      ${costmap_2d_LIBRARIES}
-#    )
-#    add_executable(rtabmap_costmap_voxel_markers src/costmap_2d/voxel_markers.cpp)
-#    ament_target_dependencies(rtabmap_costmap_voxel_markers ${costmap_2d_LIBRARIES})
-#    set_target_properties(rtabmap_costmap_voxel_markers PROPERTIES OUTPUT_NAME "voxel_markers")
-#ENDIF(costmap_2d_FOUND)
+IF(costmap_2d_FOUND)
+    MESSAGE(STATUS "WITH costmap_2d")
+    IF(${costmap_2d_VERSION_MAJOR} GREATER 1 OR ${costmap_2d_VERSION_MINOR} GREATER 15)
+      ADD_DEFINITIONS("-DCOSTMAP_2D_POINTCLOUD2")
+    ENDIF(${costmap_2d_VERSION_MAJOR} GREATER 1 OR ${costmap_2d_VERSION_MINOR} GREATER 15)
+    include_directories(${costmap_2d_INCLUDE_DIRS})
+    add_library(rtabmap_costmap_plugins
+       src/costmap_2d/static_layer.cpp
+    )
+    add_library(rtabmap_costmap_plugins2
+       src/costmap_2d/voxel_layer.cpp
+    )
+    target_link_libraries(rtabmap_costmap_plugins
+      ${costmap_2d_LIBRARIES}
+    )
+    target_link_libraries(rtabmap_costmap_plugins2
+      ${costmap_2d_LIBRARIES}
+    )
+    add_executable(rtabmap_costmap_voxel_markers src/costmap_2d/voxel_markers.cpp)
+    target_link_libraries(rtabmap_costmap_voxel_markers ${costmap_2d_LIBRARIES})
+    set_target_properties(rtabmap_costmap_voxel_markers PROPERTIES OUTPUT_NAME "voxel_markers")
+ENDIF(costmap_2d_FOUND)
 
 #############
 ## Install ##
@@ -644,127 +553,116 @@ ENDIF(rviz_default_plugins_FOUND)
 
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
-#install(PROGRAMS
-#  scripts/patrol.py
-#  scripts/objects_to_tags.py
-#  scripts/point_to_tf.py
-#  scripts/transform_to_tf.py
-#  scripts/yaml_to_camera_info.py
-#  scripts/netvlad_tf_ros.py
-#  scripts/wifi_signal_pub.py
-#  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-#)
+catkin_install_python(PROGRAMS
+  scripts/patrol.py
+  scripts/objects_to_tags.py
+  scripts/point_to_tf.py
+  scripts/transform_to_tf.py
+  scripts/yaml_to_camera_info.py
+  scripts/netvlad_tf_ros.py
+  scripts/wifi_signal_pub.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 
 ## Mark executables and/or libraries for installation
 install(TARGETS 
    rtabmap_sync
-   rtabmap_common
+   rtabmap_ros
    rtabmap_plugins 
-   ARCHIVE DESTINATION lib
-   LIBRARY DESTINATION lib
-   RUNTIME DESTINATION bin
-)
-install(TARGETS 
    rtabmap 
    rtabmap_rgbd_odometry 
    rtabmap_icp_odometry
-#   rtabmap_rgbdicp_odometry 
+   rtabmap_rgbdicp_odometry 
    rtabmap_stereo_odometry
-#   rtabmap_map_assembler
-#   rtabmap_map_optimizer
-#   rtabmap_data_player
-#   rtabmap_odom_msg_to_tf
+   rtabmap_map_assembler
+   rtabmap_map_optimizer
+   rtabmap_data_player
+   rtabmap_odom_msg_to_tf
    rtabmap_pointcloud_to_depthimage
-   rtabmap_point_cloud_xyz
-   rtabmap_point_cloud_xyzrgb
-   rtabmap_obstacles_detection
-   rtabmap_point_cloud_aggregator
    rtabmap_point_cloud_assembler
-#   rtabmap_camera
+   rtabmap_camera
    rtabmap_rgbd_sync
    rtabmap_rgbdx_sync
-   rtabmap_stereo_sync
-   rtabmap_rgb_sync
    rtabmap_rgbd_relay
-#   rtabmap_wifi_signal_sub
-   DESTINATION lib/${PROJECT_NAME}
+   rtabmap_wifi_signal_sub
+   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 IF(RTABMAP_GUI)
     install(TARGETS 
        rtabmapviz
-       DESTINATION lib/${PROJECT_NAME}
+       ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+       LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+       RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
      )
 ENDIF(RTABMAP_GUI)
 
 ## Mark cpp header files for installation
 install(DIRECTORY include/${PROJECT_NAME}/
-   DESTINATION include/${PROJECT_NAME}
+   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
    FILES_MATCHING PATTERN "*.h"
    PATTERN ".svn" EXCLUDE
 )
 
 ## Mark other files for installation (e.g. launch and bag files, etc.)
-#install(FILES
-#   launch/ros2/turtlebot3_scan.launch.py
-#   launch/ros2/turtlebot3_rgbd.launch.py
-#   launch/ros2/turtlebot3_rgbd_sync.launch.py
-#   launch/ros2/realsense_d400.launch.py
-#   launch/ros2/rtabmap.launch.py
-#   launch/rgbd_mapping.launch
-#   launch/stereo_mapping.launch
-#   launch/data_recorder.launch
-#   launch/rgbd_mapping_kinect2.launch
-#   DESTINATION share/${PROJECT_NAME}/launch
-#)
+install(FILES
+   launch/rtabmap.launch
+   launch/rgbd_mapping.launch
+   launch/stereo_mapping.launch
+   launch/data_recorder.launch
+   launch/rgbd_mapping_kinect2.launch
+   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
+)
 install(DIRECTORY 
-   launch/ros2/.
-#   launch/data
-#   launch/demo
-   DESTINATION share/${PROJECT_NAME}/launch
+   launch/config
+   launch/data
+   launch/demo
+   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
 )
 
 ## install plugins/nodelets xml
-#install(FILES
-#   nodelet_plugins.xml
-#   DESTINATION share/${PROJECT_NAME}
-#)
-IF(rviz_default_plugins_FOUND)
-  install(
-    TARGETS rtabmap_rviz_plugins
-    #EXPORT rtabmap_rviz_plugins
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin
-    INCLUDES DESTINATION include
+install(FILES
+   nodelet_plugins.xml
+   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
-ENDIF(rviz_default_plugins_FOUND)
+IF(rviz_FOUND)
+    install(TARGETS 
+       rtabmap_rviz_plugins
+       ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+       LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+       RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+     )
+    install(FILES
+       rviz_plugins.xml
+       DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+    )
+ENDIF(rviz_FOUND)
 
-#IF(costmap_2d_FOUND)
-#    install(TARGETS 
-#       rtabmap_costmap_plugins
-#       rtabmap_costmap_plugins2
-#       rtabmap_costmap_voxel_markers
-#      DESTINATION lib
-#     )
-#    install(FILES
-#       costmap_plugins.xml
-#       DESTINATION share/${PROJECT_NAME}
-#    )
-#ENDIF(costmap_2d_FOUND)
+IF(costmap_2d_FOUND)
+    install(TARGETS 
+       rtabmap_costmap_plugins
+       rtabmap_costmap_plugins2
+       rtabmap_costmap_voxel_markers
+       ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+       LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+       RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+     )
+    install(FILES
+       costmap_plugins.xml
+       DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+    )
+ENDIF(costmap_2d_FOUND)
 
 #############
 ## Testing ##
 #############
 
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # uncomment the line when a copyright and license is not present in all source files
-  #set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # uncomment the line when this package is not in a git repo
-  #set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
-endif()
+## Add gtest based cpp test target and link libraries
+# catkin_add_gtest(${PROJECT_NAME}-test test/test_rtabmap.cpp)
+# if(TARGET ${PROJECT_NAME}-test)
+#   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
+# endif()
 
-ament_package()
+## Add folders to be run by python nosetests
+# catkin_add_nosetests(test)
