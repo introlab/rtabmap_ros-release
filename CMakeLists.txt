@@ -32,7 +32,7 @@ find_package(fiducial_msgs)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(RTABMap 0.20.15 REQUIRED)
+find_package(RTABMap 0.20.18 REQUIRED)
 
 find_package(OpenCV REQUIRED)
 
@@ -134,6 +134,7 @@ add_message_files(
    ResetPose.srv
    SetGoal.srv
    SetLabel.srv
+   RemoveLabel.srv
    GetPlan.srv
    AddLink.srv
    GetNodeData.srv
