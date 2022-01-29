@@ -60,6 +60,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rtabmap_ros/srv/publish_map.hpp"
 #include "rtabmap_ros/srv/set_goal.hpp"
 #include "rtabmap_ros/srv/set_label.hpp"
+#include "rtabmap_ros/srv/remove_label.hpp"
 #include "rtabmap_ros/msg/goal.hpp"
 #include "rtabmap_ros/srv/get_plan.hpp"
 #include "rtabmap_ros/CommonDataSubscriber.h"
@@ -83,10 +84,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <apriltag_msgs/msg/april_tag_detection_array.hpp>
 #endif
 
-#ifdef WITH_MOVE_BASE_MSGS
-#include <move_base_msgs/action/move_base.hpp>
+#include <nav2_msgs/action/navigate_to_pose.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
-#endif
 
 //#define WITH_FIDUCIAL_MSGS
 #ifdef WITH_FIDUCIAL_MSGS
@@ -105,6 +104,9 @@ public:
 	RTABMAP_ROS_PUBLIC
 	explicit CoreWrapper(const rclcpp::NodeOptions & options);
 	virtual ~CoreWrapper();
+
+	using NavigateToPose = nav2_msgs::action::NavigateToPose;
+	using GoalHandleNav2 = rclcpp_action::ClientGoalHandle<NavigateToPose>;
 
 private:
 	bool odomUpdate(const nav_msgs::msg::Odometry & odomMsg, rclcpp::Time stamp);
@@ -230,6 +232,7 @@ private:
 	void cancelGoalCallback(const std::shared_ptr<rmw_request_id_t>, const std::shared_ptr<std_srvs::srv::Empty::Request>, std::shared_ptr<std_srvs::srv::Empty::Response>);
 	void setLabelCallback(const std::shared_ptr<rmw_request_id_t>, const std::shared_ptr<rtabmap_ros::srv::SetLabel::Request>, std::shared_ptr<rtabmap_ros::srv::SetLabel::Response>);
 	void listLabelsCallback(const std::shared_ptr<rmw_request_id_t>, const std::shared_ptr<rtabmap_ros::srv::ListLabels::Request>, std::shared_ptr<rtabmap_ros::srv::ListLabels::Response> res);
+	void removeLabelCallback(const std::shared_ptr<rmw_request_id_t>, const std::shared_ptr<rtabmap_ros::srv::RemoveLabel::Request>, std::shared_ptr<rtabmap_ros::srv::RemoveLabel::Response> res);
 	void addLinkCallback(const std::shared_ptr<rmw_request_id_t>, const std::shared_ptr<rtabmap_ros::srv::AddLink::Request>, std::shared_ptr<rtabmap_ros::srv::AddLink::Response> res);
 	void getNodesInRadiusCallback(const std::shared_ptr<rmw_request_id_t>, const std::shared_ptr<rtabmap_ros::srv::GetNodesInRadius::Request>, std::shared_ptr<rtabmap_ros::srv::GetNodesInRadius::Response> res);
 #ifdef WITH_OCTOMAP_MSGS
@@ -242,13 +245,10 @@ private:
 
 	void publishStats(const rclcpp::Time & stamp);
 	void publishCurrentGoal(const rclcpp::Time & stamp);
-#ifdef WITH_MOVE_BASE_MSGS
-	using MoveBase = move_base_msgs::action::MoveBase;
-	using GoalHandleMoveBase = rclcpp_action::ClientGoalHandle<MoveBase>;
-	void goalResponseCallback(std::shared_future<GoalHandleMoveBase::SharedPtr> future);
-	void feedbackCallback(GoalHandleMoveBase::SharedPtr, const std::shared_ptr<const MoveBase::Feedback> feedback);
-	void resultCallback(const GoalHandleMoveBase::WrappedResult & result);
-#endif
+
+	void goalResponseCallback(std::shared_future<GoalHandleNav2::SharedPtr> future);
+	void resultCallback(const GoalHandleNav2::WrappedResult & result);
+
 	void publishLocalPath(const rclcpp::Time & stamp);
 	void publishGlobalPath(const rclcpp::Time & stamp);
 	void republishMaps();
@@ -358,15 +358,14 @@ private:
 	rclcpp::Service<std_srvs::srv::Empty>::SharedPtr cancelGoalSrv_;
 	rclcpp::Service<rtabmap_ros::srv::SetLabel>::SharedPtr setLabelSrv_;
 	rclcpp::Service<rtabmap_ros::srv::ListLabels>::SharedPtr listLabelsSrv_;
+	rclcpp::Service<rtabmap_ros::srv::RemoveLabel>::SharedPtr removeLabelSrv_;
 	rclcpp::Service<rtabmap_ros::srv::AddLink>::SharedPtr addLinkSrv_;
 	rclcpp::Service<rtabmap_ros::srv::GetNodesInRadius>::SharedPtr getNodesInRadiusSrv_;
 #ifdef WITH_OCTOMAP_MSGS
 	rclcpp::Service<octomap_msgs::srv::GetOctomap>::SharedPtr octomapBinarySrv_;
 	rclcpp::Service<octomap_msgs::srv::GetOctomap>::SharedPtr octomapFullSrv_;
 #endif
-#ifdef WITH_MOVE_BASE_MSGS
-	rclcpp_action::Client<MoveBase>::SharedPtr moveBaseClient_;
-#endif
+	rclcpp_action::Client<NavigateToPose>::SharedPtr nav2Client_;
 
 	std::thread* transformThread_;
 	bool tfThreadRunning_;
