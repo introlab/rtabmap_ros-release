@@ -37,6 +37,7 @@ find_package(image_transport REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 #find_package(eigen_conversions REQUIRED)
 find_package(laser_geometry REQUIRED)
 find_package(pcl_conversions REQUIRED)
@@ -56,7 +57,7 @@ find_package(octomap_msgs)
 #find_package(fiducial_msgs)
 
 ## System dependencies are found with CMake's conventions
-find_package(RTABMap 0.20.18 REQUIRED)
+find_package(RTABMap 0.20.20 REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system) # dependencies from PCL
 find_package(PCL 1.7 REQUIRED COMPONENTS kdtree) #This crashes idl generation if all components are found?! see https://github.com/ros2/rosidl/issues/402#issuecomment-565586908
 
@@ -81,6 +82,9 @@ ELSEIF(COMPILER_SUPPORTS_CXX11)
 ENDIF()
 endif()
 
+IF(${nav2_msgs_VERSION_MAJOR} EQUAL 0)
+   ADD_DEFINITIONS("-DNAV_MSGS_FOXY")
+ENDIF()
 
 option(RTABMAP_SYNC_MULTI_RGBD "Build with multi RGBD camera synchronization support"  OFF)
 option(RTABMAP_SYNC_USER_DATA "Build with input user data support"  OFF)
@@ -138,6 +142,8 @@ ENDIF(RTABMAP_GUI OR rviz_default_plugins_FOUND)
    "msg/GPS.msg"
    "msg/Path.msg"
    "msg/EnvSensor.msg"
+   "msg/CameraModel.msg"
+   "msg/CameraModels.msg"
  )
 
 # declare the service files to generate code for
@@ -201,10 +207,12 @@ ament_export_dependencies(rosidl_default_runtime)
 
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
-# include_directories(include)
+#include_directories(include)
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${RTABMap_INCLUDE_DIRS}
+)
+include_directories(SYSTEM
   ${PCL_INCLUDE_DIRS}
 )
 
@@ -223,6 +231,7 @@ SET(Libraries
    tf2
    tf2_eigen
    tf2_ros
+   tf2_geometry_msgs
    laser_geometry
    message_filters
    class_loader
@@ -335,13 +344,27 @@ ament_target_dependencies(rtabmap_common ${Libraries})
 ament_target_dependencies(rtabmap_sync ${Libraries})
 ament_target_dependencies(rtabmap_plugins ${Libraries})
 
-target_link_libraries(rtabmap_common ${RTABMap_LIBRARIES})
-target_link_libraries(rtabmap_sync rtabmap_common ${RTABMap_LIBRARIES})
-target_link_libraries(rtabmap_plugins rtabmap_common ${RTABMap_LIBRARIES})
+if("$ENV{ROS_DISTRO}" STRGREATER_EQUAL "humble")
+  rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
-rosidl_target_interfaces(rtabmap_common ${PROJECT_NAME} "rosidl_typesupport_cpp")
-rosidl_target_interfaces(rtabmap_sync ${PROJECT_NAME} "rosidl_typesupport_cpp")
-rosidl_target_interfaces(rtabmap_plugins ${PROJECT_NAME} "rosidl_typesupport_cpp")
+  target_link_libraries(rtabmap_common ${cpp_typesupport_target} ${RTABMap_LIBRARIES})
+  target_link_libraries(rtabmap_sync rtabmap_common ${cpp_typesupport_targeT} ${RTABMap_LIBRARIES})
+  target_link_libraries(rtabmap_plugins rtabmap_common ${cpp_typesupport_target} ${RTABMap_LIBRARIES})
+else()
+  # foxy, galatic
+  target_link_libraries(rtabmap_common ${RTABMap_LIBRARIES})
+  target_link_libraries(rtabmap_sync rtabmap_common ${RTABMap_LIBRARIES})
+  target_link_libraries(rtabmap_plugins rtabmap_common ${RTABMap_LIBRARIES})
+
+  rosidl_target_interfaces(rtabmap_common ${PROJECT_NAME} "rosidl_typesupport_cpp")
+  rosidl_target_interfaces(rtabmap_sync ${PROJECT_NAME} "rosidl_typesupport_cpp")
+  rosidl_target_interfaces(rtabmap_plugins ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
+  function(rosidl_get_typesupport_target var generate_interfaces_target typesupport_name)
+    rosidl_target_interfaces(${var} ${generate_interfaces_target} ${typesupport_name})
+  endfunction()
+  add_definitions(-DPRE_ROS_HUMBLE)
+endif()
 
 rclcpp_components_register_nodes(rtabmap_plugins "rtabmap_ros::RGBDOdometry")
 rclcpp_components_register_nodes(rtabmap_plugins "rtabmap_ros::StereoOdometry")
@@ -504,41 +527,41 @@ find_package("${rmw_implementation}" REQUIRED)
 get_rmw_typesupport(typesupport_impls "${rmw_implementation}" LANGUAGE "cpp")
 
 foreach(typesupport_impl ${typesupport_impls})
-  rosidl_target_interfaces(rtabmap_rgbd_odometry
+  rosidl_get_typesupport_target(rtabmap_rgbd_odometry
     ${PROJECT_NAME} ${typesupport_impl}
   )
-  rosidl_target_interfaces(rtabmap_stereo_odometry
+  rosidl_get_typesupport_target(rtabmap_stereo_odometry
     ${PROJECT_NAME} ${typesupport_impl}
   )
-  rosidl_target_interfaces(rtabmap_icp_odometry
+  rosidl_get_typesupport_target(rtabmap_icp_odometry
     ${PROJECT_NAME} ${typesupport_impl}
   )
-  rosidl_target_interfaces(rtabmap_rgbd_relay
+  rosidl_get_typesupport_target(rtabmap_rgbd_relay
     ${PROJECT_NAME} ${typesupport_impl}
   )
-  rosidl_target_interfaces(rtabmap_rgbd_sync
+  rosidl_get_typesupport_target(rtabmap_rgbd_sync
     ${PROJECT_NAME} ${typesupport_impl}
   )
-  rosidl_target_interfaces(rtabmap_rgbdx_sync
+  rosidl_get_typesupport_target(rtabmap_rgbdx_sync
     ${PROJECT_NAME} ${typesupport_impl}
   )
-  rosidl_target_interfaces(rtabmap_rgb_sync
+  rosidl_get_typesupport_target(rtabmap_rgb_sync
     ${PROJECT_NAME} ${typesupport_impl}
   )
-  rosidl_target_interfaces(rtabmap_stereo_sync
+  rosidl_get_typesupport_target(rtabmap_stereo_sync
     ${PROJECT_NAME} ${typesupport_impl}
   )
-  rosidl_target_interfaces(rtabmap_pointcloud_to_depthimage
+  rosidl_get_typesupport_target(rtabmap_pointcloud_to_depthimage
     ${PROJECT_NAME} ${typesupport_impl}
   )
-  rosidl_target_interfaces(rtabmap_point_cloud_xyzrgb
+  rosidl_get_typesupport_target(rtabmap_point_cloud_xyzrgb
     ${PROJECT_NAME} ${typesupport_impl}
   )
-  rosidl_target_interfaces(rtabmap
+  rosidl_get_typesupport_target(rtabmap
     ${PROJECT_NAME} ${typesupport_impl}
   )
   IF(RTABMAP_GUI)
-    rosidl_target_interfaces(rtabmapviz
+    rosidl_get_typesupport_target(rtabmapviz
       ${PROJECT_NAME} ${typesupport_impl}
     )
   ENDIF()
@@ -598,7 +621,7 @@ IF(rviz_default_plugins_FOUND)
     ENDIF(Qt5_FOUND)
 
     foreach(typesupport_impl ${typesupport_impls})
-	  rosidl_target_interfaces(rtabmap_rviz_plugins
+	  rosidl_get_typesupport_target(rtabmap_rviz_plugins
 	    ${PROJECT_NAME} ${typesupport_impl}
 	  )
     endforeach()
@@ -655,6 +678,7 @@ ENDIF(rviz_default_plugins_FOUND)
 #  scripts/yaml_to_camera_info.py
 #  scripts/netvlad_tf_ros.py
 #  scripts/wifi_signal_pub.py
+#  scripts/gazebo_ground_truth.py
 #  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 #)
 
