@@ -29,7 +29,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <opencv2/highgui/highgui.hpp>
 #include <zlib.h>
-#include <ros/ros.h>
+#include "rclcpp/rclcpp.hpp"
 #include <rtabmap/core/util3d.h>
 #include <rtabmap/core/util3d_transforms.h>
 #include <rtabmap/core/util3d_filtering.h>
@@ -37,40 +37,49 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/utilite/UStl.h>
 #include <rtabmap/utilite/ULogger.h>
 #include <pcl_conversions/pcl_conversions.h>
-#include <eigen_conversions/eigen_msg.h>
-#include <tf_conversions/tf_eigen.h>
 #include <image_geometry/pinhole_camera_model.h>
 #include <image_geometry/stereo_camera_model.h>
-#include <sensor_msgs/image_encodings.h>
-#include <laser_geometry/laser_geometry.h>
+#include <sensor_msgs/image_encodings.hpp>
+#include <sensor_msgs/msg/point_field.hpp>
+#include <geometry_msgs/msg/transform.hpp>
+#include <laser_geometry/laser_geometry.hpp>
 #include <rtabmap/core/util3d_surface.h>
+#ifdef PRE_ROS_HUMBLE
+#include <tf2_eigen/tf2_eigen.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#else
+#include <tf2_eigen/tf2_eigen.hpp>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#endif
 
 namespace rtabmap_ros {
 
-void transformToTF(const rtabmap::Transform & transform, tf::Transform & tfTransform)
+void transformToTF(const rtabmap::Transform & transform, tf2::Transform & tfTransform)
 {
 	if(!transform.isNull())
 	{
-		tf::transformEigenToTF(transform.toEigen3d(), tfTransform);
+		geometry_msgs::msg::TransformStamped gm = tf2::eigenToTransform(transform.toEigen3d());
+		//tf2::fromMsg(gm, tfTransform);
 	}
 	else
 	{
-		tfTransform = tf::Transform();
+		tfTransform = tf2::Transform();
 	}
 }
 
-rtabmap::Transform transformFromTF(const tf::Transform & transform)
+rtabmap::Transform transformFromTF(const tf2::Transform & transform)
 {
-	Eigen::Affine3d eigenTf;
-	tf::transformTFToEigen(transform, eigenTf);
+	Eigen::Isometry3d eigenTf;
+	geometry_msgs::msg::Transform gm = tf2::toMsg(transform);
+	eigenTf = tf2::transformToEigen(gm);
 	return rtabmap::Transform::fromEigen3d(eigenTf);
 }
 
-void transformToGeometryMsg(const rtabmap::Transform & transform, geometry_msgs::Transform & msg)
+void transformToGeometryMsg(const rtabmap::Transform & transform, geometry_msgs::msg::Transform & msg)
 {
 	if(!transform.isNull())
 	{
-		tf::transformEigenToMsg(transform.toEigen3d(), msg);
+		msg = tf2::eigenToTransform(transform.toEigen3d()).transform;
 
 		// make sure the quaternion is normalized
 		long double recipNorm = 1.0 / sqrt(msg.rotation.x * msg.rotation.x + msg.rotation.y * msg.rotation.y + msg.rotation.z * msg.rotation.z + msg.rotation.w * msg.rotation.w);
@@ -81,12 +90,12 @@ void transformToGeometryMsg(const rtabmap::Transform & transform, geometry_msgs:
 	}
 	else
 	{
-		msg = geometry_msgs::Transform();
+		msg = geometry_msgs::msg::Transform();
 	}
 }
 
 
-rtabmap::Transform transformFromGeometryMsg(const geometry_msgs::Transform & msg)
+rtabmap::Transform transformFromGeometryMsg(const geometry_msgs::msg::Transform & msg)
 {
 	if(msg.rotation.w == 0 &&
 		msg.rotation.x == 0 &&
@@ -96,24 +105,24 @@ rtabmap::Transform transformFromGeometryMsg(const geometry_msgs::Transform & msg
 		return rtabmap::Transform();
 	}
 
-	Eigen::Affine3d tfTransform;
-	tf::transformMsgToEigen(msg, tfTransform);
+	Eigen::Isometry3d tfTransform;
+	tfTransform = tf2::transformToEigen(msg);
 	return rtabmap::Transform::fromEigen3d(tfTransform);
 }
 
-void transformToPoseMsg(const rtabmap::Transform & transform, geometry_msgs::Pose & msg)
+void transformToPoseMsg(const rtabmap::Transform & transform, geometry_msgs::msg::Pose & msg)
 {
 	if(!transform.isNull())
 	{
-		tf::poseEigenToMsg(transform.toEigen3d(), msg);
+		msg = tf2::toMsg(transform.toEigen3d());
 	}
 	else
 	{
-		msg = geometry_msgs::Pose();
+		msg = geometry_msgs::msg::Pose();
 	}
 }
 
-rtabmap::Transform transformFromPoseMsg(const geometry_msgs::Pose & msg, bool ignoreRotationIfNotSet)
+rtabmap::Transform transformFromPoseMsg(const geometry_msgs::msg::Pose & msg, bool ignoreRotationIfNotSet)
 {
 	if(msg.orientation.w == 0 &&
 		msg.orientation.x == 0 &&
@@ -127,11 +136,11 @@ rtabmap::Transform transformFromPoseMsg(const geometry_msgs::Pose & msg, bool ig
 		return rtabmap::Transform();
 	}
 	Eigen::Affine3d tfPose;
-	tf::poseMsgToEigen(msg, tfPose);
+	tf2::fromMsg(msg, tfPose);
 	return rtabmap::Transform::fromEigen3d(tfPose);
 }
 
-void toCvCopy(const rtabmap_ros::RGBDImage & image, cv_bridge::CvImagePtr & rgb, cv_bridge::CvImagePtr & depth)
+void toCvCopy(const rtabmap_ros::msg::RGBDImage & image, cv_bridge::CvImagePtr & rgb, cv_bridge::CvImagePtr & depth)
 {
 	if(!image.rgb.data.empty())
 	{
@@ -139,11 +148,12 @@ void toCvCopy(const rtabmap_ros::RGBDImage & image, cv_bridge::CvImagePtr & rgb,
 	}
 	else if(!image.rgb_compressed.data.empty())
 	{
-#ifdef CV_BRIDGE_HYDRO
-		ROS_ERROR("Unsupported compressed image copy, please upgrade at least to ROS Indigo to use this.");
-#else
 		rgb = cv_bridge::toCvCopy(image.rgb_compressed);
-#endif
+	}
+	else
+	{
+		// empty
+		rgb = std::make_shared<cv_bridge::CvImage>();
 	}
 
 	if(!image.depth.data.empty())
@@ -152,21 +162,26 @@ void toCvCopy(const rtabmap_ros::RGBDImage & image, cv_bridge::CvImagePtr & rgb,
 	}
 	else if(!image.depth_compressed.data.empty())
 	{
-		cv_bridge::CvImagePtr ptr = boost::make_shared<cv_bridge::CvImage>();
+		cv_bridge::CvImagePtr ptr = std::make_unique<cv_bridge::CvImage>();
 		ptr->header = image.depth_compressed.header;
 		ptr->image = rtabmap::uncompressImage(image.depth_compressed.data);
-		ROS_ASSERT(ptr->image.empty() || ptr->image.type() == CV_32FC1 || ptr->image.type() == CV_16UC1);
+		UASSERT(ptr->image.empty() || ptr->image.type() == CV_32FC1 || ptr->image.type() == CV_16UC1);
 		ptr->encoding = ptr->image.empty()?"":ptr->image.type() == CV_32FC1?sensor_msgs::image_encodings::TYPE_32FC1:sensor_msgs::image_encodings::TYPE_16UC1;
 		depth = ptr;
 	}
+	else
+	{
+		// empty
+		depth = std::make_shared<cv_bridge::CvImage>();
+	}
 }
 
-void toCvShare(const rtabmap_ros::RGBDImageConstPtr & image, cv_bridge::CvImageConstPtr & rgb, cv_bridge::CvImageConstPtr & depth)
+void toCvShare(const rtabmap_ros::msg::RGBDImage::ConstSharedPtr & image, cv_bridge::CvImageConstPtr & rgb, cv_bridge::CvImageConstPtr & depth)
 {
 	toCvShare(*image, image, rgb, depth);
 }
 
-void toCvShare(const rtabmap_ros::RGBDImage & image, const boost::shared_ptr<void const>& trackedObject, cv_bridge::CvImageConstPtr & rgb, cv_bridge::CvImageConstPtr & depth)
+void toCvShare(const rtabmap_ros::msg::RGBDImage & image, const std::shared_ptr<void const>& trackedObject, cv_bridge::CvImageConstPtr & rgb, cv_bridge::CvImageConstPtr & depth)
 {
 	if(!image.rgb.data.empty())
 	{
@@ -174,11 +189,12 @@ void toCvShare(const rtabmap_ros::RGBDImage & image, const boost::shared_ptr<voi
 	}
 	else if(!image.rgb_compressed.data.empty())
 	{
-#ifdef CV_BRIDGE_HYDRO
-		ROS_ERROR("Unsupported compressed image copy, please upgrade at least to ROS Indigo to use this.");
-#else
 		rgb = cv_bridge::toCvCopy(image.rgb_compressed);
-#endif
+	}
+	else
+	{
+		// empty
+		rgb = std::make_shared<cv_bridge::CvImage>();
 	}
 
 	if(!image.depth.data.empty())
@@ -189,29 +205,25 @@ void toCvShare(const rtabmap_ros::RGBDImage & image, const boost::shared_ptr<voi
 	{
 		if(image.depth_compressed.format.compare("jpg")==0)
 		{
-#ifdef CV_BRIDGE_HYDRO
-			ROS_ERROR("Unsupported compressed image copy, please upgrade at least to ROS Indigo to use this.");
-#else
 			depth = cv_bridge::toCvCopy(image.depth_compressed);
-#endif
 		}
 		else
 		{
-			cv_bridge::CvImagePtr ptr = boost::make_shared<cv_bridge::CvImage>();
+			cv_bridge::CvImagePtr ptr = std::make_shared<cv_bridge::CvImage>();
 			ptr->header = image.depth_compressed.header;
 			ptr->image = rtabmap::uncompressImage(image.depth_compressed.data);
-			ROS_ASSERT(ptr->image.empty() || ptr->image.type() == CV_32FC1 || ptr->image.type() == CV_16UC1);
+			UASSERT(ptr->image.empty() || ptr->image.type() == CV_32FC1 || ptr->image.type() == CV_16UC1);
 			ptr->encoding = ptr->image.empty()?"":ptr->image.type() == CV_32FC1?sensor_msgs::image_encodings::TYPE_32FC1:sensor_msgs::image_encodings::TYPE_16UC1;
 			depth = ptr;
 		}
 	}
 }
 
-void rgbdImageToROS(const rtabmap::SensorData & data, rtabmap_ros::RGBDImage & msg, const std::string & sensorFrameId)
+void rgbdImageToROS(const rtabmap::SensorData & data, rtabmap_ros::msg::RGBDImage & msg, const std::string & sensorFrameId)
 {
-	std_msgs::Header header;
+	std_msgs::msg::Header header;
 	header.frame_id = sensorFrameId;
-	header.stamp = ros::Time(data.stamp());
+	header.stamp = timestampToROS(data.stamp());
 	rtabmap::Transform localTransform;
 	if(data.cameraModels().size()>1)
 	{
@@ -246,7 +258,7 @@ void rgbdImageToROS(const rtabmap::SensorData & data, rtabmap_ros::RGBDImage & m
 	}
 	else if(!data.imageCompressed().empty())
 	{
-		ROS_ERROR("Conversion of compressed SensorData to RGBDImage is not implemented...");
+		UERROR("Conversion of compressed SensorData to RGBDImage is not implemented...");
 	}
 
 	if(!data.depthOrRightRaw().empty())
@@ -260,7 +272,7 @@ void rgbdImageToROS(const rtabmap::SensorData & data, rtabmap_ros::RGBDImage & m
 	}
 	else if(!data.depthOrRightCompressed().empty())
 	{
-		ROS_ERROR("Conversion of compressed SensorData to RGBDImage is not implemented...");
+		UERROR("Conversion of compressed SensorData to RGBDImage is not implemented...");
 	}
 
 	//convert features
@@ -283,7 +295,7 @@ void rgbdImageToROS(const rtabmap::SensorData & data, rtabmap_ros::RGBDImage & m
 	}
 }
 
-rtabmap::SensorData rgbdImageFromROS(const rtabmap_ros::RGBDImageConstPtr & image)
+rtabmap::SensorData rgbdImageFromROS(const rtabmap_ros::msg::RGBDImage::ConstSharedPtr & image)
 {
 	rtabmap::SensorData data;
 	cv_bridge::CvImageConstPtr imageMsg;
@@ -307,7 +319,7 @@ rtabmap::SensorData rgbdImageFromROS(const rtabmap_ros::RGBDImageConstPtr & imag
 			  imageRectRight->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
 			  imageRectRight->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0))
 		{
-			ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8 (mono8 recommended), received types are %s (left) and %s (right)",
+			UERROR("Input type must be image=mono8,mono16,rgb8,bgr8 (mono8 recommended), received types are %s (left) and %s (right)",
 					imageRectLeft->encoding.c_str(), imageRectRight->encoding.c_str());
 			return data;
 		}
@@ -319,7 +331,7 @@ rtabmap::SensorData rgbdImageFromROS(const rtabmap_ros::RGBDImageConstPtr & imag
 				static bool shown = false;
 				if(!shown)
 				{
-					ROS_WARN("Detected baseline (%f m) is quite large! Is your "
+					UWARN("Detected baseline (%f m) is quite large! Is your "
 							 "right camera_info P(0,3) correctly set? Note that "
 							 "baseline=-P(0,3)/P(0,0). This warning is printed only once.",
 							 stereoModel.baseline());
@@ -362,12 +374,11 @@ rtabmap::SensorData rgbdImageFromROS(const rtabmap_ros::RGBDImageConstPtr & imag
 		}
 		else
 		{
-			ROS_WARN("Odom: input images empty?!?");
+			UWARN("Odom: input images empty?!?");
 		}
 	}
 	else //depth
 	{
-		ros::Time higherStamp;
 		int imageWidth = imageMsg->image.cols;
 		int imageHeight = imageMsg->image.rows;
 		int depthWidth = depthMsg->image.cols;
@@ -393,7 +404,7 @@ rtabmap::SensorData rgbdImageFromROS(const rtabmap_ros::RGBDImageConstPtr & imag
 			 depthMsg->encoding.compare(sensor_msgs::image_encodings::TYPE_32FC1) == 0 ||
 			 depthMsg->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0))
 		{
-			ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8,bgra8,rgba8 and "
+			UERROR("Input type must be image=mono8,mono16,rgb8,bgr8,bgra8,rgba8 and "
 			"image_depth=32FC1,16UC1,mono16. Current rgb=%s and depth=%s",
 				imageMsg->encoding.c_str(),
 				depthMsg->encoding.c_str());
@@ -453,59 +464,59 @@ cv::Mat compressedMatFromBytes(const std::vector<unsigned char> & bytes, bool co
 	return out;
 }
 
-void infoFromROS(const rtabmap_ros::Info & info, rtabmap::Statistics & stat)
+void infoFromROS(const rtabmap_ros::msg::Info & info, rtabmap::Statistics & stat)
 {
 	stat.setExtended(true); // Extended
 
 	// rtabmap_ros::Info
-	stat.setRefImageId(info.refId);
-	stat.setLoopClosureId(info.loopClosureId);
-	stat.setProximityDetectionId(info.proximityDetectionId);
-	stat.setStamp(info.header.stamp.toSec());
+	stat.setRefImageId(info.ref_id);
+	stat.setLoopClosureId(info.loop_closure_id);
+	stat.setProximityDetectionId(info.proximity_detection_id);
+	stat.setStamp(timestampFromROS(info.header.stamp));
 
-	stat.setLoopClosureTransform(rtabmap_ros::transformFromGeometryMsg(info.loopClosureTransform));
+	stat.setLoopClosureTransform(rtabmap_ros::transformFromGeometryMsg(info.loop_closure_transform));
 
 	//wmState
-	stat.setWmState(info.wmState);
+	stat.setWmState(info.wm_state);
 
 	//Posterior, likelihood, childCount
 	std::map<int, float> mapIntFloat;
-	for(unsigned int i=0; i<info.posteriorKeys.size() && i<info.posteriorValues.size(); ++i)
+	for(unsigned int i=0; i<info.posterior_keys.size() && i<info.posterior_values.size(); ++i)
 	{
-		mapIntFloat.insert(std::pair<int, float>(info.posteriorKeys.at(i), info.posteriorValues.at(i)));
+		mapIntFloat.insert(std::pair<int, float>(info.posterior_keys.at(i), info.posterior_values.at(i)));
 	}
 	stat.setPosterior(mapIntFloat);
 
 	mapIntFloat.clear();
-	for(unsigned int i=0; i<info.likelihoodKeys.size() && i<info.likelihoodValues.size(); ++i)
+	for(unsigned int i=0; i<info.likelihood_keys.size() && i<info.likelihood_values.size(); ++i)
 	{
-		mapIntFloat.insert(std::pair<int, float>(info.likelihoodKeys.at(i), info.likelihoodValues.at(i)));
+		mapIntFloat.insert(std::pair<int, float>(info.likelihood_keys.at(i), info.likelihood_values.at(i)));
 	}
 	stat.setLikelihood(mapIntFloat);
 
 	mapIntFloat.clear();
-	for(unsigned int i=0; i<info.rawLikelihoodKeys.size() && i<info.rawLikelihoodValues.size(); ++i)
+	for(unsigned int i=0; i<info.raw_likelihood_keys.size() && i<info.raw_likelihood_values.size(); ++i)
 	{
-		mapIntFloat.insert(std::pair<int, float>(info.rawLikelihoodKeys.at(i), info.rawLikelihoodValues.at(i)));
+		mapIntFloat.insert(std::pair<int, float>(info.raw_likelihood_keys.at(i), info.raw_likelihood_values.at(i)));
 	}
 	stat.setRawLikelihood(mapIntFloat);
 
 	std::map<int, int> mapIntInt;
-	for(unsigned int i=0; i<info.weightsKeys.size() && i<info.weightsValues.size(); ++i)
+	for(unsigned int i=0; i<info.weights_keys.size() && i<info.weights_values.size(); ++i)
 	{
-		mapIntInt.insert(std::pair<int, int>(info.weightsKeys.at(i), info.weightsValues.at(i)));
+		mapIntInt.insert(std::pair<int, int>(info.weights_keys.at(i), info.weights_values.at(i)));
 	}
 	stat.setWeights(mapIntInt);
 
 	std::map<int, std::string> mapIntStr;
-	for(unsigned int i=0; i<info.labelsKeys.size() && i<info.labelsValues.size(); ++i)
+	for(unsigned int i=0; i<info.labels_keys.size() && i<info.labels_values.size(); ++i)
 	{
-		mapIntStr.insert(std::pair<int, std::string>(info.labelsKeys.at(i), info.labelsValues.at(i)));
+		mapIntStr.insert(std::pair<int, std::string>(info.labels_keys.at(i), info.labels_values.at(i)));
 	}
 	stat.setLabels(mapIntStr);
 
-	stat.setLocalPath(info.localPath);
-	stat.setCurrentGoalId(info.currentGoalId);
+	stat.setLocalPath(info.local_path);
+	stat.setCurrentGoalId(info.current_goal_id);
 
 	std::map<int, rtabmap::Transform> poses;
 	std::multimap<int, rtabmap::Link> constraints;
@@ -515,58 +526,58 @@ void infoFromROS(const rtabmap_ros::Info & info, rtabmap::Statistics & stat)
 	stat.setOdomCacheConstraints(constraints);
 
 	// Statistics data
-	for(unsigned int i=0; i<info.statsKeys.size() && i<info.statsValues.size(); i++)
+	for(unsigned int i=0; i<info.stats_keys.size() && i<info.stats_values.size(); i++)
 	{
-		stat.addStatistic(info.statsKeys.at(i), info.statsValues.at(i));
+		stat.addStatistic(info.stats_keys.at(i), info.stats_values.at(i));
 	}
 }
 
-void infoToROS(const rtabmap::Statistics & stats, rtabmap_ros::Info & info)
+void infoToROS(const rtabmap::Statistics & stats, rtabmap_ros::msg::Info & info)
 {
-	info.refId = stats.refImageId();
-	info.loopClosureId = stats.loopClosureId();
-	info.proximityDetectionId = stats.proximityDetectionId();
-	info.landmarkId =  static_cast<int>(uValue(stats.data(), rtabmap::Statistics::kLoopLandmark_detected(), 0.0f));
+	info.ref_id = stats.refImageId();
+	info.loop_closure_id = stats.loopClosureId();
+	info.proximity_detection_id = stats.proximityDetectionId();
+	info.landmark_id = static_cast<int>(uValue(stats.data(), rtabmap::Statistics::kLoopLandmark_detected(), 0.0f));
 
-	rtabmap_ros::transformToGeometryMsg(stats.loopClosureTransform(), info.loopClosureTransform);
+	rtabmap_ros::transformToGeometryMsg(stats.loopClosureTransform(), info.loop_closure_transform);
 
 	// Detailed info
 	if(stats.extended())
 	{
 		//wmState
-		info.wmState = stats.wmState();
+		info.wm_state = stats.wmState();
 
 		//Posterior, likelihood, childCount
-		info.posteriorKeys = uKeys(stats.posterior());
-		info.posteriorValues = uValues(stats.posterior());
-		info.likelihoodKeys = uKeys(stats.likelihood());
-		info.likelihoodValues = uValues(stats.likelihood());
-		info.rawLikelihoodKeys = uKeys(stats.rawLikelihood());
-		info.rawLikelihoodValues = uValues(stats.rawLikelihood());
-		info.weightsKeys = uKeys(stats.weights());
-		info.weightsValues = uValues(stats.weights());
-		info.labelsKeys = uKeys(stats.labels());
-		info.labelsValues = uValues(stats.labels());
-		info.localPath = stats.localPath();
-		info.currentGoalId = stats.currentGoalId();
+		info.posterior_keys = uKeys(stats.posterior());
+		info.posterior_values = uValues(stats.posterior());
+		info.likelihood_keys = uKeys(stats.likelihood());
+		info.likelihood_values = uValues(stats.likelihood());
+		info.raw_likelihood_keys = uKeys(stats.rawLikelihood());
+		info.raw_likelihood_values = uValues(stats.rawLikelihood());
+		info.weights_keys = uKeys(stats.weights());
+		info.weights_values = uValues(stats.weights());
+		info.labels_keys = uKeys(stats.labels());
+		info.labels_values = uValues(stats.labels());
+		info.local_path = stats.localPath();
+		info.current_goal_id = stats.currentGoalId();
 		mapGraphToROS(stats.odomCachePoses(), stats.odomCacheConstraints(), stats.mapCorrection(), info.odom_cache);
 
 		// Statistics data
-		info.statsKeys = uKeys(stats.data());
-		info.statsValues = uValues(stats.data());
+		info.stats_keys = uKeys(stats.data());
+		info.stats_values = uValues(stats.data());
 	}
 }
 
-rtabmap::Link linkFromROS(const rtabmap_ros::Link & msg)
+rtabmap::Link linkFromROS(const rtabmap_ros::msg::Link & msg)
 {
 	cv::Mat information = cv::Mat(6,6,CV_64FC1, (void*)msg.information.data()).clone();
-	return rtabmap::Link(msg.fromId, msg.toId, (rtabmap::Link::Type)msg.type, transformFromGeometryMsg(msg.transform), information);
+	return rtabmap::Link(msg.from_id, msg.to_id, (rtabmap::Link::Type)msg.type, transformFromGeometryMsg(msg.transform), information);
 }
 
-void linkToROS(const rtabmap::Link & link, rtabmap_ros::Link & msg)
+void linkToROS(const rtabmap::Link & link, rtabmap_ros::msg::Link & msg)
 {
-	msg.fromId = link.from();
-	msg.toId = link.to();
+	msg.from_id = link.from();
+	msg.to_id = link.to();
 	msg.type = link.type();
 	if(link.infMatrix().type() == CV_64FC1 && link.infMatrix().cols == 6 && link.infMatrix().rows == 6)
 	{
@@ -575,12 +586,12 @@ void linkToROS(const rtabmap::Link & link, rtabmap_ros::Link & msg)
 	transformToGeometryMsg(link.transform(), msg.transform);
 }
 
-cv::KeyPoint keypointFromROS(const rtabmap_ros::KeyPoint & msg)
+cv::KeyPoint keypointFromROS(const rtabmap_ros::msg::KeyPoint & msg)
 {
 	return cv::KeyPoint(msg.pt.x, msg.pt.y, msg.size, msg.angle, msg.response, msg.octave, msg.class_id);
 }
 
-void keypointToROS(const cv::KeyPoint & kpt, rtabmap_ros::KeyPoint & msg)
+void keypointToROS(const cv::KeyPoint & kpt, rtabmap_ros::msg::KeyPoint & msg)
 {
 	msg.angle = kpt.angle;
 	msg.class_id = kpt.class_id;
@@ -591,7 +602,7 @@ void keypointToROS(const cv::KeyPoint & kpt, rtabmap_ros::KeyPoint & msg)
 	msg.size = kpt.size;
 }
 
-std::vector<cv::KeyPoint> keypointsFromROS(const std::vector<rtabmap_ros::KeyPoint> & msg)
+std::vector<cv::KeyPoint> keypointsFromROS(const std::vector<rtabmap_ros::msg::KeyPoint> & msg)
 {
 	std::vector<cv::KeyPoint> v(msg.size());
 	for(unsigned int i=0; i<msg.size(); ++i)
@@ -601,7 +612,7 @@ std::vector<cv::KeyPoint> keypointsFromROS(const std::vector<rtabmap_ros::KeyPoi
 	return v;
 }
 
-void keypointsFromROS(const std::vector<rtabmap_ros::KeyPoint> & msg, std::vector<cv::KeyPoint> & kpts, int xShift)
+void keypointsFromROS(const std::vector<rtabmap_ros::msg::KeyPoint> & msg, std::vector<cv::KeyPoint> & kpts, int xShift)
 {
 	size_t outCurrentIndex = kpts.size();
 	kpts.resize(kpts.size()+msg.size());
@@ -612,7 +623,7 @@ void keypointsFromROS(const std::vector<rtabmap_ros::KeyPoint> & msg, std::vecto
 	}
 }
 
-void keypointsToROS(const std::vector<cv::KeyPoint> & kpts, std::vector<rtabmap_ros::KeyPoint> & msg)
+void keypointsToROS(const std::vector<cv::KeyPoint> & kpts, std::vector<rtabmap_ros::msg::KeyPoint> & msg)
 {
 	msg.resize(kpts.size());
 	for(unsigned int i=0; i<msg.size(); ++i)
@@ -621,19 +632,19 @@ void keypointsToROS(const std::vector<cv::KeyPoint> & kpts, std::vector<rtabmap_
 	}
 }
 
-rtabmap::GlobalDescriptor globalDescriptorFromROS(const rtabmap_ros::GlobalDescriptor & msg)
+rtabmap::GlobalDescriptor globalDescriptorFromROS(const rtabmap_ros::msg::GlobalDescriptor & msg)
 {
 	return rtabmap::GlobalDescriptor(msg.type, rtabmap::uncompressData(msg.data), rtabmap::uncompressData(msg.info));
 }
 
-void globalDescriptorToROS(const rtabmap::GlobalDescriptor & desc, rtabmap_ros::GlobalDescriptor & msg)
+void globalDescriptorToROS(const rtabmap::GlobalDescriptor & desc, rtabmap_ros::msg::GlobalDescriptor & msg)
 {
 	msg.type = desc.type();
 	msg.info = rtabmap::compressData(desc.info());
 	msg.data = rtabmap::compressData(desc.data());
 }
 
-std::vector<rtabmap::GlobalDescriptor> globalDescriptorsFromROS(const std::vector<rtabmap_ros::GlobalDescriptor> & msg)
+std::vector<rtabmap::GlobalDescriptor> globalDescriptorsFromROS(const std::vector<rtabmap_ros::msg::GlobalDescriptor> & msg)
 {
 	if(!msg.empty())
 	{
@@ -647,7 +658,7 @@ std::vector<rtabmap::GlobalDescriptor> globalDescriptorsFromROS(const std::vecto
 	return std::vector<rtabmap::GlobalDescriptor>();
 }
 
-void globalDescriptorsToROS(const std::vector<rtabmap::GlobalDescriptor> & desc, std::vector<rtabmap_ros::GlobalDescriptor> & msg)
+void globalDescriptorsToROS(const std::vector<rtabmap::GlobalDescriptor> & desc, std::vector<rtabmap_ros::msg::GlobalDescriptor> & msg)
 {
 	msg.clear();
 	if(!desc.empty())
@@ -660,19 +671,19 @@ void globalDescriptorsToROS(const std::vector<rtabmap::GlobalDescriptor> & desc,
 	}
 }
 
-rtabmap::EnvSensor envSensorFromROS(const rtabmap_ros::EnvSensor & msg)
+rtabmap::EnvSensor envSensorFromROS(const rtabmap_ros::msg::EnvSensor & msg)
 {
 	return rtabmap::EnvSensor((rtabmap::EnvSensor::Type)msg.type, msg.value, timestampFromROS(msg.header.stamp));
 }
 
-void envSensorToROS(const rtabmap::EnvSensor & sensor, rtabmap_ros::EnvSensor & msg)
+void envSensorToROS(const rtabmap::EnvSensor & sensor, rtabmap_ros::msg::EnvSensor & msg)
 {
 	msg.type = sensor.type();
 	msg.value = sensor.value();
-	msg.header.stamp = ros::Time(sensor.stamp());
+	msg.header.stamp = timestampToROS(sensor.stamp());
 }
 
-rtabmap::EnvSensors envSensorsFromROS(const std::vector<rtabmap_ros::EnvSensor> & msg)
+rtabmap::EnvSensors envSensorsFromROS(const std::vector<rtabmap_ros::msg::EnvSensor> & msg)
 {
 	rtabmap::EnvSensors v;
 	if(!msg.empty())
@@ -686,7 +697,7 @@ rtabmap::EnvSensors envSensorsFromROS(const std::vector<rtabmap_ros::EnvSensor> 
 	return v;
 }
 
-void envSensorsToROS(const rtabmap::EnvSensors & sensors, std::vector<rtabmap_ros::EnvSensor> & msg)
+void envSensorsToROS(const rtabmap::EnvSensors & sensors, std::vector<rtabmap_ros::msg::EnvSensor> & msg)
 {
 	msg.clear();
 	if(!sensors.empty())
@@ -700,18 +711,18 @@ void envSensorsToROS(const rtabmap::EnvSensors & sensors, std::vector<rtabmap_ro
 	}
 }
 
-cv::Point2f point2fFromROS(const rtabmap_ros::Point2f & msg)
+cv::Point2f point2fFromROS(const rtabmap_ros::msg::Point2f & msg)
 {
 	return cv::Point2f(msg.x, msg.y);
 }
 
-void point2fToROS(const cv::Point2f & kpt, rtabmap_ros::Point2f & msg)
+void point2fToROS(const cv::Point2f & kpt, rtabmap_ros::msg::Point2f & msg)
 {
 	msg.x = kpt.x;
 	msg.y = kpt.y;
 }
 
-std::vector<cv::Point2f> points2fFromROS(const std::vector<rtabmap_ros::Point2f> & msg)
+std::vector<cv::Point2f> points2fFromROS(const std::vector<rtabmap_ros::msg::Point2f> & msg)
 {
 	std::vector<cv::Point2f> v(msg.size());
 	for(unsigned int i=0; i<msg.size(); ++i)
@@ -721,7 +732,7 @@ std::vector<cv::Point2f> points2fFromROS(const std::vector<rtabmap_ros::Point2f>
 	return v;
 }
 
-void points2fToROS(const std::vector<cv::Point2f> & kpts, std::vector<rtabmap_ros::Point2f> & msg)
+void points2fToROS(const std::vector<cv::Point2f> & kpts, std::vector<rtabmap_ros::msg::Point2f> & msg)
 {
 	msg.resize(kpts.size());
 	for(unsigned int i=0; i<msg.size(); ++i)
@@ -730,19 +741,19 @@ void points2fToROS(const std::vector<cv::Point2f> & kpts, std::vector<rtabmap_ro
 	}
 }
 
-cv::Point3f point3fFromROS(const rtabmap_ros::Point3f & msg)
+cv::Point3f point3fFromROS(const rtabmap_ros::msg::Point3f & msg)
 {
 	return cv::Point3f(msg.x, msg.y, msg.z);
 }
 
-void point3fToROS(const cv::Point3f & pt, rtabmap_ros::Point3f & msg)
+void point3fToROS(const cv::Point3f & pt, rtabmap_ros::msg::Point3f & msg)
 {
 	msg.x = pt.x;
 	msg.y = pt.y;
 	msg.z = pt.z;
 }
 
-std::vector<cv::Point3f> points3fFromROS(const std::vector<rtabmap_ros::Point3f> & msg, const rtabmap::Transform & transform)
+std::vector<cv::Point3f> points3fFromROS(const std::vector<rtabmap_ros::msg::Point3f> & msg, const rtabmap::Transform & transform)
 {
 	bool transformPoints = !transform.isNull() && !transform.isIdentity();
 	std::vector<cv::Point3f> v(msg.size());
@@ -757,7 +768,7 @@ std::vector<cv::Point3f> points3fFromROS(const std::vector<rtabmap_ros::Point3f>
 	return v;
 }
 
-void points3fFromROS(const std::vector<rtabmap_ros::Point3f> & msg, std::vector<cv::Point3f> & points3, const rtabmap::Transform & transform)
+void points3fFromROS(const std::vector<rtabmap_ros::msg::Point3f> & msg, std::vector<cv::Point3f> & points3, const rtabmap::Transform & transform)
 {
 	size_t currentIndex = points3.size();
 	points3.resize(points3.size()+msg.size());
@@ -772,7 +783,7 @@ void points3fFromROS(const std::vector<rtabmap_ros::Point3f> & msg, std::vector<
 	}
 }
 
-void points3fToROS(const std::vector<cv::Point3f> & pts, std::vector<rtabmap_ros::Point3f> & msg, const rtabmap::Transform & transform)
+void points3fToROS(const std::vector<cv::Point3f> & pts, std::vector<rtabmap_ros::msg::Point3f> & msg, const rtabmap::Transform & transform)
 {
 	msg.resize(pts.size());
 	bool transformPoints = !transform.isNull() && !transform.isIdentity();
@@ -791,37 +802,37 @@ void points3fToROS(const std::vector<cv::Point3f> & pts, std::vector<rtabmap_ros
 }
 
 rtabmap::CameraModel cameraModelFromROS(
-		const sensor_msgs::CameraInfo & camInfo,
+		const sensor_msgs::msg::CameraInfo & camInfo,
 		const rtabmap::Transform & localTransform)
 {
 	cv:: Mat K;
-	UASSERT(camInfo.K.empty() || camInfo.K.size() == 9);
-	if(!camInfo.K.empty())
+	UASSERT(camInfo.k.empty() || camInfo.k.size() == 9);
+	if(!camInfo.k.empty())
 	{
 		K = cv::Mat(3, 3, CV_64FC1);
-		memcpy(K.data, camInfo.K.elems, 9*sizeof(double));
+		memcpy(K.data, camInfo.k.data(), 9*sizeof(double));
 	}
 
 	cv::Mat D;
-	if(camInfo.D.size())
+	if(camInfo.d.size())
 	{
-		if(camInfo.D.size()>=4 &&
+		if(camInfo.d.size()>=4 &&
 		   (uStrContains(camInfo.distortion_model, "fisheye") ||
 		    uStrContains(camInfo.distortion_model, "equidistant") ||
 		    uStrContains(camInfo.distortion_model, "Kannala Brandt4")))
 		{
 			D = cv::Mat::zeros(1, 6, CV_64FC1);
-			D.at<double>(0,0) = camInfo.D[0];
-			D.at<double>(0,1) = camInfo.D[1];
-			D.at<double>(0,4) = camInfo.D[2];
-			D.at<double>(0,5) = camInfo.D[3];
+			D.at<double>(0,0) = camInfo.d[0];
+			D.at<double>(0,1) = camInfo.d[1];
+			D.at<double>(0,4) = camInfo.d[2];
+			D.at<double>(0,5) = camInfo.d[3];
 		}
-		else if(camInfo.D.size()>8)
+		else if(camInfo.d.size()>8)
 		{
 			bool zerosAfter8 = true;
-			for(size_t i=8; i<camInfo.D.size() && zerosAfter8; ++i)
+			for(size_t i=8; i<camInfo.d.size() && zerosAfter8; ++i)
 			{
-				if(camInfo.D[i] != 0.0)
+				if(camInfo.d[i] != 0.0)
 				{
 					zerosAfter8 = false;
 				}
@@ -829,33 +840,33 @@ rtabmap::CameraModel cameraModelFromROS(
 			static bool warned = false;
 			if(!zerosAfter8 && !warned)
 			{
-				ROS_WARN("Camera info conversion: Distortion model is larger than 8, coefficients after 8 are ignored. This message is only shown once.");
+				UWARN("Camera info conversion: Distortion model is larger than 8, coefficients after 8 are ignored. This message is only shown once.");
 				warned = true;
 			}
 			D = cv::Mat(1, 8, CV_64FC1);
-			memcpy(D.data, camInfo.D.data(), D.cols*sizeof(double));
+			memcpy(D.data, camInfo.d.data(), D.cols*sizeof(double));
 		}
 		else
 		{
-			D = cv::Mat(1, camInfo.D.size(), CV_64FC1);
-			memcpy(D.data, camInfo.D.data(), D.cols*sizeof(double));
+			D = cv::Mat(1, camInfo.d.size(), CV_64FC1);
+			memcpy(D.data, camInfo.d.data(), D.cols*sizeof(double));
 		}
 	}
 
 	cv:: Mat R;
-	UASSERT(camInfo.R.empty() || camInfo.R.size() == 9);
-	if(!camInfo.R.empty())
+	UASSERT(camInfo.r.empty() || camInfo.r.size() == 9);
+	if(!camInfo.r.empty())
 	{
 		R = cv::Mat(3, 3, CV_64FC1);
-		memcpy(R.data, camInfo.R.elems, 9*sizeof(double));
+		memcpy(R.data, camInfo.r.data(), 9*sizeof(double));
 	}
 
 	cv:: Mat P;
-	UASSERT(camInfo.P.empty() || camInfo.P.size() == 12);
-	if(!camInfo.P.empty())
+	UASSERT(camInfo.p.empty() || camInfo.p.size() == 12);
+	if(!camInfo.p.empty())
 	{
 		P = cv::Mat(3, 4, CV_64FC1);
-		memcpy(P.data, camInfo.P.elems, 12*sizeof(double));
+		memcpy(P.data, camInfo.p.data(), 12*sizeof(double));
 	}
 
 	return rtabmap::CameraModel(
@@ -866,32 +877,32 @@ rtabmap::CameraModel cameraModelFromROS(
 }
 void cameraModelToROS(
 		const rtabmap::CameraModel & model,
-		sensor_msgs::CameraInfo & camInfo)
+		sensor_msgs::msg::CameraInfo & camInfo)
 {
 	UASSERT(model.K_raw().empty() || model.K_raw().total() == 9);
 	if(model.K_raw().empty())
 	{
-		memset(camInfo.K.elems, 0.0, 9*sizeof(double));
+		memset(camInfo.k.data(), 0.0, 9*sizeof(double));
 	}
 	else
 	{
-		memcpy(camInfo.K.elems, model.K_raw().data, 9*sizeof(double));
+		memcpy(camInfo.k.data(), model.K_raw().data, 9*sizeof(double));
 	}
 
 	if(model.D_raw().total() == 6)
 	{
-		camInfo.D = std::vector<double>(4);
-		camInfo.D[0] = model.D_raw().at<double>(0,0);
-		camInfo.D[1] = model.D_raw().at<double>(0,1);
-		camInfo.D[2] = model.D_raw().at<double>(0,4);
-		camInfo.D[3] = model.D_raw().at<double>(0,5);
+		camInfo.d = std::vector<double>(4);
+		camInfo.d[0] = model.D_raw().at<double>(0,0);
+		camInfo.d[1] = model.D_raw().at<double>(0,1);
+		camInfo.d[2] = model.D_raw().at<double>(0,4);
+		camInfo.d[3] = model.D_raw().at<double>(0,5);
 		camInfo.distortion_model = "equidistant"; // fisheye
 	}
 	else
 	{
-		camInfo.D = std::vector<double>(model.D_raw().cols);
-		memcpy(camInfo.D.data(), model.D_raw().data, model.D_raw().cols*sizeof(double));
-		if(camInfo.D.size() > 5)
+		camInfo.d = std::vector<double>(model.D_raw().cols);
+		memcpy(camInfo.d.data(), model.D_raw().data, model.D_raw().cols*sizeof(double));
+		if(camInfo.d.size() > 5)
 		{
 			camInfo.distortion_model = "rational_polynomial";
 		}
@@ -904,21 +915,21 @@ void cameraModelToROS(
 	UASSERT(model.R().empty() || model.R().total() == 9);
 	if(model.R().empty())
 	{
-		memset(camInfo.R.elems, 0.0, 9*sizeof(double));
+		memset(camInfo.r.data(), 0.0, 9*sizeof(double));
 	}
 	else
 	{
-		memcpy(camInfo.R.elems, model.R().data, 9*sizeof(double));
+		memcpy(camInfo.r.data(), model.R().data, 9*sizeof(double));
 	}
 
 	UASSERT(model.P().empty() || model.P().total() == 12);
 	if(model.P().empty())
 	{
-		memset(camInfo.P.elems, 0.0, 12*sizeof(double));
+		memset(camInfo.p.data(), 0.0, 12*sizeof(double));
 	}
 	else
 	{
-		memcpy(camInfo.P.elems, model.P().data, 12*sizeof(double));
+		memcpy(camInfo.p.data(), model.P().data, 12*sizeof(double));
 	}
 
 	camInfo.binning_x = 1;
@@ -930,8 +941,8 @@ void cameraModelToROS(
 	camInfo.height = model.imageHeight();
 }
 rtabmap::StereoCameraModel stereoCameraModelFromROS(
-		const sensor_msgs::CameraInfo & leftCamInfo,
-		const sensor_msgs::CameraInfo & rightCamInfo,
+		const sensor_msgs::msg::CameraInfo & leftCamInfo,
+		const sensor_msgs::msg::CameraInfo & rightCamInfo,
 		const rtabmap::Transform & localTransform,
 		const rtabmap::Transform & stereoTransform)
 {
@@ -942,10 +953,10 @@ rtabmap::StereoCameraModel stereoCameraModelFromROS(
 			stereoTransform);
 }
 rtabmap::StereoCameraModel stereoCameraModelFromROS(
-		const sensor_msgs::CameraInfo & leftCamInfo,
-		const sensor_msgs::CameraInfo & rightCamInfo,
+		const sensor_msgs::msg::CameraInfo & leftCamInfo,
+		const sensor_msgs::msg::CameraInfo & rightCamInfo,
 		const std::string & frameId,
-		tf::TransformListener & listener,
+		tf2_ros::Buffer & listener,
 		double waitForTransform)
 {
 	rtabmap::Transform localTransform = getTransform(
@@ -973,14 +984,14 @@ rtabmap::StereoCameraModel stereoCameraModelFromROS(
 }
 
 void mapDataFromROS(
-		const rtabmap_ros::MapData & msg,
+		const rtabmap_ros::msg::MapData & msg,
 		std::map<int, rtabmap::Transform> & poses,
 		std::multimap<int, rtabmap::Link> & links,
 		std::map<int, rtabmap::Signature> & signatures,
-		rtabmap::Transform & mapToOdom)
+		rtabmap::Transform & map_to_odom)
 {
 	//optimized graph
-	mapGraphFromROS(msg.graph, poses, links, mapToOdom);
+	mapGraphFromROS(msg.graph, poses, links, map_to_odom);
 
 	//Data
 	for(unsigned int i=0; i<msg.nodes.size(); ++i)
@@ -992,11 +1003,11 @@ void mapDataToROS(
 		const std::map<int, rtabmap::Transform> & poses,
 		const std::multimap<int, rtabmap::Link> & links,
 		const std::map<int, rtabmap::Signature> & signatures,
-		const rtabmap::Transform & mapToOdom,
-		rtabmap_ros::MapData & msg)
+		const rtabmap::Transform & map_to_odom,
+		rtabmap_ros::msg::MapData & msg)
 {
 	//Optimized graph
-	mapGraphToROS(poses, links, mapToOdom, msg.graph);
+	mapGraphToROS(poses, links, map_to_odom, msg.graph);
 
 	//Data
 	msg.nodes.resize(signatures.size());
@@ -1010,39 +1021,39 @@ void mapDataToROS(
 }
 
 void mapGraphFromROS(
-		const rtabmap_ros::MapGraph & msg,
+		const rtabmap_ros::msg::MapGraph & msg,
 		std::map<int, rtabmap::Transform> & poses,
 		std::multimap<int, rtabmap::Link> & links,
-		rtabmap::Transform & mapToOdom)
+		rtabmap::Transform & map_to_odom)
 {
 	//optimized graph
-	UASSERT(msg.posesId.size() == msg.poses.size());
-	for(unsigned int i=0; i<msg.posesId.size(); ++i)
+	UASSERT(msg.poses_id.size() == msg.poses.size());
+	for(unsigned int i=0; i<msg.poses_id.size(); ++i)
 	{
-		poses.insert(std::make_pair(msg.posesId[i], rtabmap_ros::transformFromPoseMsg(msg.poses[i])));
+		poses.insert(std::make_pair(msg.poses_id[i], rtabmap_ros::transformFromPoseMsg(msg.poses[i])));
 	}
 	for(unsigned int i=0; i<msg.links.size(); ++i)
 	{
 		rtabmap::Transform t = rtabmap_ros::transformFromGeometryMsg(msg.links[i].transform);
-		links.insert(std::make_pair(msg.links[i].fromId, linkFromROS(msg.links[i])));
+		links.insert(std::make_pair(msg.links[i].from_id, linkFromROS(msg.links[i])));
 	}
-	mapToOdom = transformFromGeometryMsg(msg.mapToOdom);
+	map_to_odom = transformFromGeometryMsg(msg.map_to_odom);
 }
 void mapGraphToROS(
 		const std::map<int, rtabmap::Transform> & poses,
 		const std::multimap<int, rtabmap::Link> & links,
-		const rtabmap::Transform & mapToOdom,
-		rtabmap_ros::MapGraph & msg)
+		const rtabmap::Transform & map_to_odom,
+		rtabmap_ros::msg::MapGraph & msg)
 {
 	//Optimized graph
-	msg.posesId.resize(poses.size());
+	msg.poses_id.resize(poses.size());
 	msg.poses.resize(poses.size());
 	int index = 0;
 	for(std::map<int, rtabmap::Transform>::const_iterator iter = poses.begin();
 		iter != poses.end();
 		++iter)
 	{
-		msg.posesId[index] = iter->first;
+		msg.poses_id[index] = iter->first;
 		transformToPoseMsg(iter->second, msg.poses[index]);
 		++index;
 	}
@@ -1056,55 +1067,56 @@ void mapGraphToROS(
 		linkToROS(iter->second, msg.links[index++]);
 	}
 
-	transformToGeometryMsg(mapToOdom, msg.mapToOdom);
+	transformToGeometryMsg(map_to_odom, msg.map_to_odom);
 }
 
-rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
+rtabmap::Signature nodeDataFromROS(const rtabmap_ros::msg::NodeData & msg)
 {
 	//Features stuff...
 	std::multimap<int, int> words;
 	std::vector<cv::KeyPoint> wordsKpts;
 	std::vector<cv::Point3f> words3D;
-	cv::Mat wordsDescriptors = rtabmap::uncompressData(msg.wordDescriptors);
 
-	if(msg.wordIdKeys.size() != msg.wordIdValues.size())
+	cv::Mat wordsDescriptors = rtabmap::uncompressData(msg.word_descriptors);
+
+	if(msg.word_id_keys.size() != msg.word_id_values.size())
 	{
-		ROS_ERROR("Word ID keys and values should be the same size (%d, %d)!", (int)msg.wordIdKeys.size(), (int)msg.wordIdValues.size());
+		UERROR("Word ID keys and values should be the same size (%d, %d)!", (int)msg.word_id_keys.size(), (int)msg.word_id_values.size());
 	}
-	if(!msg.wordKpts.empty() && msg.wordKpts.size() != msg.wordIdKeys.size())
+	if(!msg.word_kpts.empty() && msg.word_kpts.size() != msg.word_id_keys.size())
 	{
-		ROS_ERROR("Word IDs and 2D keypoints should be the same size (%d, %d)!", (int)msg.wordIdKeys.size(), (int)msg.wordKpts.size());
+		UERROR("Word IDs and 2D keypoints should be the same size (%d, %d)!", (int)msg.word_id_keys.size(), (int)msg.word_kpts.size());
 	}
-	if(!msg.wordPts.empty() && msg.wordPts.size() != msg.wordIdKeys.size())
+	if(!msg.word_pts.empty() && msg.word_pts.size() != msg.word_id_keys.size())
 	{
-		ROS_ERROR("Word IDs and 3D points should be the same size (%d, %d)!", (int)msg.wordIdKeys.size(), (int)msg.wordPts.size());
+		UERROR("Word IDs and 3D points should be the same size (%d, %d)!", (int)msg.word_id_keys.size(), (int)msg.word_pts.size());
 	}
-	if(!wordsDescriptors.empty() && wordsDescriptors.rows != (int)msg.wordIdKeys.size())
+	if(!wordsDescriptors.empty() && wordsDescriptors.rows != (int)msg.word_id_keys.size())
 	{
-		ROS_ERROR("Word IDs and descriptors should be the same size (%d, %d)!", (int)msg.wordIdKeys.size(), wordsDescriptors.rows);
+		UERROR("Word IDs and descriptors should be the same size (%d, %d)!", (int)msg.word_id_keys.size(), wordsDescriptors.rows);
 		wordsDescriptors = cv::Mat();
 	}
 
-	if(msg.wordIdKeys.size() == msg.wordIdValues.size())
+	if(msg.word_id_keys.size() == msg.word_id_values.size())
 	{
-		for(unsigned int i=0; i<msg.wordIdKeys.size(); ++i)
+		for(unsigned int i=0; i<msg.word_id_keys.size(); ++i)
 		{
-			words.insert(std::make_pair(msg.wordIdKeys.at(i), msg.wordIdValues.at(i))); // ID to index
-			if(msg.wordIdKeys.size() == msg.wordKpts.size())
+			words.insert(std::make_pair(msg.word_id_keys.at(i), msg.word_id_values.at(i))); // ID to index
+			if(msg.word_id_keys.size() == msg.word_kpts.size())
 			{
 				if(wordsKpts.empty())
 				{
-					wordsKpts.reserve(msg.wordKpts.size());
+					wordsKpts.reserve(msg.word_kpts.size());
 				}
-				wordsKpts.push_back(keypointFromROS(msg.wordKpts.at(i)));
+				wordsKpts.push_back(keypointFromROS(msg.word_kpts.at(i)));
 			}
-			if(msg.wordIdKeys.size() == msg.wordPts.size())
+			if(msg.word_id_keys.size() == msg.word_pts.size())
 			{
 				if(words3D.empty())
 				{
-					words3D.reserve(msg.wordPts.size());
+					words3D.reserve(msg.word_pts.size());
 				}
-				words3D.push_back(point3fFromROS(msg.wordPts[i]));
+				words3D.push_back(point3fFromROS(msg.word_pts[i]));
 			}
 		}
 	}
@@ -1120,7 +1132,7 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 		   msg.cy.size() == msg.baseline.size() &&
 		   msg.width.size() == msg.baseline.size() &&
 		   msg.height.size() == msg.baseline.size() &&
-		   msg.localTransform.size() == msg.baseline.size())
+		   msg.local_transform.size() == msg.baseline.size())
 		{
 			for(unsigned int i=0; i<msg.fx.size(); ++i)
 			{
@@ -1130,7 +1142,7 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 						msg.cx[i],
 						msg.cy[i],
 						msg.baseline[i],
-						transformFromGeometryMsg(msg.localTransform[i]),
+						transformFromGeometryMsg(msg.local_transform[i]),
 						cv::Size(msg.width[i], msg.height[i])));
 			}
 		}
@@ -1142,7 +1154,7 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 		   msg.fx.size() == msg.fy.size() &&
 		   msg.fx.size() == msg.cx.size() &&
 		   msg.fx.size() == msg.cy.size() &&
-		   msg.fx.size() == msg.localTransform.size())
+		   msg.fx.size() == msg.local_transform.size())
 		{
 			for(unsigned int i=0; i<msg.fx.size(); ++i)
 			{
@@ -1157,7 +1169,7 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 							msg.fy[i],
 							msg.cx[i],
 							msg.cy[i],
-							transformFromGeometryMsg(msg.localTransform[i]),
+							transformFromGeometryMsg(msg.local_transform[i]),
 							0.0,
 							cv::Size(msg.width[i], msg.height[i])));
 				}
@@ -1167,39 +1179,39 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 
 	rtabmap::Signature s(
 			msg.id,
-			msg.mapId,
+			msg.map_id,
 			msg.weight,
 			msg.stamp,
 			msg.label,
 			transformFromPoseMsg(msg.pose),
-			transformFromPoseMsg(msg.groundTruthPose),
+			transformFromPoseMsg(msg.ground_truth_pose),
 			stereoModels.size()?
 				rtabmap::SensorData(
-					rtabmap::LaserScan(compressedMatFromBytes(msg.laserScan),
-							msg.laserScanMaxPts,
-							msg.laserScanMaxRange,
-							(rtabmap::LaserScan::Format)msg.laserScanFormat,
-							transformFromGeometryMsg(msg.laserScanLocalTransform)),
+					rtabmap::LaserScan(compressedMatFromBytes(msg.laser_scan),
+							msg.laser_scan_max_pts,
+							msg.laser_scan_max_range,
+							(rtabmap::LaserScan::Format)msg.laser_scan_format,
+							transformFromGeometryMsg(msg.laser_scan_local_transform)),
 					compressedMatFromBytes(msg.image),
 					compressedMatFromBytes(msg.depth),
 					stereoModels,
 					msg.id,
 					msg.stamp,
-					compressedMatFromBytes(msg.userData)):
+					compressedMatFromBytes(msg.user_data)):
 				rtabmap::SensorData(
-					rtabmap::LaserScan(compressedMatFromBytes(msg.laserScan),
-							msg.laserScanMaxPts,
-							msg.laserScanMaxRange,
-							(rtabmap::LaserScan::Format)msg.laserScanFormat,
-							transformFromGeometryMsg(msg.laserScanLocalTransform)),
+					rtabmap::LaserScan(compressedMatFromBytes(msg.laser_scan),
+							msg.laser_scan_max_pts,
+							msg.laser_scan_max_range,
+							(rtabmap::LaserScan::Format)msg.laser_scan_format,
+							transformFromGeometryMsg(msg.laser_scan_local_transform)),
 					compressedMatFromBytes(msg.image),
 					compressedMatFromBytes(msg.depth),
 					models,
 					msg.id,
 					msg.stamp,
-					compressedMatFromBytes(msg.userData)));
+					compressedMatFromBytes(msg.user_data)));
 	s.setWords(words, wordsKpts, words3D, wordsDescriptors);
-	s.sensorData().setGlobalDescriptors(rtabmap_ros::globalDescriptorsFromROS(msg.globalDescriptors));
+	s.sensorData().setGlobalDescriptors(rtabmap_ros::globalDescriptorsFromROS(msg.global_descriptors));
 	s.sensorData().setEnvSensors(rtabmap_ros::envSensorsFromROS(msg.env_sensors));
 	s.sensorData().setOccupancyGrid(
 			compressedMatFromBytes(msg.grid_ground),
@@ -1210,16 +1222,16 @@ rtabmap::Signature nodeDataFromROS(const rtabmap_ros::NodeData & msg)
 	s.sensorData().setGPS(rtabmap::GPS(msg.gps.stamp, msg.gps.longitude, msg.gps.latitude, msg.gps.altitude, msg.gps.error, msg.gps.bearing));
 	return s;
 }
-void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData & msg)
+void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::msg::NodeData & msg)
 {
 	// add data
 	msg.id = signature.id();
-	msg.mapId = signature.mapId();
+	msg.map_id = signature.mapId();
 	msg.weight = signature.getWeight();
 	msg.stamp = signature.getStamp();
 	msg.label = signature.getLabel();
 	transformToPoseMsg(signature.getPose(), msg.pose);
-	transformToPoseMsg(signature.getGroundTruthPose(), msg.groundTruthPose);
+	transformToPoseMsg(signature.getGroundTruthPose(), msg.ground_truth_pose);
 	msg.gps.stamp = signature.sensorData().gps().stamp();
 	msg.gps.longitude = signature.sensorData().gps().longitude();
 	msg.gps.latitude = signature.sensorData().gps().latitude();
@@ -1228,17 +1240,17 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 	msg.gps.bearing = signature.sensorData().gps().bearing();
 	compressedMatToBytes(signature.sensorData().imageCompressed(), msg.image);
 	compressedMatToBytes(signature.sensorData().depthOrRightCompressed(), msg.depth);
-	compressedMatToBytes(signature.sensorData().laserScanCompressed().data(), msg.laserScan);
-	compressedMatToBytes(signature.sensorData().userDataCompressed(), msg.userData);
+	compressedMatToBytes(signature.sensorData().laserScanCompressed().data(), msg.laser_scan);
+	compressedMatToBytes(signature.sensorData().userDataCompressed(), msg.user_data);
 	compressedMatToBytes(signature.sensorData().gridGroundCellsCompressed(), msg.grid_ground);
 	compressedMatToBytes(signature.sensorData().gridObstacleCellsCompressed(), msg.grid_obstacles);
 	compressedMatToBytes(signature.sensorData().gridEmptyCellsCompressed(), msg.grid_empty_cells);
 	point3fToROS(signature.sensorData().gridViewPoint(), msg.grid_view_point);
 	msg.grid_cell_size = signature.sensorData().gridCellSize();
-	msg.laserScanMaxPts = signature.sensorData().laserScanCompressed().maxPoints();
-	msg.laserScanMaxRange = signature.sensorData().laserScanCompressed().rangeMax();
-	msg.laserScanFormat = signature.sensorData().laserScanCompressed().format();
-	transformToGeometryMsg(signature.sensorData().laserScanCompressed().localTransform(), msg.laserScanLocalTransform);
+	msg.laser_scan_max_pts = signature.sensorData().laserScanCompressed().maxPoints();
+	msg.laser_scan_max_range = signature.sensorData().laserScanCompressed().rangeMax();
+	msg.laser_scan_format = signature.sensorData().laserScanCompressed().format();
+	transformToGeometryMsg(signature.sensorData().laserScanCompressed().localTransform(), msg.laser_scan_local_transform);
 	if(signature.sensorData().cameraModels().size())
 	{
 		msg.fx.resize(signature.sensorData().cameraModels().size());
@@ -1247,7 +1259,7 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 		msg.cy.resize(signature.sensorData().cameraModels().size());
 		msg.width.resize(signature.sensorData().cameraModels().size());
 		msg.height.resize(signature.sensorData().cameraModels().size());
-		msg.localTransform.resize(signature.sensorData().cameraModels().size());
+		msg.local_transform.resize(signature.sensorData().cameraModels().size());
 		for(unsigned int i=0; i<signature.sensorData().cameraModels().size(); ++i)
 		{
 			msg.fx[i] = signature.sensorData().cameraModels()[i].fx();
@@ -1256,7 +1268,7 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 			msg.cy[i] = signature.sensorData().cameraModels()[i].cy();
 			msg.width[i] = signature.sensorData().cameraModels()[i].imageWidth();
 			msg.height[i] = signature.sensorData().cameraModels()[i].imageHeight();
-			transformToGeometryMsg(signature.sensorData().cameraModels()[i].localTransform(), msg.localTransform[i]);
+			transformToGeometryMsg(signature.sensorData().cameraModels()[i].localTransform(), msg.local_transform[i]);
 		}
 	}
 	else if(signature.sensorData().stereoCameraModels().size())
@@ -1268,7 +1280,7 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 		msg.width.resize(signature.sensorData().stereoCameraModels().size());
 		msg.height.resize(signature.sensorData().stereoCameraModels().size());
 		msg.baseline.resize(signature.sensorData().stereoCameraModels().size());
-		msg.localTransform.resize(signature.sensorData().stereoCameraModels().size());
+		msg.local_transform.resize(signature.sensorData().stereoCameraModels().size());
 		for(unsigned int i=0; i<signature.sensorData().stereoCameraModels().size(); ++i)
 		{
 			msg.fx[i] = signature.sensorData().stereoCameraModels()[i].left().fx();
@@ -1278,7 +1290,7 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 			msg.width[i] = signature.sensorData().stereoCameraModels()[i].left().imageWidth();
 			msg.height[i] = signature.sensorData().stereoCameraModels()[i].left().imageHeight();
 			msg.baseline[i] = signature.sensorData().stereoCameraModels()[i].baseline();
-			transformToGeometryMsg(signature.sensorData().stereoCameraModels()[i].left().localTransform(), msg.localTransform[i]);
+			transformToGeometryMsg(signature.sensorData().stereoCameraModels()[i].left().localTransform(), msg.local_transform[i]);
 		}
 	}
 
@@ -1286,7 +1298,7 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 	if(!signature.getWordsKpts().empty() &&
 		signature.getWords().size() != signature.getWordsKpts().size())
 	{
-		ROS_ERROR("Word IDs and 2D keypoints must have the same size (%d vs %d)!",
+		UERROR("Word IDs and 2D keypoints must have the same size (%d vs %d)!",
 				(int)signature.getWords().size(),
 				(int)signature.getWordsKpts().size());
 	}
@@ -1294,34 +1306,34 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 	if(!signature.getWords3().empty() &&
 	   signature.getWords().size() != signature.getWords3().size())
 	{
-		ROS_ERROR("Word IDs and 3D points must have the same size (%d vs %d)!",
+		UERROR("Word IDs and 3D points must have the same size (%d vs %d)!",
 				(int)signature.getWords().size(),
 				(int)signature.getWords3().size());
 	}
 	int i=0;
-	msg.wordIdKeys.resize(signature.getWords().size());
-	msg.wordIdValues.resize(signature.getWords().size());
+	msg.word_id_keys.resize(signature.getWords().size());
+	msg.word_id_values.resize(signature.getWords().size());
 	for(std::multimap<int, int>::const_iterator iter=signature.getWords().begin();
 		iter!=signature.getWords().end();
 		++iter)
 	{
-		msg.wordIdKeys.at(i) = iter->first;
-		msg.wordIdValues.at(i) = iter->second;
+		msg.word_id_keys.at(i) = iter->first;
+		msg.word_id_values.at(i) = iter->second;
 		if(signature.getWordsKpts().size() == signature.getWords().size())
 		{
-			if(msg.wordKpts.empty())
+			if(msg.word_kpts.empty())
 			{
-				msg.wordKpts.resize(signature.getWords().size());
+				msg.word_kpts.resize(signature.getWords().size());
 			}
-			keypointToROS(signature.getWordsKpts().at(i), msg.wordKpts.at(i));
+			keypointToROS(signature.getWordsKpts().at(i), msg.word_kpts.at(i));
 		}
 		if(signature.getWords3().size() == signature.getWords().size())
 		{
-			if(msg.wordPts.empty())
+			if(msg.word_pts.empty())
 			{
-				msg.wordPts.resize(signature.getWords().size());
+				msg.word_pts.resize(signature.getWords().size());
 			}
-			point3fToROS(signature.getWords3().at(i), msg.wordPts.at(i));
+			point3fToROS(signature.getWords3().at(i), msg.word_pts.at(i));
 		}
 		++i;
 	}
@@ -1330,42 +1342,42 @@ void nodeDataToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData &
 	{
 		if(signature.getWordsDescriptors().rows == (int)signature.getWords().size())
 		{
-			msg.wordDescriptors = rtabmap::compressData(signature.getWordsDescriptors());
+			msg.word_descriptors = rtabmap::compressData(signature.getWordsDescriptors());
 		}
 		else
 		{
-			ROS_ERROR("Word IDs and descriptors must have the same size (%d vs %d)!",
+			UERROR("Word IDs and descriptors must have the same size (%d vs %d)!",
 					(int)signature.getWords().size(),
 					signature.getWordsDescriptors().rows);
 		}
 	}
 
-	rtabmap_ros::globalDescriptorsToROS(signature.sensorData().globalDescriptors(), msg.globalDescriptors);
+	rtabmap_ros::globalDescriptorsToROS(signature.sensorData().globalDescriptors(), msg.global_descriptors);
 	rtabmap_ros::envSensorsToROS(signature.sensorData().envSensors(), msg.env_sensors);
 }
 
-rtabmap::Signature nodeInfoFromROS(const rtabmap_ros::NodeData & msg)
+rtabmap::Signature nodeInfoFromROS(const rtabmap_ros::msg::NodeData & msg)
 {
 	rtabmap::Signature s(
 			msg.id,
-			msg.mapId,
+			msg.map_id,
 			msg.weight,
 			msg.stamp,
 			msg.label,
 			transformFromPoseMsg(msg.pose),
-			transformFromPoseMsg(msg.groundTruthPose));
+			transformFromPoseMsg(msg.ground_truth_pose));
 	return s;
 }
-void nodeInfoToROS(const rtabmap::Signature & signature, rtabmap_ros::NodeData & msg)
+void nodeInfoToROS(const rtabmap::Signature & signature, rtabmap_ros::msg::NodeData & msg)
 {
 	// add data
 	msg.id = signature.id();
-	msg.mapId = signature.mapId();
+	msg.map_id = signature.mapId();
 	msg.weight = signature.getWeight();
 	msg.stamp = signature.getStamp();
 	msg.label = signature.getLabel();
 	transformToPoseMsg(signature.getPose(), msg.pose);
-	transformToPoseMsg(signature.getGroundTruthPose(), msg.groundTruthPose);
+	transformToPoseMsg(signature.getGroundTruthPose(), msg.ground_truth_pose);
 }
 
 std::map<std::string, float> odomInfoToStatistics(const rtabmap::OdometryInfo & info)
@@ -1385,7 +1397,7 @@ std::map<std::string, float> odomInfoToStatistics(const rtabmap::OdometryInfo & 
 	stats.insert(std::make_pair("Odometry/InliersRatio/", info.reg.inliers));
 	stats.insert(std::make_pair("Odometry/ICPInliersRatio/", info.reg.icpInliersRatio));
 	stats.insert(std::make_pair("Odometry/ICPRotation/rad", info.reg.icpRotation));
-	stats.insert(std::make_pair("Odometry/ICPTranslation/m", info.reg.icpTranslation));
+	stats.insert(std::make_pair("Odometry/icp_translation/m", info.reg.icpTranslation));
 	stats.insert(std::make_pair("Odometry/ICPStructuralComplexity/", info.reg.icpStructuralComplexity));
 	stats.insert(std::make_pair("Odometry/ICPStructuralDistribution/", info.reg.icpStructuralDistribution));
 	stats.insert(std::make_pair("Odometry/ICPCorrespondences/", info.reg.icpCorrespondences));
@@ -1457,177 +1469,177 @@ std::map<std::string, float> odomInfoToStatistics(const rtabmap::OdometryInfo & 
 	return stats;
 }
 
-rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::OdomInfo & msg, bool ignoreData)
+rtabmap::OdometryInfo odomInfoFromROS(const rtabmap_ros::msg::OdomInfo & msg, bool ignoreData)
 {
 	rtabmap::OdometryInfo info;
 	info.lost = msg.lost;
 	info.reg.matches = msg.matches;
 	info.reg.inliers = msg.inliers;
-	info.reg.icpInliersRatio = msg.icpInliersRatio;
-	info.reg.icpRotation = msg.icpRotation;
-	info.reg.icpTranslation = msg.icpTranslation;
-	info.reg.icpStructuralComplexity = msg.icpStructuralComplexity;
-	info.reg.icpStructuralDistribution = msg.icpStructuralDistribution;
-	info.reg.icpCorrespondences = msg.icpCorrespondences;
+	info.reg.icpInliersRatio = msg.icp_inliers_ratio;
+	info.reg.icpRotation = msg.icp_rotation;
+	info.reg.icpTranslation = msg.icp_translation;
+	info.reg.icpStructuralComplexity = msg.icp_structural_complexity;
+	info.reg.icpStructuralDistribution = msg.icp_structural_distribution;
+	info.reg.icpCorrespondences = msg.icp_correspondences;
 	info.reg.covariance = cv::Mat(6,6,CV_64FC1, (void*)msg.covariance.data()).clone();
 	info.features = msg.features;
-	info.localMapSize = msg.localMapSize;
-	info.localScanMapSize = msg.localScanMapSize;
-	info.localKeyFrames = msg.localKeyFrames;
-	info.localBundleOutliers = msg.localBundleOutliers;
-	info.localBundleConstraints = msg.localBundleConstraints;
-	info.localBundleTime = msg.localBundleTime;
-	UASSERT(msg.localBundleModels.size() == msg.localBundleIds.size());
-	UASSERT(msg.localBundleModels.size() == msg.localBundlePoses.size());
-	for(size_t i=0; i<msg.localBundleIds.size(); ++i)
+	info.localMapSize = msg.local_map_size;
+	info.localScanMapSize = msg.local_scan_map_size;
+	info.localKeyFrames = msg.local_key_frames;
+	info.localBundleOutliers = msg.local_bundle_outliers;
+	info.localBundleConstraints = msg.local_bundle_constraints;
+	info.localBundleTime = msg.local_bundle_time;
+	UASSERT(msg.local_bundle_models.size() == msg.local_bundle_ids.size());
+	UASSERT(msg.local_bundle_models.size() == msg.local_bundle_poses.size());
+	for(size_t i=0; i<msg.local_bundle_ids.size(); ++i)
 	{
 		std::vector<rtabmap::CameraModel> models;
-		for(size_t j=0; j<msg.localBundleModels[i].models.size(); ++j)
+		for(size_t j=0; j<msg.local_bundle_models[i].models.size(); ++j)
 		{
-			models.push_back(cameraModelFromROS(msg.localBundleModels[i].models[j].camera_info, transformFromGeometryMsg(msg.localBundleModels[i].models[j].local_transform)));
+			models.push_back(cameraModelFromROS(msg.local_bundle_models[i].models[j].camera_info, transformFromGeometryMsg(msg.local_bundle_models[i].models[j].local_transform)));
 		}
-		info.localBundleModels.insert(std::make_pair(msg.localBundleIds[i], models));
-		info.localBundlePoses.insert(std::make_pair(msg.localBundleIds[i], transformFromPoseMsg(msg.localBundlePoses[i])));
+		info.localBundleModels.insert(std::make_pair(msg.local_bundle_ids[i], models));
+		info.localBundlePoses.insert(std::make_pair(msg.local_bundle_ids[i], transformFromPoseMsg(msg.local_bundle_poses[i])));
 	}
-	info.keyFrameAdded = msg.keyFrameAdded;
-	info.timeEstimation = msg.timeEstimation;
-	info.timeParticleFiltering =  msg.timeParticleFiltering;
+	info.keyFrameAdded = msg.key_frame_added;
+	info.timeEstimation = msg.time_estimation;
+	info.timeParticleFiltering =  msg.time_particle_filtering;
 	info.stamp = msg.stamp;
 	info.interval = msg.interval;
-	info.distanceTravelled = msg.distanceTravelled;
-	info.memoryUsage = msg.memoryUsage;
-	info.gravityRollError = msg.gravityRollError;
-	info.gravityPitchError = msg.gravityPitchError;
+	info.distanceTravelled = msg.distance_travelled;
+	info.memoryUsage = msg.memory_usage;
+	info.gravityRollError = msg.gravity_roll_error;
+	info.gravityPitchError = msg.gravity_pitch_error;
 
 	info.type = msg.type;
 
-	info.reg.matchesIDs = msg.wordMatches;
-	info.reg.inliersIDs = msg.wordInliers;
+	info.reg.matchesIDs = msg.word_matches;
+	info.reg.inliersIDs = msg.word_inliers;
 
 	if(!ignoreData)
 	{
-		UASSERT(msg.wordsKeys.size() == msg.wordsValues.size());
-		for(unsigned int i=0; i<msg.wordsKeys.size(); ++i)
+		UASSERT(msg.words_keys.size() == msg.words_values.size());
+		for(unsigned int i=0; i<msg.words_keys.size(); ++i)
 		{
-			info.words.insert(std::make_pair(msg.wordsKeys[i], keypointFromROS(msg.wordsValues[i])));
+			info.words.insert(std::make_pair(msg.words_keys[i], keypointFromROS(msg.words_values[i])));
 		}
 
-		info.refCorners = points2fFromROS(msg.refCorners);
-		info.newCorners = points2fFromROS(msg.newCorners);
-		info.cornerInliers = msg.cornerInliers;
+		info.refCorners = points2fFromROS(msg.ref_corners);
+		info.newCorners = points2fFromROS(msg.new_corners);
+		info.cornerInliers = msg.corner_inliers;
 
 		info.transform = transformFromGeometryMsg(msg.transform);
-		info.transformFiltered = transformFromGeometryMsg(msg.transformFiltered);
-		info.transformGroundTruth = transformFromGeometryMsg(msg.transformGroundTruth);
+		info.transformFiltered = transformFromGeometryMsg(msg.transform_filtered);
+		info.transformGroundTruth = transformFromGeometryMsg(msg.transform_ground_truth);
 		info.guess = transformFromGeometryMsg(msg.guess);
 
-		UASSERT(msg.localMapKeys.size() == msg.localMapValues.size());
-		for(unsigned int i=0; i<msg.localMapKeys.size(); ++i)
+		UASSERT(msg.local_map_keys.size() == msg.local_map_values.size());
+		for(unsigned int i=0; i<msg.local_map_keys.size(); ++i)
 		{
-			info.localMap.insert(std::make_pair(msg.localMapKeys[i], point3fFromROS(msg.localMapValues[i])));
+			info.localMap.insert(std::make_pair(msg.local_map_keys[i], point3fFromROS(msg.local_map_values[i])));
 		}
 
 		pcl::PCLPointCloud2 cloud;
-		pcl_conversions::toPCL(msg.localScanMap, cloud);
+		pcl_conversions::toPCL(msg.local_scan_map, cloud);
 		info.localScanMap = rtabmap::util3d::laserScanFromPointCloud(cloud);
 	}
 	return info;
 }
 
-void odomInfoToROS(const rtabmap::OdometryInfo & info, rtabmap_ros::OdomInfo & msg, bool ignoreData)
+void odomInfoToROS(const rtabmap::OdometryInfo & info, rtabmap_ros::msg::OdomInfo & msg, bool ignoreData)
 {
 	msg.lost = info.lost;
 	msg.matches = info.reg.matches;
 	msg.inliers = info.reg.inliers;
-	msg.icpInliersRatio = info.reg.icpInliersRatio;
-	msg.icpRotation = info.reg.icpRotation;
-	msg.icpTranslation = info.reg.icpTranslation;
-	msg.icpStructuralComplexity = info.reg.icpStructuralComplexity;
-	msg.icpStructuralDistribution = info.reg.icpStructuralDistribution;
-	msg.icpCorrespondences = info.reg.icpCorrespondences;
+	msg.icp_inliers_ratio = info.reg.icpInliersRatio;
+	msg.icp_rotation = info.reg.icpRotation;
+	msg.icp_translation = info.reg.icpTranslation;
+	msg.icp_structural_complexity = info.reg.icpStructuralComplexity;
+	msg.icp_structural_distribution = info.reg.icpStructuralDistribution;
+	msg.icp_correspondences = info.reg.icpCorrespondences;
 	if(info.reg.covariance.type() == CV_64FC1 && info.reg.covariance.cols == 6 && info.reg.covariance.rows == 6)
 	{
 		memcpy(msg.covariance.data(), info.reg.covariance.data, 36*sizeof(double));
 	}
 	msg.features = info.features;
-	msg.localMapSize = info.localMapSize;
-	msg.localScanMapSize = info.localScanMapSize;
-	msg.localKeyFrames = info.localKeyFrames;
-	msg.localBundleOutliers = info.localBundleOutliers;
-	msg.localBundleConstraints = info.localBundleConstraints;
-	msg.localBundleTime = info.localBundleTime;
+	msg.local_map_size = info.localMapSize;
+	msg.local_scan_map_size = info.localScanMapSize;
+	msg.local_key_frames = info.localKeyFrames;
+	msg.local_bundle_outliers = info.localBundleOutliers;
+	msg.local_bundle_constraints = info.localBundleConstraints;
+	msg.local_bundle_time = info.localBundleTime;
 	UASSERT(info.localBundleModels.size() == info.localBundlePoses.size());
 	for(std::map<int, std::vector<rtabmap::CameraModel> >::const_iterator iter=info.localBundleModels.begin();
 		iter!=info.localBundleModels.end();
 		++iter)
 	{
-		msg.localBundleIds.push_back(iter->first);
+		msg.local_bundle_ids.push_back(iter->first);
 
 		UASSERT(info.localBundlePoses.find(iter->first)!=info.localBundlePoses.end());
-		geometry_msgs::Pose pose;
+		geometry_msgs::msg::Pose pose;
 		transformToPoseMsg(info.localBundlePoses.at(iter->first), pose);
-		msg.localBundlePoses.push_back(pose);
+		msg.local_bundle_poses.push_back(pose);
 
-		rtabmap_ros::CameraModels models;
+		rtabmap_ros::msg::CameraModels models;
 		for(size_t i=0; i<iter->second.size(); ++i)
 		{
-			rtabmap_ros::CameraModel modelMsg;
+			rtabmap_ros::msg::CameraModel modelMsg;
 			cameraModelToROS(iter->second[i], modelMsg.camera_info);
 			transformToGeometryMsg(iter->second[i].localTransform(), modelMsg.local_transform);
 			models.models.push_back(modelMsg);
 		}
-		msg.localBundleModels.push_back(models);
+		msg.local_bundle_models.push_back(models);
 	}
-	msg.keyFrameAdded = info.keyFrameAdded;
-	msg.timeEstimation = info.timeEstimation;
-	msg.timeParticleFiltering =  info.timeParticleFiltering;
+	msg.key_frame_added = info.keyFrameAdded;
+	msg.time_estimation = info.timeEstimation;
+	msg.time_particle_filtering =  info.timeParticleFiltering;
 	msg.stamp = info.stamp;
 	msg.interval = info.interval;
-	msg.distanceTravelled = info.distanceTravelled;
-	msg.memoryUsage = info.memoryUsage;
-	msg.gravityRollError = info.gravityRollError;
-	msg.gravityPitchError = info.gravityPitchError;
+	msg.distance_travelled = info.distanceTravelled;
+	msg.memory_usage = info.memoryUsage;
+	msg.gravity_roll_error = info.gravityRollError;
+	msg.gravity_pitch_error = info.gravityPitchError;
 
 	msg.type = info.type;
 
 	transformToGeometryMsg(info.transform, msg.transform);
-	transformToGeometryMsg(info.transformFiltered, msg.transformFiltered);
-	transformToGeometryMsg(info.transformGroundTruth, msg.transformGroundTruth);
+	transformToGeometryMsg(info.transformFiltered, msg.transform_filtered);
+	transformToGeometryMsg(info.transformGroundTruth, msg.transform_ground_truth);
 	transformToGeometryMsg(info.guess, msg.guess);
 
 	if(!ignoreData)
 	{
-		msg.wordsKeys = uKeys(info.words);
-		keypointsToROS(uValues(info.words), msg.wordsValues);
+		msg.words_keys = uKeys(info.words);
+		keypointsToROS(uValues(info.words), msg.words_values);
 
-		msg.wordMatches = info.reg.matchesIDs;
-		msg.wordInliers = info.reg.inliersIDs;
+		msg.word_matches = info.reg.matchesIDs;
+		msg.word_inliers = info.reg.inliersIDs;
 
-		points2fToROS(info.refCorners, msg.refCorners);
-		points2fToROS(info.newCorners, msg.newCorners);
-		msg.cornerInliers = info.cornerInliers;
+		points2fToROS(info.refCorners, msg.ref_corners);
+		points2fToROS(info.newCorners, msg.new_corners);
+		msg.corner_inliers = info.cornerInliers;
 
-		msg.localMapKeys = uKeys(info.localMap);
-		points3fToROS(uValues(info.localMap), msg.localMapValues);
+		msg.local_map_keys = uKeys(info.localMap);
+		points3fToROS(uValues(info.localMap), msg.local_map_values);
 
-		pcl_conversions::moveFromPCL(*rtabmap::util3d::laserScanToPointCloud2(info.localScanMap, info.localScanMap.localTransform()), msg.localScanMap);
+		pcl_conversions::moveFromPCL(*rtabmap::util3d::laserScanToPointCloud2(info.localScanMap, info.localScanMap.localTransform()), msg.local_scan_map);;
 	}
 }
 
-cv::Mat userDataFromROS(const rtabmap_ros::UserData & dataMsg)
+cv::Mat userDataFromROS(const rtabmap_ros::msg::UserData & dataMsg)
 {
 	cv::Mat data;
 	if(!dataMsg.data.empty())
 	{
-		if(dataMsg.cols > 0 && dataMsg.rows > 0 && dataMsg.type >= 0)
+		if(dataMsg.cols > 0 && dataMsg.rows > 0)
 		{
 			data = cv::Mat(dataMsg.rows, dataMsg.cols, dataMsg.type, (void*)dataMsg.data.data()).clone();
 		}
 		else
 		{
-			if(dataMsg.cols != (int)dataMsg.data.size() || dataMsg.rows != 1 || dataMsg.type != CV_8UC1)
+			if(dataMsg.cols != dataMsg.data.size() || dataMsg.rows != 1 || dataMsg.type != CV_8UC1)
 			{
-				ROS_ERROR("cols, rows and type fields of the UserData msg "
+				UERROR("cols, rows and type fields of the user_data msg "
 						"are not correctly set (cols=%d, rows=%d, type=%d)! We assume that the data "
 						"is compressed (cols=%d, rows=1, type=%d(CV_8UC1)).",
 						dataMsg.cols, dataMsg.rows, dataMsg.type, (int)dataMsg.data.size(), CV_8UC1);
@@ -1638,7 +1650,7 @@ cv::Mat userDataFromROS(const rtabmap_ros::UserData & dataMsg)
 	}
 	return data;
 }
-void userDataToROS(const cv::Mat & data, rtabmap_ros::UserData & dataMsg, bool compress)
+void userDataToROS(const cv::Mat & data, rtabmap_ros::msg::UserData & dataMsg, bool compress)
 {
 	if(!data.empty())
 	{
@@ -1661,22 +1673,22 @@ void userDataToROS(const cv::Mat & data, rtabmap_ros::UserData & dataMsg, bool c
 }
 
 rtabmap::Landmarks landmarksFromROS(
-		const std::map<int, std::pair<geometry_msgs::PoseWithCovarianceStamped, float> > & tags,
+		const std::map<int, std::pair<geometry_msgs::msg::PoseWithCovarianceStamped, float> > & tags,
 		const std::string & frameId,
 		const std::string & odomFrameId,
-		const ros::Time & odomStamp,
-		tf::TransformListener & listener,
+		const rclcpp::Time & odomStamp,
+		tf2_ros::Buffer & listener,
 		double waitForTransform,
 		double defaultLinVariance,
 		double defaultAngVariance)
 {
 	//tag detections
 	rtabmap::Landmarks landmarks;
-	for(std::map<int, std::pair<geometry_msgs::PoseWithCovarianceStamped, float> >::const_iterator iter=tags.begin(); iter!=tags.end(); ++iter)
+	for(std::map<int, std::pair<geometry_msgs::msg::PoseWithCovarianceStamped, float> >::const_iterator iter=tags.begin(); iter!=tags.end(); ++iter)
 	{
 		if(iter->first <=0)
 		{
-			ROS_ERROR("Invalid landmark received! IDs should be > 0 (it is %d). Ignoring this landmark.", iter->first);
+			UERROR("Invalid landmark received! IDs should be > 0 (it is %d). Ignoring this landmark.", iter->first);
 			continue;
 		}
 		rtabmap::Transform baseToCamera = rtabmap_ros::getTransform(
@@ -1688,7 +1700,7 @@ rtabmap::Landmarks landmarksFromROS(
 
 		if(baseToCamera.isNull())
 		{
-			ROS_ERROR("Cannot transform tag pose from \"%s\" frame to \"%s\" frame!",
+			UERROR("Cannot transform tag pose from \"%s\" frame to \"%s\" frame!",
 					iter->second.first.header.frame_id.c_str(), frameId.c_str());
 			continue;
 		}
@@ -1711,7 +1723,7 @@ rtabmap::Landmarks landmarksFromROS(
 			}
 			else
 			{
-				ROS_WARN("Could not adjust tag pose accordingly to latest odometry pose. "
+				UWARN("Could not adjust tag pose accordingly to latest odometry pose. "
 						"If odometry is small since it received the tag pose and "
 						"covariance is large, this should not be a problem.");
 			}
@@ -1731,34 +1743,29 @@ rtabmap::Landmarks landmarksFromROS(
 rtabmap::Transform getTransform(
 		const std::string & fromFrameId,
 		const std::string & toFrameId,
-		const ros::Time & stamp,
-		tf::TransformListener & listener,
+		const rclcpp::Time & stamp,
+		tf2_ros::Buffer &tfBuffer,
 		double waitForTransform)
 {
 	// TF ready?
 	rtabmap::Transform transform;
+	std::string errString;
+	if(!tfBuffer.canTransform(fromFrameId, toFrameId,  tf2_ros::fromMsg(stamp), tf2::durationFromSec(waitForTransform), &errString))
+	{
+		UWARN("(can transform %s -> %s?) %s (wait_for_transform=%f)", fromFrameId.c_str(), toFrameId.c_str(), errString.c_str(), waitForTransform);
+		return rtabmap::Transform();
+	}
 	try
 	{
-		if(waitForTransform > 0.0 && !stamp.isZero())
-		{
-			//if(!tfBuffer_.canTransform(fromFrameId, toFrameId, stamp, ros::Duration(1)))
-			std::string errorMsg;
-			if(!listener.waitForTransform(fromFrameId, toFrameId, stamp, ros::Duration(waitForTransform), ros::Duration(0.01), &errorMsg))
-			{
-				ROS_WARN("Could not get transform from %s to %s after %f seconds (for stamp=%f)! Error=\"%s\".",
-						fromFrameId.c_str(), toFrameId.c_str(), waitForTransform, stamp.toSec(), errorMsg.c_str());
-				return transform;
-			}
-		}
-
-		tf::StampedTransform tmp;
-		listener.lookupTransform(fromFrameId, toFrameId, stamp, tmp);
-		transform = rtabmap_ros::transformFromTF(tmp);
+		geometry_msgs::msg::TransformStamped tmp;
+		tmp = tfBuffer.lookupTransform(fromFrameId, toFrameId,  tf2_ros::fromMsg(stamp), tf2::durationFromSec(waitForTransform));
+		transform = rtabmap_ros::transformFromGeometryMsg(tmp.transform);
 	}
-	catch(tf::TransformException & ex)
+	catch(tf2::TransformException & ex)
 	{
-		ROS_WARN("(getting transform %s -> %s) %s", fromFrameId.c_str(), toFrameId.c_str(), ex.what());
+		UWARN("(getting transform %s -> %s) %s (wait_for_transform=%f)", fromFrameId.c_str(), toFrameId.c_str(), ex.what(), waitForTransform);
 	}
+
 	return transform;
 }
 
@@ -1767,34 +1774,22 @@ rtabmap::Transform getTransform(
 rtabmap::Transform getTransform(
 		const std::string & sourceTargetFrame,
 		const std::string & fixedFrame,
-		const ros::Time & stampSource,
-		const ros::Time & stampTarget,
-		tf::TransformListener & listener,
+		const rclcpp::Time & stampSource,
+		const rclcpp::Time & stampTarget,
+		tf2_ros::Buffer & tfBuffer,
 		double waitForTransform)
 {
 	// TF ready?
 	rtabmap::Transform transform;
 	try
 	{
-		ros::Time stamp = stampSource>stampTarget?stampSource:stampTarget;
-		if(waitForTransform > 0.0 && !stamp.isZero())
-		{
-			std::string errorMsg;
-			if(!listener.waitForTransform(sourceTargetFrame, fixedFrame, stamp, ros::Duration(waitForTransform), ros::Duration(0.01), &errorMsg))
-			{
-				ROS_WARN("Could not get transform from %s to %s accordingly to %s after %f seconds (for stamps=%f -> %f)! Error=\"%s\".",
-						sourceTargetFrame.c_str(), sourceTargetFrame.c_str(), fixedFrame.c_str(), waitForTransform, stampSource.toSec(), stampTarget.toSec(), errorMsg.c_str());
-				return transform;
-			}
-		}
-
-		tf::StampedTransform tmp;
-		listener.lookupTransform(sourceTargetFrame, stampTarget, sourceTargetFrame, stampSource, fixedFrame, tmp);
-		transform = rtabmap_ros::transformFromTF(tmp);
+		geometry_msgs::msg::TransformStamped tmp;
+		tmp = tfBuffer.lookupTransform(sourceTargetFrame, tf2_ros::fromMsg(stampTarget), sourceTargetFrame, tf2_ros::fromMsg(stampSource), fixedFrame, tf2::durationFromSec(waitForTransform));
+		transform = rtabmap_ros::transformFromGeometryMsg(tmp.transform);
 	}
-	catch(tf::TransformException & ex)
+	catch(tf2::TransformException & ex)
 	{
-		ROS_WARN("(getting transform movement of %s according to fixed %s) %s", sourceTargetFrame.c_str(), fixedFrame.c_str(), ex.what());
+		UWARN("(getting transform movement of %s according to fixed %s) %s", sourceTargetFrame.c_str(), fixedFrame.c_str(), ex.what());
 	}
 	return transform;
 }
@@ -1802,20 +1797,20 @@ rtabmap::Transform getTransform(
 bool convertRGBDMsgs(
 		const std::vector<cv_bridge::CvImageConstPtr> & imageMsgs,
 		const std::vector<cv_bridge::CvImageConstPtr> & depthMsgs,
-		const std::vector<sensor_msgs::CameraInfo> & cameraInfoMsgs,
-		const std::vector<sensor_msgs::CameraInfo> & depthCameraInfoMsgs,
+		const std::vector<sensor_msgs::msg::CameraInfo> & cameraInfoMsgs,
+		const std::vector<sensor_msgs::msg::CameraInfo> & depthCameraInfoMsgs,
 		const std::string & frameId,
 		const std::string & odomFrameId,
-		const ros::Time & odomStamp,
+		const rclcpp::Time & odomStamp,
 		cv::Mat & rgb,
 		cv::Mat & depth,
 		std::vector<rtabmap::CameraModel> & cameraModels,
 		std::vector<rtabmap::StereoCameraModel> & stereoCameraModels,
-		tf::TransformListener & listener,
+		tf2_ros::Buffer & listener,
 		double waitForTransform,
 		bool alreadRectifiedImages,
-		const std::vector<std::vector<rtabmap_ros::KeyPoint> > & localKeyPointsMsgs,
-		const std::vector<std::vector<rtabmap_ros::Point3f> > & localPoints3dMsgs,
+		const std::vector<std::vector<rtabmap_ros::msg::KeyPoint> > & localKeyPointsMsgs,
+		const std::vector<std::vector<rtabmap_ros::msg::Point3f> > & localPoints3dMsgs,
 		const std::vector<cv::Mat> & localDescriptorsMsgs,
 		std::vector<cv::KeyPoint> * localKeyPoints,
 		std::vector<cv::Point3f> * localPoints3d,
@@ -1842,11 +1837,11 @@ bool convertRGBDMsgs(
 	   depthMsgs[0]->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0 &&
 	   cameraInfoMsgs.size() == depthCameraInfoMsgs.size())
 	{
-		isDepth = cameraInfoMsgs[0].P.elems[3] == 0.0 && depthCameraInfoMsgs[0].P.elems[3] == 0.0;
+		isDepth = cameraInfoMsgs[0].p[3] == 0.0 && depthCameraInfoMsgs[0].p[3] == 0.0;
 		static bool warned = false;
 		if(!warned && isDepth)
 		{
-			ROS_WARN("Input depth/left image has encoding \"mono16\" and "
+			UWARN("Input depth/left image has encoding \"mono16\" and "
 					"camera info P[3] is null for both cameras, thus image is "
 					"considered a depth image. If the depth image is in "
 					"fact the right image, please convert the right image to "
@@ -1877,7 +1872,7 @@ bool convertRGBDMsgs(
 				 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::BAYER_GRBG8) == 0 ||
 				 imageMsgs[i]->encoding.compare(sensor_msgs::image_encodings::BAYER_RGGB8) == 0))
 			{
-				ROS_ERROR("Input rgb/left type must be image=mono8,mono16,rgb8,bgr8,bgra8,rgba8. Current rgb/left=%s",
+				UERROR("Input rgb/left type must be image=mono8,mono16,rgb8,bgr8,bgra8,rgba8. Current rgb/left=%s",
 						imageMsgs[i]->encoding.c_str());
 				return false;
 			}
@@ -1896,7 +1891,7 @@ bool convertRGBDMsgs(
 			     depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_32FC1) == 0 ||
 			     depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0))
 			 {
-				ROS_ERROR("Input depth type must be image_depth=32FC1,16UC1,mono16. Current depth=%s",
+				UERROR("Input depth type must be image_depth=32FC1,16UC1,mono16. Current depth=%s",
 						depthMsgs[i]->encoding.c_str());
 				return false;
 			 }
@@ -1909,14 +1904,14 @@ bool convertRGBDMsgs(
 						depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::BGRA8) == 0 ||
 						depthMsgs[i]->encoding.compare(sensor_msgs::image_encodings::RGBA8) == 0))
 			 {
-				 ROS_ERROR("Input right type must be image=mono8,mono16,rgb8,bgr8,bgra8,rgba8. Current right=%s",
+				 UERROR("Input right type must be image=mono8,mono16,rgb8,bgr8,bgra8,rgba8. Current right=%s",
 						 depthMsgs[i]->encoding.c_str());
 				return false;
 			 }
 		}
 
 
-		ros::Time stamp;
+		rclcpp::Time stamp;
 		if(isDepth && !depthMsgs.empty())
 		{
 			UASSERT_MSG(depthMsgs[i]->image.cols == depthWidth && depthMsgs[i]->image.rows == depthHeight,
@@ -1940,7 +1935,7 @@ bool convertRGBDMsgs(
 		rtabmap::Transform localTransform = rtabmap_ros::getTransform(frameId, !imageMsgs.empty()?imageMsgs[i]->header.frame_id:cameraInfoMsgs[i].header.frame_id, stamp, listener, waitForTransform);
 		if(localTransform.isNull())
 		{
-			ROS_ERROR("TF of received image %d at time %fs is not set!", i, stamp.toSec());
+			UERROR("TF of received image %d at time %fs is not set!", i, stamp.seconds());
 			return false;
 		}
 		// sync with odometry stamp
@@ -1955,12 +1950,12 @@ bool convertRGBDMsgs(
 					waitForTransform);
 			if(sensorT.isNull())
 			{
-				ROS_WARN("Could not get odometry value for image stamp (%fs). Latest odometry "
-						"stamp is %fs. The image pose will not be synchronized with odometry.", stamp.toSec(), odomStamp.toSec());
+				UWARN("Could not get odometry value for image stamp (%fs). Latest odometry "
+						"stamp is %fs. The image pose will not be synchronized with odometry.", timestampFromROS(stamp), timestampFromROS(odomStamp));
 			}
 			else
 			{
-				//ROS_WARN("RGBD correction = %s (time diff=%fs)", sensorT.prettyPrint().c_str(), fabs(stamp.toSec()-odomStamp.toSec()));
+				//UWARN("RGBD correction = %s (time diff=%fs)", sensorT.prettyPrint().c_str(), fabs(stamp.toSec()-odomStamp.toSec()));
 				localTransform = sensorT * localTransform;
 			}
 		}
@@ -1994,7 +1989,7 @@ bool convertRGBDMsgs(
 			}
 			else
 			{
-				ROS_ERROR("Some RGB/left images are not the same type!");
+				UERROR("Some RGB/left images are not the same type!");
 				return false;
 			}
 		}
@@ -2017,7 +2012,7 @@ bool convertRGBDMsgs(
 				}
 				else
 				{
-					ROS_ERROR("Some Depth images are not the same type!");
+					UERROR("Some Depth images are not the same type!");
 					return false;
 				}
 			}
@@ -2045,7 +2040,7 @@ bool convertRGBDMsgs(
 				}
 				else
 				{
-					ROS_ERROR("Some right images are not the same type!");
+					UERROR("Some right images are not the same type!");
 					return false;
 				}
 			}
@@ -2069,7 +2064,7 @@ bool convertRGBDMsgs(
 						waitForTransform);
 				if(stereoTransform.isNull())
 				{
-					ROS_ERROR("Parameter %s is false but we cannot get TF between the two cameras!", rtabmap::Parameters::kRtabmapImagesAlreadyRectified().c_str());
+					UERROR("Parameter %s is false but we cannot get TF between the two cameras!", rtabmap::Parameters::kRtabmapImagesAlreadyRectified().c_str());
 					return false;
 				}
 			}
@@ -2081,7 +2076,7 @@ bool convertRGBDMsgs(
 				static bool shown = false;
 				if(!shown)
 				{
-					ROS_WARN("Detected baseline (%f m) is quite large! Is your "
+					UWARN("Detected baseline (%f m) is quite large! Is your "
 							 "right camera_info P(0,3) correctly set? Note that "
 							 "baseline=-P(0,3)/P(0,0). You may need to calibrate your camera. "
 							 "This warning is printed only once.",
@@ -2099,7 +2094,7 @@ bool convertRGBDMsgs(
 						waitForTransform);
 				if(stereoTransform.isNull() || stereoTransform.x()<=0)
 				{
-					ROS_WARN("We cannot estimated the baseline of the rectified images with tf! (%s->%s = %s)",
+					UWARN("We cannot estimated the baseline of the rectified images with tf! (%s->%s = %s)",
 							depthCameraInfoMsgs[i].header.frame_id.c_str(), cameraInfoMsgs[i].header.frame_id.c_str(), stereoTransform.prettyPrint().c_str());
 				}
 				else
@@ -2107,7 +2102,7 @@ bool convertRGBDMsgs(
 					static bool warned = false;
 					if(!warned)
 					{
-						ROS_WARN("Right camera info doesn't have Tx set but we are assuming that stereo images are already rectified (see %s parameter). While not "
+						UWARN("Right camera info doesn't have Tx set but we are assuming that stereo images are already rectified (see %s parameter). While not "
 								"recommended, we used TF to get the baseline (%s->%s = %fm) for convenience (e.g., D400 ir stereo issue). It is preferred to feed "
 								"a valid right camera info if stereo images are already rectified. This message is only printed once...",
 								rtabmap::Parameters::kRtabmapImagesAlreadyRectified().c_str(),
@@ -2147,15 +2142,15 @@ bool convertRGBDMsgs(
 bool convertStereoMsg(
 		const cv_bridge::CvImageConstPtr& leftImageMsg,
 		const cv_bridge::CvImageConstPtr& rightImageMsg,
-		const sensor_msgs::CameraInfo& leftCamInfoMsg,
-		const sensor_msgs::CameraInfo& rightCamInfoMsg,
+		const sensor_msgs::msg::CameraInfo& leftCamInfoMsg,
+		const sensor_msgs::msg::CameraInfo& rightCamInfoMsg,
 		const std::string & frameId,
 		const std::string & odomFrameId,
-		const ros::Time & odomStamp,
+		const rclcpp::Time & odomStamp,
 		cv::Mat & left,
 		cv::Mat & right,
 		rtabmap::StereoCameraModel & stereoModel,
-		tf::TransformListener & listener,
+		tf2_ros::Buffer & listener,
 		double waitForTransform,
 		bool alreadyRectified)
 {
@@ -2176,8 +2171,8 @@ bool convertStereoMsg(
 		rightImageMsg->encoding.compare(sensor_msgs::image_encodings::BGRA8) == 0 ||
 		rightImageMsg->encoding.compare(sensor_msgs::image_encodings::RGBA8) == 0))
 	{
-		ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8,bgra8,rgba8");
-		ROS_ERROR("Input type must be image=mono8,mono16,rgb8,bgr8,bgra8,rgba8 Current left=%s and right=%s",
+		UERROR("Input type must be image=mono8,mono16,rgb8,bgr8,bgra8,rgba8");
+		UERROR("Input type must be image=mono8,mono16,rgb8,bgr8,bgra8,rgba8 Current left=%s and right=%s",
 				leftImageMsg->encoding.c_str(),
 				rightImageMsg->encoding.c_str());
 		return false;
@@ -2223,8 +2218,8 @@ bool convertStereoMsg(
 				waitForTransform);
 		if(sensorT.isNull())
 		{
-			ROS_WARN("Could not get odometry value for stereo msg stamp (%fs). Latest odometry "
-					"stamp is %fs. The stereo image pose will not be synchronized with odometry.", leftImageMsg->header.stamp.toSec(), odomStamp.toSec());
+			UWARN("Could not get odometry value for stereo msg stamp (%fs). Latest odometry "
+					"stamp is %fs. The stereo image pose will not be synchronized with odometry.", timestampFromROS(leftImageMsg->header.stamp), odomStamp.seconds());
 		}
 		else
 		{
@@ -2243,7 +2238,7 @@ bool convertStereoMsg(
 				waitForTransform);
 		if(stereoTransform.isNull())
 		{
-			ROS_ERROR("Parameter %s is false but we cannot get TF between the two cameras!", rtabmap::Parameters::kRtabmapImagesAlreadyRectified().c_str());
+			UERROR("Parameter %s is false but we cannot get TF between the two cameras!", rtabmap::Parameters::kRtabmapImagesAlreadyRectified().c_str());
 			return false;
 		}
 	}
@@ -2255,7 +2250,7 @@ bool convertStereoMsg(
 		static bool shown = false;
 		if(!shown)
 		{
-			ROS_WARN("Detected baseline (%f m) is quite large! Is your "
+			UWARN("Detected baseline (%f m) is quite large! Is your "
 					 "right camera_info P(0,3) correctly set? Note that "
 					 "baseline=-P(0,3)/P(0,0). You may need to calibrate your camera. "
 					 "This warning is printed only once.",
@@ -2273,7 +2268,7 @@ bool convertStereoMsg(
 				waitForTransform);
 		if(stereoTransform.isNull() || stereoTransform.x()<=0)
 		{
-			ROS_WARN("We cannot estimated the baseline of the rectified images with tf! (%s->%s = %s)",
+			UWARN("We cannot estimated the baseline of the rectified images with tf! (%s->%s = %s)",
 					rightCamInfoMsg.header.frame_id.c_str(), leftCamInfoMsg.header.frame_id.c_str(), stereoTransform.prettyPrint().c_str());
 		}
 		else
@@ -2281,7 +2276,7 @@ bool convertStereoMsg(
 			static bool warned = false;
 			if(!warned)
 			{
-				ROS_WARN("Right camera info doesn't have Tx set but we are assuming that stereo images are already rectified (see %s parameter). While not "
+				UWARN("Right camera info doesn't have Tx set but we are assuming that stereo images are already rectified (see %s parameter). While not "
 						"recommended, we used TF to get the baseline (%s->%s = %fm) for convenience (e.g., D400 ir stereo issue). It is preferred to feed "
 						"a valid right camera info if stereo images are already rectified. This message is only printed once...",
 						rtabmap::Parameters::kRtabmapImagesAlreadyRectified().c_str(),
@@ -2302,12 +2297,12 @@ bool convertStereoMsg(
 }
 
 bool convertScanMsg(
-		const sensor_msgs::LaserScan & scan2dMsg,
+		const sensor_msgs::msg::LaserScan& scan2dMsg,
 		const std::string & frameId,
 		const std::string & odomFrameId,
-		const ros::Time & odomStamp,
+		const rclcpp::Time & odomStamp,
 		rtabmap::LaserScan & scan,
-		tf::TransformListener & listener,
+		tf2_ros::Buffer & tfBuffer,
 		double waitForTransform,
 		bool outputInFrameId)
 {
@@ -2315,8 +2310,8 @@ bool convertScanMsg(
 	rtabmap::Transform tmpT = getTransform(
 			odomFrameId.empty()?frameId:odomFrameId,
 			scan2dMsg.header.frame_id,
-			scan2dMsg.header.stamp + ros::Duration().fromSec(scan2dMsg.ranges.size()*scan2dMsg.time_increment),
-			listener,
+			rclcpp::Time(scan2dMsg.header.stamp.sec, scan2dMsg.header.stamp.nanosec) + rclcpp::Duration::from_seconds(scan2dMsg.ranges.size()*scan2dMsg.time_increment),
+			tfBuffer,
 			waitForTransform);
 	if(tmpT.isNull())
 	{
@@ -2327,7 +2322,7 @@ bool convertScanMsg(
 			frameId,
 			scan2dMsg.header.frame_id,
 			scan2dMsg.header.stamp,
-			listener,
+			tfBuffer,
 			waitForTransform);
 	if(scanLocalTransform.isNull())
 	{
@@ -2335,16 +2330,16 @@ bool convertScanMsg(
 	}
 
 	//transform in frameId_ frame
-	sensor_msgs::PointCloud2 scanOut;
+	sensor_msgs::msg::PointCloud2 scanOut;
 	laser_geometry::LaserProjection projection;
-	projection.transformLaserScanToPointCloud(odomFrameId.empty()?frameId:odomFrameId, scan2dMsg, scanOut, listener);
+	projection.transformLaserScanToPointCloud(odomFrameId.empty()?frameId:odomFrameId, scan2dMsg, scanOut, tfBuffer);
 
 	//transform back in laser frame
 	rtabmap::Transform laserToOdom = getTransform(
 			scan2dMsg.header.frame_id,
 			odomFrameId.empty()?frameId:odomFrameId,
 			scan2dMsg.header.stamp,
-			listener,
+			tfBuffer,
 			waitForTransform);
 	if(laserToOdom.isNull())
 	{
@@ -2359,16 +2354,16 @@ bool convertScanMsg(
 				odomFrameId,
 				odomStamp,
 				scan2dMsg.header.stamp,
-				listener,
+				tfBuffer,
 				waitForTransform);
 		if(sensorT.isNull())
 		{
-			ROS_WARN("Could not get odometry value for laser scan stamp (%fs). Latest odometry "
-					"stamp is %fs. The laser scan pose will not be synchronized with odometry.", scan2dMsg.header.stamp.toSec(), odomStamp.toSec());
+			UWARN("Could not get odometry value for laser scan stamp (%fs). Latest odometry "
+					"stamp is %fs. The laser scan pose will not be synchronized with odometry.", timestampFromROS(scan2dMsg.header.stamp), odomStamp.seconds());
 		}
 		else
 		{
-			//ROS_WARN("scan correction = %s (time diff=%fs)", sensorT.prettyPrint().c_str(), fabs(scan2dMsg->header.stamp.toSec()-odomStamp.toSec()));
+			//UWARN("scan correction = %s (time diff=%fs)", sensorT.prettyPrint().c_str(), fabs(scan2dMsg.header.stamp.toSec()-odomStamp.toSec()));
 			scanLocalTransform = sensorT * scanLocalTransform;
 		}
 	}
@@ -2383,7 +2378,7 @@ bool convertScanMsg(
 	{
 		if(scanOut.fields[i].name.compare("intensity") == 0)
 		{
-			if(scanOut.fields[i].datatype == sensor_msgs::PointField::FLOAT32)
+			if(scanOut.fields[i].datatype == sensor_msgs::msg::PointField::FLOAT32)
 			{
 				hasIntensity = true;
 			}
@@ -2392,7 +2387,7 @@ bool convertScanMsg(
 				static bool warningShown = false;
 				if(!warningShown)
 				{
-					ROS_WARN("The input scan cloud has an \"intensity\" field "
+					UWARN("The input scan cloud has an \"intensity\" field "
 							"but the datatype (%d) is not supported. Intensity will be ignored. "
 							"This message is only shown once.", scanOut.fields[i].datatype);
 					warningShown = true;
@@ -2442,12 +2437,12 @@ bool convertScanMsg(
 }
 
 bool convertScan3dMsg(
-		const sensor_msgs::PointCloud2 & scan3dMsg,
+		const sensor_msgs::msg::PointCloud2 & scan3dMsg,
 		const std::string & frameId,
 		const std::string & odomFrameId,
-		const ros::Time & odomStamp,
+		const rclcpp::Time & odomStamp,
 		rtabmap::LaserScan & scan,
-		tf::TransformListener & listener,
+		tf2_ros::Buffer & listener,
 		double waitForTransform,
 		int maxPoints,
 		float maxRange)
@@ -2458,7 +2453,7 @@ bool convertScan3dMsg(
 	rtabmap::Transform scanLocalTransform = getTransform(frameId, scan3dMsg.header.frame_id, scan3dMsg.header.stamp, listener, waitForTransform);
 	if(scanLocalTransform.isNull())
 	{
-		ROS_ERROR("TF of received scan cloud at time %fs is not set, aborting rtabmap update.", scan3dMsg.header.stamp.toSec());
+		UERROR("TF of received scan cloud at time %fs is not set, aborting rtabmap update.", timestampFromROS(scan3dMsg.header.stamp));
 		return false;
 	}
 
@@ -2474,17 +2469,125 @@ bool convertScan3dMsg(
 				waitForTransform);
 		if(sensorT.isNull())
 		{
-			ROS_WARN("Could not get odometry value for laser scan stamp (%fs). Latest odometry "
-					"stamp is %fs. The 3d laser scan pose will not be synchronized with odometry.", scan3dMsg.header.stamp.toSec(), odomStamp.toSec());
+			UWARN("Could not get odometry value for laser scan stamp (%fs). Latest odometry "
+					"stamp is %fs. The 3d laser scan pose will not be synchronized with odometry.", timestampFromROS(scan3dMsg.header.stamp), odomStamp.seconds());
 		}
 		else
 		{
 			scanLocalTransform = sensorT * scanLocalTransform;
 		}
 	}
+
 	scan = rtabmap::util3d::laserScanFromPointCloud(scan3dMsg);
 	scan = rtabmap::LaserScan(scan, maxPoints, maxRange, scanLocalTransform);
 	return true;
+}
+
+void
+transformPointCloud (
+		const Eigen::Matrix4f &transform,
+		const sensor_msgs::msg::PointCloud2 &in,
+        sensor_msgs::msg::PointCloud2 &out)
+{
+  // Get X-Y-Z indices
+  int x_idx = pcl::getFieldIndex (in, "x");
+  int y_idx = pcl::getFieldIndex (in, "y");
+  int z_idx = pcl::getFieldIndex (in, "z");
+
+  if (x_idx == -1 || y_idx == -1 || z_idx == -1)
+  {
+    UERROR ("Input dataset has no X-Y-Z coordinates! Cannot convert to Eigen format.");
+    return;
+  }
+
+  if (in.fields[x_idx].datatype != sensor_msgs::msg::PointField::FLOAT32 ||
+      in.fields[y_idx].datatype != sensor_msgs::msg::PointField::FLOAT32 ||
+      in.fields[z_idx].datatype != sensor_msgs::msg::PointField::FLOAT32)
+  {
+	  UERROR ("X-Y-Z coordinates not floats. Currently only floats are supported.");
+    return;
+  }
+
+  // Check if distance is available
+  int dist_idx = pcl::getFieldIndex (in, "distance");
+
+  // Copy the other data
+  if (&in != &out)
+  {
+    out.header = in.header;
+    out.height = in.height;
+    out.width  = in.width;
+    out.fields = in.fields;
+    out.is_bigendian = in.is_bigendian;
+    out.point_step   = in.point_step;
+    out.row_step     = in.row_step;
+    out.is_dense     = in.is_dense;
+    out.data.resize (in.data.size ());
+    // Copy everything as it's faster than copying individual elements
+    memcpy (&out.data[0], &in.data[0], in.data.size ());
+  }
+
+  Eigen::Array4i xyz_offset (in.fields[x_idx].offset, in.fields[y_idx].offset, in.fields[z_idx].offset, 0);
+
+  for (size_t i = 0; i < in.width * in.height; ++i)
+  {
+    Eigen::Vector4f pt (*(float*)&in.data[xyz_offset[0]], *(float*)&in.data[xyz_offset[1]], *(float*)&in.data[xyz_offset[2]], 1);
+    Eigen::Vector4f pt_out;
+
+    bool max_range_point = false;
+    int distance_ptr_offset = i*in.point_step + in.fields[dist_idx].offset;
+    float* distance_ptr = (dist_idx < 0 ? NULL : (float*)(&in.data[distance_ptr_offset]));
+    if (!std::isfinite (pt[0]) || !std::isfinite (pt[1]) || !std::isfinite (pt[2]))
+    {
+      if (distance_ptr==NULL || !std::isfinite(*distance_ptr))  // Invalid point
+      {
+        pt_out = pt;
+      }
+      else  // max range point
+      {
+        pt[0] = *distance_ptr;  // Replace x with the x value saved in distance
+        pt_out = transform * pt;
+        max_range_point = true;
+        //std::cout << pt[0]<<","<<pt[1]<<","<<pt[2]<<" => "<<pt_out[0]<<","<<pt_out[1]<<","<<pt_out[2]<<"\n";
+      }
+    }
+    else
+    {
+      pt_out = transform * pt;
+    }
+
+    if (max_range_point)
+    {
+      // Save x value in distance again
+      *(float*)(&out.data[distance_ptr_offset]) = pt_out[0];
+      pt_out[0] = std::numeric_limits<float>::quiet_NaN();
+    }
+
+    memcpy (&out.data[xyz_offset[0]], &pt_out[0], sizeof (float));
+    memcpy (&out.data[xyz_offset[1]], &pt_out[1], sizeof (float));
+    memcpy (&out.data[xyz_offset[2]], &pt_out[2], sizeof (float));
+
+
+    xyz_offset += in.point_step;
+  }
+
+  // Check if the viewpoint information is present
+  int vp_idx = pcl::getFieldIndex (in, "vp_x");
+  if (vp_idx != -1)
+  {
+    // Transform the viewpoint info too
+    for (size_t i = 0; i < out.width * out.height; ++i)
+    {
+      float *pstep = (float*)&out.data[i * out.point_step + out.fields[vp_idx].offset];
+      // Assume vp_x, vp_y, vp_z are consecutive
+      Eigen::Vector4f vp_in (pstep[0], pstep[1], pstep[2], 1);
+      Eigen::Vector4f vp_out = transform * vp_in;
+
+      pstep[0] = vp_out[0];
+      pstep[1] = vp_out[1];
+      pstep[2] = vp_out[2];
+    }
+  }
 }
 
 }

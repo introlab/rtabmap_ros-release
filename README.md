@@ -1,114 +1,92 @@
-rtabmap_ros [![Build Status](https://github.com/introlab/rtabmap_ros/actions/workflows/ros1.yml/badge.svg)](https://github.com/introlab/rtabmap_ros/actions/workflows/ros1.yml) [![docker](https://github.com/introlab/rtabmap_ros/actions/workflows/docker.yml/badge.svg)](https://github.com/introlab/rtabmap_ros/actions/workflows/docker.yml)
-=======
+rtabmap_ros [![Build Status](https://github.com/introlab/rtabmap_ros/actions/workflows/ros2.yml/badge.svg)](https://github.com/introlab/rtabmap_ros/actions/workflows/ros2.yml)
+===========
 
-RTAB-Map's ROS package.
+RTAB-Map's ROS2 package (branch `ros2`). **ROS2 Foxy minimum required**: currently most nodes are ported to ROS2, however they are not all tested yet. The interface is the same than on ROS1 (parameters and topic names should still match ROS1 documentation on [rtabmap_ros](http://wiki.ros.org/rtabmap_ros)). 
 
-For more information, demos and tutorials about this package, visit [rtabmap_ros](http://wiki.ros.org/rtabmap_ros) page on ROS wiki.
+`rtabmap.launch` is also ported to ROS2 with same arguments. If you see [ROS1 examples](http://wiki.ros.org/rtabmap_ros/Tutorials/HandHeldMapping) like this:
 
-For the RTAB-Map libraries and standalone application, visit [RTAB-Map's home page](http://introlab.github.io/rtabmap) or [RTAB-Map's wiki](https://github.com/introlab/rtabmap/wiki).
+```bash
+roslaunch zed_wrapper zed_no_tf.launch
+
+roslaunch rtabmap_ros rtabmap.launch \
+    rtabmap_args:="--delete_db_on_start" \
+    rgb_topic:=/zed/zed_node/rgb/image_rect_color \
+    depth_topic:=/zed/zed_node/depth/depth_registered \
+    camera_info_topic:=/zed/zed_node/rgb/camera_info \
+    frame_id:=base_link \
+    approx_sync:=false \
+    wait_imu_to_init:=true \
+    imu_topic:=/zed_node/imu/data
+```
+
+The ROS2 equivalent is (with those [lines](https://github.com/stereolabs/zed-ros2-wrapper/blob/b512dce6ad4565f4770273995b147122e735ca0f/zed_wrapper/config/common.yaml#L58-L60) set to false to avoid TF conflicts):
+
+```bash
+ros2 launch zed_wrapper zed.launch.py
+
+ros2 launch rtabmap_ros rtabmap.launch.py \
+    rtabmap_args:="--delete_db_on_start" \
+    rgb_topic:=/zed/zed_node/rgb/image_rect_color \
+    depth_topic:=/zed/zed_node/depth/depth_registered \
+    camera_info_topic:=/zed/zed_node/rgb/camera_info \
+    frame_id:=base_link \
+    approx_sync:=false \
+    wait_imu_to_init:=true \
+    imu_topic:=/zed/zed_node/imu/data \
+    qos:=1 \
+    rviz:=true
+```
+`qos` (Quality of Service) argument should match the published topics QoS (1=RELIABLE, 2=BEST EFFORT). ROS1 was always RELIABLE.
 
 # Installation 
 
-## ROS2 distribution
-**Under construction**: see [ros2 branch](https://github.com/introlab/rtabmap_ros/tree/ros2#rtabmap_ros).
-
-## ROS distribution 
-RTAB-Map is released as binaries in the ROS distribution.
-* Noetic
-    ```
-    $ sudo apt install ros-noetic-rtabmap-ros
-    ```
-* Melodic
-    ```
-    $ sudo apt install ros-melodic-rtabmap-ros
+* RTAB-Map ROS2 package:
+    ```bash
+    cd ~/ros2_ws
+    git clone https://github.com/introlab/rtabmap.git src/rtabmap
+    git clone --branch ros2 https://github.com/introlab/rtabmap_ros.git src/rtabmap_ros
+    export MAKEFLAGS="-j6" # Can be ignored if you have a lot of RAM (>16GB)
+    colcon build --symlink-install
     ```
 
-When launching `rtabmap_ros`'s nodes, if you have the error `error while loading shared libraries...`, try `ldconfig` or add the next line at the end of your `~/.bashrc` to fix it:
+* To build with `rgbd_cameras>1` support and/or `subscribe_user_data` support:
+    ```bash
+    colcon build --symlink-install --cmake-args -DRTABMAP_SYNC_MULTI_RGBD=ON -DRTABMAP_SYNC_USER_DATA=ON
+    ```
+
+# Example with Turtlebot3
+
+1. Launch Turtlebot3 simulator:
+    ```bash
+    export TURTLEBOT3_MODEL=waffle
+    ros2 launch turtlebot3_gazebo turtlebot3_world.launch.py
     
-```bash
-$ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/ros/noetic/lib/x86_64-linux-gnu
-```
-
-### Docker
-
-* Go to [docker](https://github.com/introlab/rtabmap_ros/tree/master/docker) directory for an example.
-
-
-## Build from source
-This section shows how to install RTAB-Map ros-pkg on **ROS Melodic/Noetic** (Catkin build).
-
-* The next instructions assume that you have set up your ROS workspace using this [tutorial](http://wiki.ros.org/catkin/Tutorials/create_a_workspace). The workspace path is `~/catkin_ws` and your `~/.bashrc` contains:
- 
-    ```bash
-    $ source /opt/ros/$ROS_DISTRO/setup.bash
-    $ source ~/catkin_ws/devel/setup.bash
+    export TURTLEBOT3_MODEL=waffle
+    ros2 run turtlebot3_teleop teleop_keyboard
     ```
 
- 0. Required dependencies
-     * The easiest way to get all them (Qt, PCL, VTK, OpenCV, ...) is to install/uninstall rtabmap binaries:
-          ```bash
-          $ sudo apt install ros-$ROS_DISTRO-rtabmap ros-$ROS_DISTRO-rtabmap-ros
-          $ sudo apt remove ros-$ROS_DISTRO-rtabmap ros-$ROS_DISTRO-rtabmap-ros
-          ```
- 
- 1. Optional dependencies
-     * If you want SURF/SIFT on Melodic/Noetic, you have to build [OpenCV]([OpenCV](http://opencv.org/)) from source to have access to *xfeatures2d* and *nonfree* modules (note that SIFT is not in *nonfree* anymore since OpenCV 4.4.0). Install it in `/usr/local` (default) and rtabmap library should link with it instead of the one installed in ROS. 
-         * On Melodic/Noetic, build from source with *xfeatures2d* module (and *nonfree* module if needed) the same OpenCV version already installed on the system. You will then avoid breaking `cv_bridge` with `rtabmap_ros`. If you want to install a more recent OpenCV version, I recommend to uninstall `libopencv*` libraries (with all ros packages depending on it) and rebuild all those ros packages in your catkin workspace (to make sure `cv_bridge` is linked on the OpenCV version you just compiled).
-  
-    * [g2o](https://github.com/RainerKuemmerle/g2o): Should be already installed by `ros-$ROS_DISTRO-libg2o`.
-
-    * [GTSAM](https://gtsam.org/get_started/): Install via PPA to avoid building from source. If you install from source, make sure to build with `cmake  -DGTSAM_BUILD_WITH_MARCH_NATIVE=OFF -DGTSAM_USE_SYSTEM_EIGEN=ON`.
+2. Launch RTAB-Map:
+    ```
+    ros2 launch rtabmap_ros turtlebot3_scan.launch.py
     
-    * [libpointmatcher](https://github.com/ethz-asl/libpointmatcher): **Recommended** if you are going to use lidars. Follow their [instructions](https://github.com/ethz-asl/libpointmatcher#quick-start) to install. Should be alread installed by `ros-$ROS_DISTRO-libpointmatcher`.
-
-2. Install RTAB-Map standalone libraries. **Do not clone in your Catkin workspace**.
-    ```bash
-    $ cd ~
-    $ git clone https://github.com/introlab/rtabmap.git rtabmap
-    $ cd rtabmap/build
-    $ cmake ..  [<---double dots included]
-    $ make -j6
-    $ sudo make install
+    # OR with rtabmap.launch.py
+    ros2 launch rtabmap_ros rtabmap.launch.py \
+       visual_odometry:=false \
+       frame_id:=base_footprint \
+       subscribe_scan:=true depth:=false \
+       approx_sync:=true \
+       odom_topic:=/odom \
+       scan_topic:=/scan \
+       qos:=2 \
+       args:="-d --RGBD/NeighborLinkRefining true --Reg/Strategy 1" \
+       use_sim_time:=true \
+       rviz:=true
     ```
 
-3. Install RTAB-Map ros-pkg in your src folder of your Catkin workspace.
- 
-    ```bash
-    $ cd ~/catkin_ws
-    $ git clone https://github.com/introlab/rtabmap_ros.git src/rtabmap_ros
-    $ catkin_make -j4
+3. Launch navigation (`nav2_bringup` package should be installed):
     ```
-    * Use `catkin_make -j1` if compilation requires more RAM than you have (e.g., some files require up to ~2 GB to build depending on gcc version).
-    * Options:
-        * Add `-DRTABMAP_SYNC_MULTI_RGBD=ON` to `catkin_make` if you plan to use multiple cameras.
-        * Add `-DRTABMAP_SYNC_USER_DATA=ON` to `catkin_make` if you plan to use user data synchronized topics.
-
-## Build from source for Nvidia Jetson
- * For **Jetpack 4** (Ubuntu 18.04 with ROS Melodic), see this [post](https://github.com/introlab/rtabmap/issues/427#issuecomment-608052821).
- * For **Jetpack 3** (Ubuntu 16.04 with ROS Kinetic), see this [post](https://github.com/introlab/rtabmap_ros/issues/655).
-
-
-### Update to new version 
-
-```bash
-###########
-# rtabmap
-###########
-$ cd rtabmap
-$ git pull origin master
-$ cd build
-$ make
-$ make install
-# Do "sudo make install" if you installed rtabmap in "/usr/local"
-
-###########
-# rtabmap_ros
-###########
-$ roscd rtabmap_ros
-$ git pull origin master
-$ roscd
-$ cd ..
-$ catkin_make -j1 --pkg rtabmap_ros
-```
-
-
+    ros2 launch nav2_bringup navigation_launch.py use_sim_time:=True
+    ros2 launch nav2_bringup rviz_launch.py
+    ```
+    
+See [launch/ros2](https://github.com/introlab/rtabmap_ros/tree/ros2/launch/ros2) subfolder for some other ROS2 examples with turtlebot3 in simulation and a RGB-D camera.
