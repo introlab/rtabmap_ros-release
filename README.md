@@ -1,3 +1,26 @@
+## rtabmap_ros (humble) - 0.20.20-1
+
+The packages in the `rtabmap_ros` repository were released into the `humble` distro by running `/usr/bin/bloom-release rtabmap_ros --ros-distro humble` on `Sun, 02 Oct 2022 02:10:35 -0000`
+
+The `rtabmap_ros` package was released.
+
+Version of package(s) in repository `rtabmap_ros`:
+
+- upstream repository: https://github.com/introlab/rtabmap_ros.git
+- release repository: unknown
+- rosdistro version: `null`
+- old version: `null`
+- new version: `0.20.20-1`
+
+Versions of tools used:
+
+- bloom version: `0.11.2`
+- catkin_pkg version: `0.5.2`
+- rosdep version: `0.22.1`
+- rosdistro version: `0.9.0`
+- vcstools version: `0.1.42`
+
+
 ## rtabmap_ros (galactic) - 0.20.20-1
 
 The packages in the `rtabmap_ros` repository were released into the `galactic` distro by running `/usr/bin/bloom-release rtabmap_ros --ros-distro galactic` on `Sun, 02 Oct 2022 02:08:03 -0000`
