@@ -1,0 +1,13 @@
+Source: ros-humble-rtabmap-ros
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), libpcl-dev, ros-humble-ament-cmake, ros-humble-ament-lint-auto <!nocheck>, ros-humble-ament-lint-common <!nocheck>, ros-humble-builtin-interfaces, ros-humble-class-loader, ros-humble-cv-bridge, ros-humble-geometry-msgs, ros-humble-image-geometry, ros-humble-image-transport, ros-humble-laser-geometry, ros-humble-message-filters, ros-humble-nav-msgs, ros-humble-nav2-msgs, ros-humble-octomap, ros-humble-octomap-msgs, ros-humble-pcl-conversions, ros-humble-pluginlib, ros-humble-rclcpp, ros-humble-rclcpp-components, ros-humble-rclpy, ros-humble-rosgraph-msgs, ros-humble-rosidl-default-generators, ros-humble-rtabmap, ros-humble-rviz-common, ros-humble-rviz-default-plugins, ros-humble-rviz-rendering, ros-humble-sensor-msgs, ros-humble-std-msgs, ros-humble-std-srvs, ros-humble-stereo-msgs, ros-humble-tf2, ros-humble-tf2-eigen, ros-humble-tf2-geometry-msgs, ros-humble-tf2-ros, ros-humble-visualization-msgs, ros-humble-ros-workspace, ros-humble-rosidl-typesupport-fastrtps-c, ros-humble-rosidl-typesupport-fastrtps-cpp
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-humble-rtabmap-ros
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-humble-builtin-interfaces, ros-humble-class-loader, ros-humble-compressed-depth-image-transport, ros-humble-compressed-image-transport, ros-humble-cv-bridge, ros-humble-geometry-msgs, ros-humble-image-geometry, ros-humble-image-transport, ros-humble-laser-geometry, ros-humble-message-filters, ros-humble-nav-msgs, ros-humble-nav2-common, ros-humble-nav2-msgs, ros-humble-octomap, ros-humble-octomap-msgs, ros-humble-pcl-conversions, ros-humble-pluginlib, ros-humble-rclcpp, ros-humble-rclcpp-components, ros-humble-rclpy, ros-humble-rosgraph-msgs, ros-humble-rosidl-default-runtime, ros-humble-rtabmap, ros-humble-rviz-common, ros-humble-rviz-default-plugins, ros-humble-rviz-rendering, ros-humble-sensor-msgs, ros-humble-std-msgs, ros-humble-std-srvs, ros-humble-stereo-msgs, ros-humble-tf2, ros-humble-tf2-eigen, ros-humble-tf2-geometry-msgs, ros-humble-tf2-ros, ros-humble-visualization-msgs, ros-humble-ros-workspace
+Description: RTAB-Map's ros-pkg.
+ RTAB-Map is a RGB-D SLAM approach with real-time constraints.
