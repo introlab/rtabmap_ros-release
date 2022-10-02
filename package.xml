@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>rtabmap_ros</name>
-  <version>0.20.18</version>
+  <version>0.20.20</version>
   <description>RTAB-Map's ros-pkg. RTAB-Map is a RGB-D SLAM approach with real-time constraints.</description>
   <maintainer email="matlabbe@gmail.com">Mathieu Labbe</maintainer>
   <author>Mathieu Labbe</author>
@@ -37,6 +37,7 @@
   <build_depend>tf2</build_depend>
   <build_depend>tf2_eigen</build_depend>
   <build_depend>tf2_ros</build_depend>
+  <build_depend>tf2_geometry_msgs</build_depend>
   <build_depend>laser_geometry</build_depend>
   <build_depend>pcl_conversions</build_depend>
   <build_depend>message_filters</build_depend>
@@ -70,6 +71,7 @@
   <exec_depend>tf2</exec_depend>
   <exec_depend>tf2_eigen</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
   <exec_depend>laser_geometry</exec_depend>
   <exec_depend>pcl_conversions</exec_depend>
   <exec_depend>message_filters</exec_depend>
