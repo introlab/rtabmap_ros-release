@@ -1,4 +1,4 @@
 
-Header header
+std_msgs/Header header
 
-rtabmap_ros/RGBDImage[] rgbd_images
+RGBDImage[] rgbd_images

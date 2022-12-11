@@ -1,108 +1,87 @@
 
-#include <ros/ros.h>
-#include <pluginlib/class_list_macros.h>
-#include <nodelet/nodelet.h>
+#include <rtabmap_ros/lidar_deskewing.hpp>
 
-#include <tf/transform_listener.h>
+#include <laser_geometry/laser_geometry.hpp>
 
-#include <sensor_msgs/PointCloud2.h>
-#include <sensor_msgs/LaserScan.h>
-
-#include <laser_geometry/laser_geometry.h>
-
-#include <pcl_ros/transforms.h>
-
-#include <rtabmap/core/util3d_transforms.h>
-#include <rtabmap/utilite/UTimer.h>
 #include <rtabmap_ros/MsgConversion.h>
 
 namespace rtabmap_ros
 {
 
-class LidarDeskewing : public nodelet::Nodelet
+LidarDeskewing::LidarDeskewing(const rclcpp::NodeOptions & options) :
+	Node("pointcloud_to_depthimage", options),
+	waitForTransformDuration_(0.01),
+	slerp_(false)
 {
-public:
-	LidarDeskewing() :
-		waitForTransformDuration_(0.01),
-		slerp_(false),
-		tfListener_(0)
+	tfBuffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+	//auto timer_interface = std::make_shared<tf2_ros::CreateTimerROS>(
+	//	this->get_node_base_interface(),
+	//	this->get_node_timers_interface());
+	//tfBuffer_->setCreateTimerInterface(timer_interface);
+	tfListener_ = std::make_shared<tf2_ros::TransformListener>(*tfBuffer_);
+
+	int queueSize = 5;
+	int qos = 0;
+	queueSize = this->declare_parameter("queue_size", queueSize);
+	qos = this->declare_parameter("qos", qos);
+	fixedFrameId_ = this->declare_parameter("fixed_frame_id", fixedFrameId_);
+	waitForTransformDuration_ = this->declare_parameter("wait_for_transform", waitForTransformDuration_);
+	slerp_ = this->declare_parameter("slerp", slerp_);
+
+	RCLCPP_INFO(this->get_logger(), "  fixed_frame_id:  %s", fixedFrameId_.c_str());
+	RCLCPP_INFO(this->get_logger(), "  wait_for_transform:  %fs", waitForTransformDuration_);
+	RCLCPP_INFO(this->get_logger(), "  slerp:  %s", slerp_?"true":"false");
+
+	if(fixedFrameId_.empty())
 	{
+		RCLCPP_FATAL(this->get_logger(), "fixed_frame_id parameter cannot be empty!");
 	}
 
-	virtual ~LidarDeskewing()
+	subScan_ = create_subscription<sensor_msgs::msg::LaserScan>("input_scan", rclcpp::QoS(queueSize).reliability((rmw_qos_reliability_policy_t)qos), std::bind(&LidarDeskewing::callbackScan, this, std::placeholders::_1));
+	subCloud_ = create_subscription<sensor_msgs::msg::PointCloud2>("input_cloud", rclcpp::QoS(queueSize).reliability((rmw_qos_reliability_policy_t)qos), std::bind(&LidarDeskewing::callbackCloud, this, std::placeholders::_1));
+
+	pubScan_ = create_publisher<sensor_msgs::msg::PointCloud2>(std::string(subScan_->get_topic_name()) + "/deskewed", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos));
+	pubCloud_ = create_publisher<sensor_msgs::msg::PointCloud2>(std::string(subCloud_->get_topic_name()) + "/deskewed", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos));
+}
+
+LidarDeskewing::~LidarDeskewing()
+{
+}
+
+void LidarDeskewing::callbackScan(const sensor_msgs::msg::LaserScan::ConstSharedPtr msg)
+{
+	sensor_msgs::msg::PointCloud2 scanOut;
+	laser_geometry::LaserProjection projection;
+	projection.transformLaserScanToPointCloud(fixedFrameId_, *msg, scanOut, *tfBuffer_);
+
+	rtabmap::Transform t = rtabmap_ros::getTransform(msg->header.frame_id, scanOut.header.frame_id, msg->header.stamp, *tfBuffer_, waitForTransformDuration_);
+	if(t.isNull())
 	{
+		RCLCPP_ERROR(this->get_logger(), "Cannot transform back projected scan from \"%s\" frame to \"%s\" frame at time %fs.",
+				scanOut.header.frame_id.c_str(), msg->header.frame_id.c_str(), rtabmap_ros::timestampFromROS(msg->header.stamp));
+		return;
 	}
+	sensor_msgs::msg::PointCloud2 scanOutDeskewed;
+	rtabmap_ros::transformPointCloud(t.toEigen4f(), scanOut, scanOutDeskewed);
+	pubScan_->publish(scanOutDeskewed);
+}
 
-private:
-	virtual void onInit()
+void LidarDeskewing::callbackCloud(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
+{
+	sensor_msgs::msg::PointCloud2 msgDeskewed;
+	if(deskew(*msg, msgDeskewed, fixedFrameId_, *tfBuffer_, waitForTransformDuration_, slerp_))
 	{
-		tfListener_ = new tf::TransformListener();
-		ros::NodeHandle & nh = getNodeHandle();
-		ros::NodeHandle & pnh = getPrivateNodeHandle();
-
-		pnh.param("fixed_frame_id", fixedFrameId_, fixedFrameId_);
-		pnh.param("wait_for_transform", waitForTransformDuration_, waitForTransformDuration_);
-		pnh.param("slerp", slerp_, slerp_);
-
-		NODELET_INFO("fixed_frame_id:  %s", fixedFrameId_.c_str());
-		NODELET_INFO("wait_for_transform:  %fs", waitForTransformDuration_);
-		NODELET_INFO("slerp:  %s", slerp_?"true":"false");
-
-		if(fixedFrameId_.empty())
-		{
-			NODELET_FATAL("fixed_frame_id parameter cannot be empty!");
-		}
-
-		pubScan_ = nh.advertise<sensor_msgs::PointCloud2>(nh.resolveName("input_scan") + "/deskewed", 1);
-		pubCloud_ = nh.advertise<sensor_msgs::PointCloud2>(nh.resolveName("input_cloud") + "/deskewed", 1);
-		subScan_ = nh.subscribe("input_scan", 1, &LidarDeskewing::callbackScan, this);
-		subCloud_ = nh.subscribe("input_cloud", 1, &LidarDeskewing::callbackCloud, this);
+		pubCloud_->publish(msgDeskewed);
 	}
-
-	void callbackScan(const sensor_msgs::LaserScanConstPtr & msg)
+	else
 	{
-		sensor_msgs::PointCloud2 scanOut;
-		laser_geometry::LaserProjection projection;
-		projection.transformLaserScanToPointCloud(fixedFrameId_, *msg, scanOut, *tfListener_);
-
-		sensor_msgs::PointCloud2 scanOutDeskewed;
-		if(!pcl_ros::transformPointCloud(msg->header.frame_id, scanOut, scanOutDeskewed, *tfListener_))
-		{
-			ROS_ERROR("Cannot transform back projected scan from \"%s\" frame to \"%s\" frame at time %fs.",
-					fixedFrameId_.c_str(), msg->header.frame_id.c_str(), msg->header.stamp.toSec());
-			return;
-		}
-		pubScan_.publish(scanOutDeskewed);
+		// Just republish the msg to not breakdown downstream
+		// A warning should be already shown (see deskew() source code)
+		RCLCPP_WARN(this->get_logger(), "deskewing failed! returning possible skewed cloud!");
+		pubCloud_->publish(*msg);
 	}
+}
 
-	void callbackCloud(const sensor_msgs::PointCloud2ConstPtr & msg)
-	{
-		sensor_msgs::PointCloud2 msgDeskewed;
-		if(deskew(*msg, msgDeskewed, fixedFrameId_, *tfListener_, waitForTransformDuration_, slerp_))
-		{
-			pubCloud_.publish(msgDeskewed);
-		}
-		else
-		{
-			// Just republish the msg to not breakdown downstream
-			// A warning should be already shown (see deskew() source code)
-			ROS_WARN("deskewing failed! returning possible skewed cloud!");
-			pubCloud_.publish(msg);
-		}
-	}
-
-private:
-	ros::Publisher pubScan_;
-	ros::Publisher pubCloud_;
-	ros::Subscriber subScan_;
-	ros::Subscriber subCloud_;
-	std::string fixedFrameId_;
-	double waitForTransformDuration_;
-	bool slerp_;
-	tf::TransformListener * tfListener_;
-};
-
-PLUGINLIB_EXPORT_CLASS(rtabmap_ros::LidarDeskewing, nodelet::Nodelet);
 }
 
 
