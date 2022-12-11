@@ -1,6 +1,6 @@
 
 int32 id
-int32 map_id
+int32 mapId
 int32 weight
 float64 stamp
 string label
@@ -9,7 +9,7 @@ string label
 geometry_msgs/Pose pose
 
 # Ground truth (optional)
-geometry_msgs/Pose ground_truth_pose
+geometry_msgs/Pose groundTruthPose
 
 # GPS (optional)
 GPS gps
@@ -31,20 +31,20 @@ float32[] width
 float32[] height
 float32[] baseline
 # local transform (/base_link -> /camera_link)
-geometry_msgs/Transform[] local_transform
+geometry_msgs/Transform[] localTransform
 
 # compressed 2D or 3D laser scan
 # use rtabmap::util3d::uncompressData() from "rtabmap/core/util3d.h"
-uint8[] laser_scan
-int32 laser_scan_max_pts
-float32 laser_scan_max_range
-int32 laser_scan_format
+uint8[] laserScan
+int32 laserScanMaxPts
+float32 laserScanMaxRange
+int32 laserScanFormat
 # local transform (/base_link -> /base_laser)
-geometry_msgs/Transform laser_scan_local_transform
+geometry_msgs/Transform laserScanLocalTransform
 
 # compressed user data
 # use rtabmap::util3d::uncompressData() from "rtabmap/core/util3d.h"
-uint8[] user_data
+uint8[] userData
 
 # compressed occupancy grid
 # use rtabmap::util3d::uncompressData() from "rtabmap/core/util3d.h"
@@ -57,14 +57,14 @@ Point3f grid_view_point
 # std::multimap<wordId, index>
 # std::vector<cv::Keypoint>
 # std::vector<cv::Point3f>
-int32[] word_id_keys
-int32[] word_id_values
-KeyPoint[] word_kpts
-Point3f[] word_pts
+int32[] wordIdKeys
+int32[] wordIdValues
+KeyPoint[] wordKpts
+Point3f[] wordPts
 # compressed descriptors
 # use rtabmap::util3d::uncompressData() from "rtabmap/core/util3d.h"
-uint8[] word_descriptors
+uint8[] wordDescriptors
 
-GlobalDescriptor[] global_descriptors
+GlobalDescriptor[] globalDescriptors
 
 EnvSensor[] env_sensors

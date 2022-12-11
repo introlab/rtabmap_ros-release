@@ -30,64 +30,65 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace rtabmap_ros {
 
 void CommonDataSubscriber::odomCallback(
-		const nav_msgs::msg::Odometry::ConstSharedPtr odomMsg)
+		const nav_msgs::OdometryConstPtr& odomMsg)
 {
 	callbackCalled();
-	rtabmap_ros::msg::UserData::SharedPtr userDataMsg; // Null
-	sensor_msgs::msg::PointCloud2::SharedPtr scan3dMsg; // Null
-	rtabmap_ros::msg::OdomInfo::SharedPtr odomInfoMsg; // null
+	rtabmap_ros::UserDataConstPtr userDataMsg; // Null
+	sensor_msgs::PointCloud2ConstPtr scan3dMsg; // Null
+	rtabmap_ros::OdomInfoConstPtr odomInfoMsg; // null
 	commonOdomCallback(odomMsg, userDataMsg, odomInfoMsg);
 }
 void CommonDataSubscriber::odomInfoCallback(
-		const nav_msgs::msg::Odometry::ConstSharedPtr odomMsg,
-		const rtabmap_ros::msg::OdomInfo::ConstSharedPtr odomInfoMsg)
+		const nav_msgs::OdometryConstPtr& odomMsg,
+		const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg)
 {
 	callbackCalled();
-	rtabmap_ros::msg::UserData::SharedPtr userDataMsg; // Null
-	sensor_msgs::msg::LaserScan::SharedPtr scan2dMsg; // Null
+	rtabmap_ros::UserDataConstPtr userDataMsg; // Null
+	sensor_msgs::LaserScanConstPtr scan2dMsg; // Null
 	commonOdomCallback(odomMsg, userDataMsg, odomInfoMsg);
 }
 #ifdef RTABMAP_SYNC_USER_DATA
 void CommonDataSubscriber::odomDataCallback(
-		const nav_msgs::msg::Odometry::ConstSharedPtr odomMsg,
-		const rtabmap_ros::msg::UserData::ConstSharedPtr userDataMsg)
+		const nav_msgs::OdometryConstPtr& odomMsg,
+		const rtabmap_ros::UserDataConstPtr & userDataMsg)
 {
 	callbackCalled();
-	rtabmap_ros::msg::OdomInfo::SharedPtr odomInfoMsg; // null
+	rtabmap_ros::OdomInfoConstPtr odomInfoMsg; // null
 	commonOdomCallback(odomMsg, userDataMsg, odomInfoMsg);
 }
 void CommonDataSubscriber::odomDataInfoCallback(
-		const nav_msgs::msg::Odometry::ConstSharedPtr odomMsg,
-		const rtabmap_ros::msg::UserData::ConstSharedPtr userDataMsg,
-		const rtabmap_ros::msg::OdomInfo::ConstSharedPtr odomInfoMsg)
+		const nav_msgs::OdometryConstPtr& odomMsg,
+		const rtabmap_ros::UserDataConstPtr & userDataMsg,
+		const rtabmap_ros::OdomInfoConstPtr& odomInfoMsg)
 {
 	callbackCalled();
-	sensor_msgs::msg::PointCloud2::SharedPtr scan3dMsg; // Null
+	sensor_msgs::PointCloud2ConstPtr scan3dMsg; // Null
 	commonOdomCallback(odomMsg, userDataMsg, odomInfoMsg);
 }
 #endif
 
 void CommonDataSubscriber::setupOdomCallbacks(
-		rclcpp::Node& node,
+		ros::NodeHandle & nh,
+		ros::NodeHandle & pnh,
 		bool subscribeUserData,
 		bool subscribeOdomInfo,
 		int queueSize,
 		bool approxSync)
 {
-	RCLCPP_INFO(node.get_logger(), "Setup scan callback");
+	ROS_INFO("Setup scan callback");
 
 	if(subscribeUserData || subscribeOdomInfo)
 	{
-		odomSub_.subscribe(&node, "odom", rclcpp::QoS(1).reliability(qosOdom_).get_rmw_qos_profile());
+		odomSub_.subscribe(nh, "odom", queueSize);
 
 #ifdef RTABMAP_SYNC_USER_DATA
 		if(subscribeUserData)
 		{
-			userDataSub_.subscribe(&node, "user_data", rclcpp::QoS(1).reliability(qosUserData_).get_rmw_qos_profile());
+			userDataSub_.subscribe(nh, "user_data", queueSize);
 			if(subscribeOdomInfo)
 			{
 				subscribedToOdomInfo_ = true;
-				odomInfoSub_.subscribe(&node, "odom_info", rclcpp::QoS(1).reliability(qosOdom_).get_rmw_qos_profile());
+				odomInfoSub_.subscribe(nh, "odom_info", queueSize);
 				SYNC_DECL3(CommonDataSubscriber, odomDataInfo, approxSync, queueSize, odomSub_, userDataSub_, odomInfoSub_);
 			}
 			else
@@ -100,17 +101,17 @@ void CommonDataSubscriber::setupOdomCallbacks(
 		if(subscribeOdomInfo)
 		{
 			subscribedToOdomInfo_ = true;
-			odomInfoSub_.subscribe(&node, "odom_info", rclcpp::QoS(1).reliability(qosOdom_).get_rmw_qos_profile());
+			odomInfoSub_.subscribe(nh, "odom_info", queueSize);
 			SYNC_DECL2(CommonDataSubscriber, odomInfo, approxSync, queueSize, odomSub_, odomInfoSub_);
 		}
 	}
 	else
 	{
-		odomSubOnly_ = node.create_subscription<nav_msgs::msg::Odometry>("odom", rclcpp::QoS(1).reliability(qosOdom_), std::bind(&CommonDataSubscriber::odomCallback, this, std::placeholders::_1));
+		odomSubOnly_ = nh.subscribe("odom", queueSize, &CommonDataSubscriber::odomCallback, this);
 		subscribedTopicsMsg_ =
 				uFormat("\n%s subscribed to:\n   %s",
-				node.get_name(),
-				odomSubOnly_->get_topic_name());
+				ros::this_node::getName().c_str(),
+				odomSubOnly_.getTopic().c_str());
 	}
 }
 

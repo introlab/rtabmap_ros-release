@@ -25,195 +25,244 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <rtabmap_ros/stereo_sync.hpp>
+#include <ros/ros.h>
+#include <pluginlib/class_list_macros.h>
+#include <nodelet/nodelet.h>
 
-#include <sensor_msgs/msg/compressed_image.hpp>
-#include <sensor_msgs/image_encodings.hpp>
+#include <sensor_msgs/Image.h>
+#include <sensor_msgs/CompressedImage.h>
+#include <sensor_msgs/image_encodings.h>
+#include <sensor_msgs/CameraInfo.h>
+
+#include <image_transport/image_transport.h>
+#include <image_transport/subscriber_filter.h>
+
+#include <message_filters/sync_policies/approximate_time.h>
+#include <message_filters/sync_policies/exact_time.h>
+#include <message_filters/subscriber.h>
 
 #include <cv_bridge/cv_bridge.h>
 #include <opencv2/highgui/highgui.hpp>
 
+#include <boost/thread.hpp>
+
+#include "rtabmap_ros/RGBDImage.h"
+
 #include "rtabmap/core/Compression.h"
 #include "rtabmap/utilite/UConversion.h"
-#include "rtabmap_ros/MsgConversion.h"
 
 namespace rtabmap_ros
 {
 
-StereoSync::StereoSync(const rclcpp::NodeOptions & options) :
-		Node("stereo_sync", options),
+class StereoSync : public nodelet::Nodelet
+{
+public:
+	StereoSync() :
 		compressedRate_(0),
 		warningThread_(0),
 		callbackCalled_(false),
 		approxSync_(0),
 		exactSync_(0)
-{
-	int queueSize = 10;
-	bool approxSync = false;
-	double approxSyncMaxInterval = 0.0;
-	int qos = 0;
-	approxSync = this->declare_parameter("approx_sync", approxSync);
-	approxSyncMaxInterval = this->declare_parameter("approx_sync_max_interval", approxSyncMaxInterval);
-	queueSize = this->declare_parameter("queue_size", queueSize);
-	qos = this->declare_parameter("qos", qos);
-	int qosCamInfo = this->declare_parameter("qos_camera_info", qos);
-	compressedRate_ = this->declare_parameter("compressed_rate", compressedRate_);
+	{}
 
-	RCLCPP_INFO(this->get_logger(), "%s: approx_sync = %s", get_name(), approxSync?"true":"false");
-	RCLCPP_INFO(this->get_logger(), "%s: approx_sync_max_interval = %f", get_name(), approxSyncMaxInterval);
-	RCLCPP_INFO(this->get_logger(), "%s: queue_size  = %d", get_name(), queueSize);
-	RCLCPP_INFO(this->get_logger(), "%s: qos         = %d", get_name(), qos);
-	RCLCPP_INFO(this->get_logger(), "%s: qos_camera_info = %d", get_name(), qosCamInfo);
-	RCLCPP_INFO(this->get_logger(), "%s: compressed_rate = %f", get_name(), compressedRate_);
-
-	rgbdImagePub_ = create_publisher<rtabmap_ros::msg::RGBDImage>("rgbd_image", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos));
-	rgbdImageCompressedPub_ = create_publisher<rtabmap_ros::msg::RGBDImage>("rgbd_image/compressed", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos));
-
-	if(approxSync)
+	virtual ~StereoSync()
 	{
-		approxSync_ = new message_filters::Synchronizer<MyApproxSyncPolicy>(MyApproxSyncPolicy(queueSize), imageLeftSub_, imageRightSub_, cameraInfoLeftSub_, cameraInfoRightSub_);
-		if(approxSyncMaxInterval>0.0)
-			approxSync_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(approxSyncMaxInterval));
-		approxSync_->registerCallback(std::bind(&StereoSync::callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-	}
-	else
-	{
-		exactSync_ = new message_filters::Synchronizer<MyExactSyncPolicy>(MyExactSyncPolicy(queueSize), imageLeftSub_, imageRightSub_, cameraInfoLeftSub_, cameraInfoRightSub_);
-		exactSync_->registerCallback(std::bind(&StereoSync::callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+		if(approxSync_)
+			delete approxSync_;
+		if(exactSync_)
+			delete exactSync_;
+
+		if(warningThread_)
+		{
+			callbackCalled_=true;
+			warningThread_->join();
+			delete warningThread_;
+		}
 	}
 
-	image_transport::TransportHints hints(this);
-	imageLeftSub_.subscribe(this, "left/image_rect", hints.getTransport(), rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos).get_rmw_qos_profile());
-	imageRightSub_.subscribe(this, "right/image_rect", hints.getTransport(), rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos).get_rmw_qos_profile());
-	cameraInfoLeftSub_.subscribe(this, "left/camera_info"), rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qosCamInfo).get_rmw_qos_profile();
-	cameraInfoRightSub_.subscribe(this, "right/camera_info", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qosCamInfo).get_rmw_qos_profile());
+private:
+	virtual void onInit()
+	{
+		ros::NodeHandle & nh = getNodeHandle();
+		ros::NodeHandle & pnh = getPrivateNodeHandle();
 
-	subscribedTopicsMsg_ = uFormat("\n%s subscribed to (%s sync%s):\n   %s,\n   %s,\n   %s,\n   %s",
-						get_name(),
-						approxSync?"approx":"exact",
-						approxSync&&approxSyncMaxInterval!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval).c_str():"",
-						imageLeftSub_.getSubscriber().getTopic().c_str(),
-						imageRightSub_.getSubscriber().getTopic().c_str(),
-						cameraInfoLeftSub_.getSubscriber()->get_topic_name(),
-						cameraInfoRightSub_.getSubscriber()->get_topic_name());
+		int queueSize = 10;
+		bool approxSync = false;
+		double approxSyncMaxInterval = 0.0;
+		pnh.param("approx_sync", approxSync, approxSync);
+		if(approxSync)
+			pnh.param("approx_sync_max_interval", approxSyncMaxInterval, approxSyncMaxInterval);
+		pnh.param("queue_size", queueSize, queueSize);
+		pnh.param("compressed_rate", compressedRate_, compressedRate_);
 
-	RCLCPP_INFO(this->get_logger(), "%s", subscribedTopicsMsg_.c_str());
+		NODELET_INFO("%s: approx_sync = %s", getName().c_str(), approxSync?"true":"false");
+		NODELET_INFO("%s: approx_sync_max_interval = %f", getName().c_str(), approxSyncMaxInterval);
+		NODELET_INFO("%s: queue_size  = %d", getName().c_str(), queueSize);
+		NODELET_INFO("%s: compressed_rate = %f", getName().c_str(), compressedRate_);
 
-	warningThread_ = new std::thread([&](){
-		rclcpp::Rate r(1/5.0);
+		rgbdImagePub_ = nh.advertise<rtabmap_ros::RGBDImage>("rgbd_image", 1);
+		rgbdImageCompressedPub_ = nh.advertise<rtabmap_ros::RGBDImage>("rgbd_image/compressed", 1);
+
+		if(approxSync)
+		{
+			approxSync_ = new message_filters::Synchronizer<MyApproxSyncPolicy>(MyApproxSyncPolicy(queueSize), imageLeftSub_, imageRightSub_, cameraInfoLeftSub_, cameraInfoRightSub_);
+			if(approxSyncMaxInterval>0.0)
+				approxSync_->setMaxIntervalDuration(ros::Duration(approxSyncMaxInterval));
+			approxSync_->registerCallback(boost::bind(&StereoSync::callback, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4));
+		}
+		else
+		{
+			exactSync_ = new message_filters::Synchronizer<MyExactSyncPolicy>(MyExactSyncPolicy(queueSize), imageLeftSub_, imageRightSub_, cameraInfoLeftSub_, cameraInfoRightSub_);
+			exactSync_->registerCallback(boost::bind(&StereoSync::callback, this, boost::placeholders::_1, boost::placeholders::_2, boost::placeholders::_3, boost::placeholders::_4));
+		}
+
+		ros::NodeHandle left_nh(nh, "left");
+		ros::NodeHandle right_nh(nh, "right");
+		ros::NodeHandle left_pnh(pnh, "left");
+		ros::NodeHandle right_pnh(pnh, "right");
+		image_transport::ImageTransport rgb_it(left_nh);
+		image_transport::ImageTransport depth_it(right_nh);
+		image_transport::TransportHints hintsRgb("raw", ros::TransportHints(), left_pnh);
+		image_transport::TransportHints hintsDepth("raw", ros::TransportHints(), right_pnh);
+
+		imageLeftSub_.subscribe(rgb_it, left_nh.resolveName("image_rect"), 1, hintsRgb);
+		imageRightSub_.subscribe(depth_it, right_nh.resolveName("image_rect"), 1, hintsDepth);
+		cameraInfoLeftSub_.subscribe(left_nh, "camera_info", 1);
+		cameraInfoRightSub_.subscribe(right_nh, "camera_info", 1);
+
+		std::string subscribedTopicsMsg = uFormat("\n%s subscribed to (%s sync%s):\n   %s \\\n   %s \\\n   %s \\\n   %s",
+							getName().c_str(),
+							approxSync?"approx":"exact",
+							approxSync&&approxSyncMaxInterval!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval).c_str():"",
+							imageLeftSub_.getTopic().c_str(),
+							imageRightSub_.getTopic().c_str(),
+							cameraInfoLeftSub_.getTopic().c_str(),
+							cameraInfoRightSub_.getTopic().c_str());
+
+		warningThread_ = new boost::thread(boost::bind(&StereoSync::warningLoop, this, subscribedTopicsMsg, approxSync));
+		NODELET_INFO("%s", subscribedTopicsMsg.c_str());
+	}
+
+	void warningLoop(const std::string & subscribedTopicsMsg, bool approxSync)
+	{
+		ros::Duration r(5.0);
 		while(!callbackCalled_)
 		{
 			r.sleep();
 			if(!callbackCalled_)
 			{
-				RCLCPP_WARN(this->get_logger(),
-						"%s: Did not receive data since 5 seconds! Make sure the input topics are "
+				ROS_WARN("%s: Did not receive data since 5 seconds! Make sure the input topics are "
 						"published (\"$ rostopic hz my_topic\") and the timestamps in their "
 						"header are set. %s%s",
-						get_name(),
+						getName().c_str(),
 						approxSync?"":"Parameter \"approx_sync\" is false, which means that input "
 							"topics should have all the exact timestamp for the callback to be called.",
-						subscribedTopicsMsg_.c_str());
+						subscribedTopicsMsg.c_str());
 			}
 		}
-	});
-}
+	}
 
-StereoSync::~StereoSync()
-{
-	delete approxSync_;
-	delete exactSync_;
-
-	callbackCalled_=true;
-	warningThread_->join();
-	delete warningThread_;
-}
-
-void StereoSync::callback(
-		const sensor_msgs::msg::Image::ConstSharedPtr imageLeft,
-		const sensor_msgs::msg::Image::ConstSharedPtr imageRight,
-		const sensor_msgs::msg::CameraInfo::ConstSharedPtr cameraInfoLeft,
-		const sensor_msgs::msg::CameraInfo::ConstSharedPtr cameraInfoRight)
-{
-	callbackCalled_ = true;
-	if(rgbdImagePub_->get_subscription_count() || rgbdImageCompressedPub_->get_subscription_count())
+	void callback(
+			  const sensor_msgs::ImageConstPtr& imageLeft,
+			  const sensor_msgs::ImageConstPtr& imageRight,
+			  const sensor_msgs::CameraInfoConstPtr& cameraInfoLeft,
+			  const sensor_msgs::CameraInfoConstPtr& cameraInfoRight)
 	{
-		double leftStamp = timestampFromROS(imageLeft->header.stamp);
-		double rightStamp = timestampFromROS(imageRight->header.stamp);
-
-		double stampDiff = fabs(leftStamp - rightStamp);
-		if(stampDiff > 0.010)
+		callbackCalled_ = true;
+		if(rgbdImagePub_.getNumSubscribers() || rgbdImageCompressedPub_.getNumSubscribers())
 		{
-			RCLCPP_WARN(this->get_logger(), "The time difference between left and right frames is "
-					"high (diff=%fs, left=%fs, right=%fs). If your left and right cameras are hardware "
-					"synchronized, use approx_sync:=false. Otherwise, you may want "
-					"to set approx_sync_max_interval lower than 0.01s to reject spurious bad synchronizations.",
-					stampDiff,
-					leftStamp,
-					rightStamp);
-		}
+			double leftStamp = imageLeft->header.stamp.toSec();
+			double rightStamp = imageRight->header.stamp.toSec();
+			double leftInfoStamp = cameraInfoLeft->header.stamp.toSec();
+			double rightInfoStamp = cameraInfoRight->header.stamp.toSec();
 
-		rtabmap_ros::msg::RGBDImage::UniquePtr msg(new rtabmap_ros::msg::RGBDImage);
-		msg->header.frame_id = cameraInfoLeft->header.frame_id;
-		msg->header.stamp = leftStamp>rightStamp?imageLeft->header.stamp:imageRight->header.stamp;
-		msg->rgb_camera_info = *cameraInfoLeft;
-		msg->depth_camera_info = *cameraInfoRight;
-
-		if(rgbdImageCompressedPub_->get_subscription_count())
-		{
-			bool publishCompressed = true;
-			if (compressedRate_ > 0.0)
+			double stampDiff = fabs(leftStamp - rightStamp);
+			if(stampDiff > 0.010)
 			{
-				if ( lastCompressedPublished_ + rclcpp::Duration::from_seconds(1.0/compressedRate_) > now())
+				NODELET_WARN("The time difference between left and right frames is "
+						"high (diff=%fs, left=%fs, right=%fs). If your left and right cameras are hardware "
+						"synchronized, use approx_sync:=false. Otherwise, you may want "
+						"to set approx_sync_max_interval lower than 0.01s to reject spurious bad synchronizations.",
+						stampDiff,
+						leftStamp,
+						rightStamp);
+			}
+
+			rtabmap_ros::RGBDImage msg;
+			msg.header.frame_id = cameraInfoLeft->header.frame_id;
+			msg.header.stamp = imageLeft->header.stamp>imageRight->header.stamp?imageLeft->header.stamp:imageRight->header.stamp;
+			msg.rgb_camera_info = *cameraInfoLeft;
+			msg.depth_camera_info = *cameraInfoRight;
+
+			if(rgbdImageCompressedPub_.getNumSubscribers())
+			{
+				bool publishCompressed = true;
+				if (compressedRate_ > 0.0)
 				{
-					RCLCPP_DEBUG(this->get_logger(), "throttle last update at %f skipping", lastCompressedPublished_.seconds());
-					publishCompressed = false;
+					if ( lastCompressedPublished_ + ros::Duration(1.0/compressedRate_) > ros::Time::now())
+					{
+						NODELET_DEBUG("throttle last update at %f skipping", lastCompressedPublished_.toSec());
+						publishCompressed = false;
+					}
+				}
+
+				if(publishCompressed)
+				{
+					lastCompressedPublished_ = ros::Time::now();
+
+					rtabmap_ros::RGBDImage msgCompressed = msg;
+
+					cv_bridge::CvImageConstPtr imagePtr = cv_bridge::toCvShare(imageLeft);
+					imagePtr->toCompressedImageMsg(msgCompressed.rgb_compressed, cv_bridge::JPG);
+
+					cv_bridge::CvImageConstPtr imageDepthPtr = cv_bridge::toCvShare(imageRight);
+					imageDepthPtr->toCompressedImageMsg(msgCompressed.depth_compressed, cv_bridge::JPG);
+
+					rgbdImageCompressedPub_.publish(msgCompressed);
 				}
 			}
 
-			if(publishCompressed)
+			if(rgbdImagePub_.getNumSubscribers())
 			{
-				lastCompressedPublished_ = now();
+				msg.rgb = *imageLeft;
+				msg.depth = *imageRight;
+				rgbdImagePub_.publish(msg);
+			}
 
-				rtabmap_ros::msg::RGBDImage::UniquePtr msgCompressed(new rtabmap_ros::msg::RGBDImage);
-				*msgCompressed = *msg;
-
-				cv_bridge::CvImageConstPtr imagePtr = cv_bridge::toCvShare(imageLeft);
-				imagePtr->toCompressedImageMsg(msgCompressed->rgb_compressed, cv_bridge::JPG);
-
-				cv_bridge::CvImageConstPtr imageDepthPtr = cv_bridge::toCvShare(imageRight);
-				imageDepthPtr->toCompressedImageMsg(msgCompressed->depth_compressed, cv_bridge::JPG);
-
-				rgbdImageCompressedPub_->publish(std::move(msgCompressed));
+			if( leftStamp != imageLeft->header.stamp.toSec() ||
+				rightStamp != imageRight->header.stamp.toSec())
+			{
+				NODELET_ERROR("Input stamps changed between the beginning and the end of the callback! Make "
+						"sure the node publishing the topics doesn't override the same data after publishing them. A "
+						"solution is to use this node within another nodelet manager. Stamps: "
+						"left%f->%f right=%f->%f",
+						leftStamp, imageLeft->header.stamp.toSec(),
+						rightStamp, imageRight->header.stamp.toSec());
 			}
 		}
-
-		if(rgbdImagePub_->get_subscription_count())
-		{
-			msg->rgb = *imageLeft;
-			msg->depth = *imageRight;
-			rgbdImagePub_->publish(std::move(msg));
-		}
-
-		if( leftStamp != timestampFromROS(imageLeft->header.stamp) ||
-			rightStamp != timestampFromROS(imageRight->header.stamp))
-		{
-			RCLCPP_ERROR(this->get_logger(), "Input stamps changed between the beginning and the end of the callback! Make "
-					"sure the node publishing the topics doesn't override the same data after publishing them. A "
-					"solution is to use this node within another nodelet manager. Stamps: "
-					"left%f->%f right=%f->%f",
-					leftStamp, timestampFromROS(imageLeft->header.stamp),
-					rightStamp, timestampFromROS(imageRight->header.stamp));
-		}
 	}
+
+private:
+	double compressedRate_;
+	boost::thread * warningThread_;
+	bool callbackCalled_;
+	ros::Time lastCompressedPublished_;
+
+	ros::Publisher rgbdImagePub_;
+	ros::Publisher rgbdImageCompressedPub_;
+
+	image_transport::SubscriberFilter imageLeftSub_;
+	image_transport::SubscriberFilter imageRightSub_;
+	message_filters::Subscriber<sensor_msgs::CameraInfo> cameraInfoLeftSub_;
+	message_filters::Subscriber<sensor_msgs::CameraInfo> cameraInfoRightSub_;
+
+	typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, sensor_msgs::CameraInfo, sensor_msgs::CameraInfo> MyApproxSyncPolicy;
+	message_filters::Synchronizer<MyApproxSyncPolicy> * approxSync_;
+
+	typedef message_filters::sync_policies::ExactTime<sensor_msgs::Image, sensor_msgs::Image, sensor_msgs::CameraInfo, sensor_msgs::CameraInfo> MyExactSyncPolicy;
+	message_filters::Synchronizer<MyExactSyncPolicy> * exactSync_;
+};
+
+PLUGINLIB_EXPORT_CLASS(rtabmap_ros::StereoSync, nodelet::Nodelet);
 }
-
-}
-
-#include "rclcpp_components/register_node_macro.hpp"
-
-// Register the component with class_loader.
-// This acts as a sort of entry point, allowing the component to be discoverable when its library
-// is being loaded into a running process.
-RCLCPP_COMPONENTS_REGISTER_NODE(rtabmap_ros::StereoSync)
 
