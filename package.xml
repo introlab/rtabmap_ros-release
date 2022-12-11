@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>rtabmap_ros</name>
-  <version>0.20.20</version>
+  <version>0.20.22</version>
   <description>RTAB-Map's ros-pkg. RTAB-Map is a RGB-D SLAM approach with real-time constraints.</description>
   <maintainer email="matlabbe@gmail.com">Mathieu Labbe</maintainer>
   <author>Mathieu Labbe</author>
@@ -11,6 +11,7 @@
   <url type="repository">https://github.com/introlab/rtabmap_ros</url>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
