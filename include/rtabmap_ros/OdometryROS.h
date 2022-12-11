@@ -44,6 +44,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <boost/thread.hpp>
 
+#include "rtabmap_ros/ULogToRosout.h"
+
 namespace rtabmap {
 class Odometry;
 }
@@ -70,6 +72,7 @@ public:
 
 	const std::string & frameId() const {return frameId_;}
 	const std::string & odomFrameId() const {return odomFrameId_;}
+	const std::string & guessFrameId() const {return guessFrameId_;}
 	const rtabmap::ParametersMap & parameters() const {return parameters_;}
 	bool isPaused() const {return paused_;}
 	rtabmap::Transform getTransform(const std::string & fromFrameId, const std::string & toFrameId, const ros::Time & stamp) const;
@@ -80,6 +83,9 @@ protected:
 
 	virtual void flushCallbacks() = 0;
 	tf::TransformListener & tfListener() {return tfListener_;}
+	double waitForTransformDuration() const {return waitForTransform_?waitForTransformDuration_:0.0;}
+	rtabmap::Transform velocityGuess() const;
+	double previousStamp() const {return previousStamp_;}
 	virtual void postProcessData(const rtabmap::SensorData & data, const std_msgs::Header & header) const {}
 
 private:
@@ -141,11 +147,14 @@ private:
 	double previousStamp_;
 	double expectedUpdateRate_;
 	double maxUpdateRate_;
+	double minUpdateRate_;
 	int odomStrategy_;
 	bool waitIMUToinit_;
 	bool imuProcessed_;
 	std::map<double, rtabmap::IMU> imus_;
 	std::pair<rtabmap::SensorData, std_msgs::Header > bufferedData_;
+
+	ULogToRosout ulogToRosout_;
 };
 
 }
