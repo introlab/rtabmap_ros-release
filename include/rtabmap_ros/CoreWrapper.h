@@ -71,6 +71,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "MapsManager.h"
 
+#include "rtabmap_ros/ULogToRosout.h"
+
 #ifdef WITH_OCTOMAP_MSGS
 #include <octomap_msgs/GetOctomap.h>
 #endif
@@ -393,8 +395,8 @@ private:
 	bool alreadyRectifiedImages_;
 	bool twoDMapping_;
 	ros::Time previousStamp_;
-	std::set<int> nodesToRepublish_;
-	int maxNodesRepublished_;
+
+	ULogToRosout ulogToRosout_;
 };
 
 }
