@@ -25,123 +25,88 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <ros/ros.h>
-#include <pluginlib/class_list_macros.hpp>
-#include <nodelet/nodelet.h>
-
-#include <sensor_msgs/Image.h>
-#include <sensor_msgs/CompressedImage.h>
-#include <sensor_msgs/image_encodings.h>
-#include <sensor_msgs/CameraInfo.h>
-
-#include <image_transport/image_transport.h>
-#include <image_transport/subscriber_filter.h>
-
-#include <message_filters/sync_policies/approximate_time.h>
-#include <message_filters/sync_policies/exact_time.h>
-#include <message_filters/subscriber.h>
+#include <rtabmap_ros/rgbd_split.hpp>
 
 #include <cv_bridge/cv_bridge.h>
-#include <opencv2/highgui/highgui.hpp>
-
-#include <boost/thread.hpp>
-
-#include "rtabmap_ros/RGBDImage.h"
-#include "rtabmap_ros/MsgConversion.h"
-
-#include "rtabmap/core/Compression.h"
-#include "rtabmap/utilite/UConversion.h"
 
 namespace rtabmap_ros
 {
 
-class RGBDSplit : public nodelet::Nodelet
+RGBDSplit::RGBDSplit(const rclcpp::NodeOptions & options) :
+	Node("rgbd_split", options)
 {
-public:
-	RGBDSplit()
-	{}
+	int queueSize = 10;
+	int qos = 0;
+	queueSize = this->declare_parameter("queue_size", queueSize);
+	qos = this->declare_parameter("qos", qos);
 
-	virtual ~RGBDSplit()
-	{
-	}
+	RCLCPP_INFO(this->get_logger(), "%s: queue_size  = %d", get_name(), queueSize);
+	RCLCPP_INFO(this->get_logger(), "%s: qos         = %d", get_name(), qos);
 
-private:
-	virtual void onInit()
-	{
-		ros::NodeHandle & nh = getNodeHandle();
-		ros::NodeHandle & pnh = getPrivateNodeHandle();
+	rgbdImageSub_ = create_subscription<rtabmap_ros::msg::RGBDImage>("rgbd_image", rclcpp::QoS(5).reliability((rmw_qos_reliability_policy_t)qos), std::bind(&RGBDSplit::callback, this, std::placeholders::_1));
 
-		int queueSize = 10;
-		pnh.param("queue_size", queueSize, queueSize);
-
-		NODELET_INFO("%s: queue_size  = %d", getName().c_str(), queueSize);
-
-		ros::NodeHandle rgb_nh(nh, nh.resolveName("rgbd_image") + "/rgb");
-		ros::NodeHandle depth_nh(nh, nh.resolveName("rgbd_image") + "/depth");
-		image_transport::ImageTransport rgb_it(rgb_nh);
-		image_transport::ImageTransport depth_it(depth_nh);
-
-		rgbPub_ = rgb_it.advertiseCamera("image", 1);
-		depthPub_ = depth_it.advertiseCamera("image", 1);
-
-		rgbdImageSub_ = nh.subscribe("rgbd_image", 1, &RGBDSplit::callback, this);
-	}
-
-	void callback(const rtabmap_ros::RGBDImageConstPtr& input)
-	{
-		if(rgbPub_.getNumSubscribers())
-		{
-			sensor_msgs::Image outputImage;
-			sensor_msgs::CameraInfo outputCameraInfo;
-			outputImage.header = outputCameraInfo.header = input->header;
-			outputCameraInfo = input->rgb_camera_info;
-
-			if(!input->rgb.data.empty())
-			{
-				// already raw, just copy pointer
-				outputImage = input->rgb;
-			}
-			else if(!input->rgb_compressed.data.empty())
-			{
-#ifdef CV_BRIDGE_HYDRO
-				ROS_ERROR("Unsupported compressed image copy, please upgrade at least to ROS Indigo to use this.");
-#else
-				cv_bridge::toCvCopy(input->rgb_compressed)->toImageMsg(outputImage);
-#endif
-			}
-			rgbPub_.publish(outputImage, outputCameraInfo);
-		}
-
-		if(depthPub_.getNumSubscribers())
-		{
-			sensor_msgs::Image outputImage;
-			sensor_msgs::CameraInfo outputCameraInfo;
-			outputCameraInfo = input->depth_camera_info;
-
-			if(!input->depth.data.empty())
-			{
-				// already raw, just copy pointer
-				outputImage = input->depth;
-			}
-			else if(!input->depth_compressed.data.empty())
-			{
-#ifdef CV_BRIDGE_HYDRO
-				ROS_ERROR("Unsupported compressed image copy, please upgrade at least to ROS Indigo to use this.");
-#else
-				cv_bridge::toCvCopy(input->depth_compressed)->toImageMsg(outputImage);
-#endif
-			}
-			outputImage.header = outputCameraInfo.header = input->header;
-			depthPub_.publish(outputImage, outputCameraInfo);
-		}
-	}
-
-private:
-	ros::Subscriber rgbdImageSub_;
-	image_transport::CameraPublisher rgbPub_;
-	image_transport::CameraPublisher depthPub_;
-};
-
-PLUGINLIB_EXPORT_CLASS(rtabmap_ros::RGBDSplit, nodelet::Nodelet);
+	auto node = rclcpp::Node::make_shared(this->get_name());
+	image_transport::ImageTransport it(node);
+	rgbPub_ = image_transport::create_camera_publisher(node.get(), std::string(rgbdImageSub_->get_topic_name()) + "/rgb", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos).get_rmw_qos_profile());
+	depthPub_ = image_transport::create_camera_publisher(node.get(), std::string(rgbdImageSub_->get_topic_name()) + "/depth", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos).get_rmw_qos_profile());
 }
+
+
+void RGBDSplit::callback(const rtabmap_ros::msg::RGBDImage::SharedPtr input) const
+{
+	if(rgbPub_.getNumSubscribers())
+	{
+		sensor_msgs::msg::Image outputImage;
+		sensor_msgs::msg::CameraInfo outputCameraInfo;
+		outputImage.header = outputCameraInfo.header = input->header;
+		outputCameraInfo = input->rgb_camera_info;
+
+		if(!input->rgb.data.empty())
+		{
+			// already raw, just copy pointer
+			outputImage = input->rgb;
+		}
+		else if(!input->rgb_compressed.data.empty())
+		{
+#ifdef CV_BRIDGE_HYDRO
+			ROS_ERROR("Unsupported compressed image copy, please upgrade at least to ROS Indigo to use this.");
+#else
+			cv_bridge::toCvCopy(input->rgb_compressed)->toImageMsg(outputImage);
+#endif
+		}
+		rgbPub_.publish(outputImage, outputCameraInfo);
+	}
+
+	if(depthPub_.getNumSubscribers())
+	{
+		sensor_msgs::msg::Image outputImage;
+		sensor_msgs::msg::CameraInfo outputCameraInfo;
+		outputCameraInfo = input->depth_camera_info;
+
+		if(!input->depth.data.empty())
+		{
+			// already raw, just copy pointer
+			outputImage = input->depth;
+		}
+		else if(!input->depth_compressed.data.empty())
+		{
+#ifdef CV_BRIDGE_HYDRO
+			ROS_ERROR("Unsupported compressed image copy, please upgrade at least to ROS Indigo to use this.");
+#else
+			cv_bridge::toCvCopy(input->depth_compressed)->toImageMsg(outputImage);
+#endif
+		}
+		outputImage.header = outputCameraInfo.header = input->header;
+		depthPub_.publish(outputImage, outputCameraInfo);
+	}
+}
+
+}
+
+#include "rclcpp_components/register_node_macro.hpp"
+
+// Register the component with class_loader.
+// This acts as a sort of entry point, allowing the component to be discoverable when its library
+// is being loaded into a running process.
+RCLCPP_COMPONENTS_REGISTER_NODE(rtabmap_ros::RGBDSplit)
 
