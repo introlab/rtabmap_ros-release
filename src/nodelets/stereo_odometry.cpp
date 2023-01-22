@@ -26,7 +26,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include "rtabmap_ros/OdometryROS.h"
-#include "pluginlib/class_list_macros.h"
+#include "pluginlib/class_list_macros.hpp"
 #include "nodelet/nodelet.h"
 
 #include <message_filters/subscriber.h>
@@ -353,7 +353,7 @@ private:
 				higherStamp = stamp;
 			}
 
-			Transform localTransform = getTransform(this->frameId(), leftImages[i]->header.frame_id, stamp);
+			Transform localTransform = getTransform(this->frameId(), leftImages[i]->header.frame_id, stamp, this->tfListener(), this->waitForTransformDuration());
 			if(localTransform.isNull())
 			{
 				return;
@@ -417,7 +417,9 @@ private:
 						stereoTransform = getTransform(
 								rightCameraInfos[i].header.frame_id,
 								leftCameraInfos[i].header.frame_id,
-								leftCameraInfos[i].header.stamp);
+								leftCameraInfos[i].header.stamp,
+								this->tfListener(),
+								this->waitForTransformDuration());
 						if(stereoTransform.isNull())
 						{
 							NODELET_ERROR("Parameter %s is false but we cannot get TF between the two cameras! (between frames %s and %s)",
@@ -449,7 +451,9 @@ private:
 					stereoTransform = getTransform(
 							leftCameraInfos[i].header.frame_id,
 							rightCameraInfos[i].header.frame_id,
-							leftCameraInfos[i].header.stamp);
+							leftCameraInfos[i].header.stamp,
+							this->tfListener(),
+							this->waitForTransformDuration());
 
 					if(!stereoTransform.isNull() && stereoTransform.x()>0)
 					{
