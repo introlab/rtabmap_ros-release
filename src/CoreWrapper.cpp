@@ -29,7 +29,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <stdio.h>
 #include <ros/ros.h>
-#include "pluginlib/class_list_macros.h"
+#include "pluginlib/class_list_macros.hpp"
 
 #include <nav_msgs/Path.h>
 #include <std_msgs/Int32MultiArray.h>
@@ -112,6 +112,7 @@ CoreWrapper::CoreWrapper() :
 		genDepthFillIterations_(1),
 		genDepthFillHolesError_(0.1),
 		scanCloudMaxPoints_(0),
+		scanCloudIs2d_(false),
 		mapToOdom_(rtabmap::Transform::getIdentity()),
 		transformThread_(0),
 		tfThreadRunning_(false),
@@ -204,6 +205,7 @@ void CoreWrapper::onInit()
 	pnh.param("gen_depth_fill_iterations",  genDepthFillIterations_, genDepthFillIterations_);
 	pnh.param("gen_depth_fill_holes_error", genDepthFillHolesError_, genDepthFillHolesError_);
 	pnh.param("scan_cloud_max_points",  scanCloudMaxPoints_, scanCloudMaxPoints_);
+	pnh.param("scan_cloud_is_2d",       scanCloudIs2d_, scanCloudIs2d_);
 	if(pnh.hasParam("scan_cloud_normal_k"))
 	{
 		ROS_WARN("rtabmap: Parameter \"scan_cloud_normal_k\" has been removed. RTAB-Map's parameter \"%s\" should be used instead. "
@@ -268,6 +270,7 @@ void CoreWrapper::onInit()
 	if(subscribeScanCloud)
 	{
 		NODELET_INFO("rtabmap: scan_cloud_max_points = %d", scanCloudMaxPoints_);
+		NODELET_INFO("rtabmap: scan_cloud_is_2d      = %s", scanCloudIs2d_?"true":"false");
 	}
 
 	infoPub_ = nh.advertise<rtabmap_ros::Info>("info", 1);
@@ -485,7 +488,7 @@ void CoreWrapper::onInit()
 				Parameters::kGridSensor().c_str());
 		parameters_.insert(ParametersPair(Parameters::kGridRangeMax(), "0"));
 	}
-	if(subscribeScan3d && parameters_.find(Parameters::kIcpPointToPlaneRadius()) == parameters_.end())
+	if(subscribeScan3d && !scanCloudIs2d_ && parameters_.find(Parameters::kIcpPointToPlaneRadius()) == parameters_.end())
 	{
 		NODELET_INFO("Setting \"%s\" parameter to 0 (default %f) as \"subscribe_scan_cloud\" is true.",
 				Parameters::kIcpPointToPlaneRadius().c_str(),
@@ -497,13 +500,14 @@ void CoreWrapper::onInit()
 	if(parameters_.find(Parameters::kRGBDProximityPathMaxNeighbors()) == parameters_.end() &&
 		(regStrategy == Registration::kTypeIcp || regStrategy == Registration::kTypeVisIcp))
 	{
-		if(subscribeScan2d)
+		if(subscribeScan2d || (subscribeScan3d && scanCloudIs2d_))
 		{
-			NODELET_WARN("Setting \"%s\" parameter to 10 (default 0) as \"subscribe_scan\" is "
+			NODELET_WARN("Setting \"%s\" parameter to 10 (default 0) as \"%s\" is "
 					"true and \"%s\" uses ICP. Proximity detection by space will be also done by merging close "
 					"scans. To disable, set \"%s\" to 0. To suppress this warning, "
 					"add <param name=\"%s\" type=\"string\" value=\"10\"/>",
 					Parameters::kRGBDProximityPathMaxNeighbors().c_str(),
+					subscribeScan2d?"subscribe_scan":"scan_cloud_is_2d",
 					Parameters::kRegStrategy().c_str(),
 					Parameters::kRGBDProximityPathMaxNeighbors().c_str(),
 					Parameters::kRGBDProximityPathMaxNeighbors().c_str());
@@ -1412,7 +1416,9 @@ void CoreWrapper::commonMultiCameraCallbackImpl(
 				scan,
 				tfListener_,
 				waitForTransform_?waitForTransformDuration_:0,
-				scanCloudMaxPoints_))
+				scanCloudMaxPoints_,
+				0,
+				scanCloudIs2d_))
 		{
 			NODELET_ERROR("Could not convert 3d laser scan msg! Aborting rtabmap update...");
 			return;
@@ -1617,7 +1623,9 @@ void CoreWrapper::commonLaserScanCallback(
 				scan,
 				tfListener_,
 				waitForTransform_?waitForTransformDuration_:0,
-				scanCloudMaxPoints_))
+				scanCloudMaxPoints_,
+				0,
+				scanCloudIs2d_))
 		{
 			NODELET_ERROR("Could not convert 3d laser scan msg! Aborting rtabmap update...");
 			return;

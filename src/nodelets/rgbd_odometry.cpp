@@ -27,7 +27,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <rtabmap_ros/OdometryROS.h>
 
-#include <pluginlib/class_list_macros.h>
+#include <pluginlib/class_list_macros.hpp>
 #include <nodelet/nodelet.h>
 
 #include <message_filters/subscriber.h>
@@ -450,7 +450,7 @@ private:
 				higherStamp = stamp;
 			}
 
-			Transform localTransform = getTransform(this->frameId(), rgbImages[i]->header.frame_id, stamp);
+			Transform localTransform = getTransform(this->frameId(), rgbImages[i]->header.frame_id, stamp, this->tfListener(), this->waitForTransformDuration());
 			if(localTransform.isNull())
 			{
 				return;
