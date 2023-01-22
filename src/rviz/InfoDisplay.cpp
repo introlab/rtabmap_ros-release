@@ -32,45 +32,50 @@ namespace rtabmap_ros
 {
 
 InfoDisplay::InfoDisplay()
-  : globalCount_(0),
+  : spinner_(1, &cbqueue_),
+    globalCount_(0),
     localCount_(0)
 {
+	update_nh_.setCallbackQueue( &cbqueue_ );
 }
 
 InfoDisplay::~InfoDisplay()
 {
+	spinner_.stop();
 }
 
 void InfoDisplay::onInitialize()
 {
 	MFDClass::onInitialize();
 
-	this->setStatusStd(rviz_common::properties::StatusProperty::Ok, "Info", "");
-	this->setStatusStd(rviz_common::properties::StatusProperty::Ok, "Position (XYZ)", "");
-	this->setStatusStd(rviz_common::properties::StatusProperty::Ok, "Orientation (RPY)", "");
-	this->setStatusStd(rviz_common::properties::StatusProperty::Ok, "Loop closures", "0");
-	this->setStatusStd(rviz_common::properties::StatusProperty::Ok, "Proximity detections", "0");
+	this->setStatusStd(rviz::StatusProperty::Ok, "Info", "");
+	this->setStatusStd(rviz::StatusProperty::Ok, "Position (XYZ)", "");
+	this->setStatusStd(rviz::StatusProperty::Ok, "Orientation (RPY)", "");
+	this->setStatusStd(rviz::StatusProperty::Ok, "Loop closures", "0");
+	this->setStatusStd(rviz::StatusProperty::Ok, "Proximity detections", "0");
+
+	spinner_.start();
 }
 
-void InfoDisplay::processMessage( const rtabmap_ros::msg::Info::ConstSharedPtr msg )
+void InfoDisplay::processMessage( const rtabmap_ros::InfoConstPtr& msg )
 {
 	{
-		std::unique_lock<std::mutex> lock(info_mutex_);
-		if(msg->loop_closure_id)
+		boost::mutex::scoped_lock lock(info_mutex_);
+		if(msg->loopClosureId)
 		{
-			info_ = QString("%1->%2").arg(msg->ref_id).arg(msg->loop_closure_id);
+			info_ = QString("%1->%2").arg(msg->refId).arg(msg->loopClosureId);
 			globalCount_ += 1;
 		}
-		else if(msg->proximity_detection_id)
+		else if(msg->proximityDetectionId)
 		{
-			info_ = QString("%1->%2 [Proximity]").arg(msg->ref_id).arg(msg->proximity_detection_id);
+			info_ = QString("%1->%2 [Proximity]").arg(msg->refId).arg(msg->proximityDetectionId);
 			localCount_ += 1;
 		}
 		else
 		{
 			info_ = "";
 		}
-		loopTransform_ = rtabmap_ros::transformFromGeometryMsg(msg->loop_closure_transform);
+		loopTransform_ = rtabmap_ros::transformFromGeometryMsg(msg->loopClosureTransform);
 
 		rtabmap::Statistics stat;
 		rtabmap_ros::infoFromROS(*msg, stat);
@@ -81,29 +86,29 @@ void InfoDisplay::processMessage( const rtabmap_ros::msg::Info::ConstSharedPtr m
 	this->emitTimeSignal(msg->header.stamp);
 }
 
-void InfoDisplay::update( float /*wall_dt*/, float /*ros_dt*/ )
+void InfoDisplay::update( float wall_dt, float ros_dt )
 {
 	{
-		std::unique_lock<std::mutex> lock(info_mutex_);
-		this->setStatusStd(rviz_common::properties::StatusProperty::Ok, "Info", tr("%1").arg(info_).toStdString());
+		boost::mutex::scoped_lock lock(info_mutex_);
+		this->setStatusStd(rviz::StatusProperty::Ok, "Info", tr("%1").arg(info_).toStdString());
 		if(loopTransform_.isNull())
 		{
-			this->setStatusStd(rviz_common::properties::StatusProperty::Ok, "Position (XYZ)", "");
-			this->setStatusStd(rviz_common::properties::StatusProperty::Ok, "Orientation (RPY)", "");
+			this->setStatusStd(rviz::StatusProperty::Ok, "Position (XYZ)", "");
+			this->setStatusStd(rviz::StatusProperty::Ok, "Orientation (RPY)", "");
 		}
 		else
 		{
 			float x,y,z, roll,pitch,yaw;
 			loopTransform_.getTranslationAndEulerAngles(x,y,z, roll,pitch,yaw);
-			this->setStatusStd(rviz_common::properties::StatusProperty::Ok, "Position (XYZ)", tr("%1;%2;%3").arg(x).arg(y).arg(z).toStdString());
-			this->setStatusStd(rviz_common::properties::StatusProperty::Ok, "Orientation (RPY)", tr("%1;%2;%3").arg(roll).arg(pitch).arg(yaw).toStdString());
+			this->setStatusStd(rviz::StatusProperty::Ok, "Position (XYZ)", tr("%1;%2;%3").arg(x).arg(y).arg(z).toStdString());
+			this->setStatusStd(rviz::StatusProperty::Ok, "Orientation (RPY)", tr("%1;%2;%3").arg(roll).arg(pitch).arg(yaw).toStdString());
 		}
-		this->setStatusStd(rviz_common::properties::StatusProperty::Ok, "Loop closures", tr("%1").arg(globalCount_).toStdString());
-		this->setStatusStd(rviz_common::properties::StatusProperty::Ok, "Proximity detections", tr("%1").arg(localCount_).toStdString());
+		this->setStatusStd(rviz::StatusProperty::Ok, "Loop closures", tr("%1").arg(globalCount_).toStdString());
+		this->setStatusStd(rviz::StatusProperty::Ok, "Proximity detections", tr("%1").arg(localCount_).toStdString());
 
 		for(std::map<std::string, float>::const_iterator iter=statistics_.begin(); iter!=statistics_.end(); ++iter)
 		{
-			this->setStatus(rviz_common::properties::StatusProperty::Ok, iter->first.c_str(), tr("%1").arg(iter->second));
+			this->setStatus(rviz::StatusProperty::Ok, iter->first.c_str(), tr("%1").arg(iter->second));
 		}
 	}
 }
@@ -112,7 +117,7 @@ void InfoDisplay::reset()
 {
 	MFDClass::reset();
 	{
-		std::unique_lock<std::mutex> lock(info_mutex_);
+		boost::mutex::scoped_lock lock(info_mutex_);
 		info_.clear();
 		globalCount_ = 0;
 		localCount_ = 0;
@@ -123,4 +128,4 @@ void InfoDisplay::reset()
 } // namespace rtabmap_ros
 
 #include <pluginlib/class_list_macros.hpp>
-PLUGINLIB_EXPORT_CLASS( rtabmap_ros::InfoDisplay, rviz_common::Display )
+PLUGINLIB_EXPORT_CLASS( rtabmap_ros::InfoDisplay, rviz::Display )

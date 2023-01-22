@@ -1,5 +1,5 @@
 #request
-bool global_map
+bool global
 bool optimized
 bool with_images
 bool with_scans

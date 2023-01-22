@@ -42,7 +42,7 @@
 
 #include "static_layer.h"
 #include <costmap_2d/costmap_math.h>
-#include <pluginlib/class_list_macros.h>
+#include <pluginlib/class_list_macros.hpp>
 
 PLUGINLIB_EXPORT_CLASS(rtabmap_ros::StaticLayer, costmap_2d::Layer)
 
@@ -109,8 +109,8 @@ void StaticLayer::onInitialize()
   }
 
   dsrv_ = new dynamic_reconfigure::Server<costmap_2d::GenericPluginConfig>(nh);
-  dynamic_reconfigure::Server<costmap_2d::GenericPluginConfig>::CallbackType cb = std::bind(
-      &StaticLayer::reconfigureCB, this, std::placeholders::_1, std::placeholders::_2);
+  dynamic_reconfigure::Server<costmap_2d::GenericPluginConfig>::CallbackType cb = boost::bind(
+      &StaticLayer::reconfigureCB, this, boost::placeholders::_1, boost::placeholders::_2);
   dsrv_->setCallback(cb);
 }
 
