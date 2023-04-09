@@ -1,0 +1,12 @@
+Source: ros-foxy-rtabmap-python
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), python3-pytest <!nocheck>, ros-foxy-ament-copyright <!nocheck>, ros-foxy-ament-flake8 <!nocheck>, ros-foxy-ament-pep257 <!nocheck>, ros-foxy-ros-workspace, python3-all, python3-setuptools, dh-python
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-foxy-rtabmap-python
+Architecture: any
+Depends: ${python3:Depends}, ${misc:Depends}, ros-foxy-ros-workspace
+Description: RTAB-Map's python package.
