@@ -1,0 +1,12 @@
+Source: ros-foxy-rtabmap-examples
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-foxy-ament-cmake, ros-foxy-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-foxy-rtabmap-examples
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-foxy-imu-filter-madgwick, ros-foxy-realsense2-camera, ros-foxy-rtabmap-odom, ros-foxy-rtabmap-rviz-plugins, ros-foxy-rtabmap-slam, ros-foxy-rtabmap-util, ros-foxy-rtabmap-viz, ros-foxy-tf2-ros, ros-foxy-velodyne, ros-foxy-ros-workspace
+Description: RTAB-Map's example launch files.
