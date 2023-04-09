@@ -1,0 +1,12 @@
+Source: ros-foxy-rtabmap-launch
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-foxy-ament-cmake, ros-foxy-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-foxy-rtabmap-launch
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-foxy-rtabmap-msgs, ros-foxy-rtabmap-odom, ros-foxy-rtabmap-rviz-plugins, ros-foxy-rtabmap-slam, ros-foxy-rtabmap-util, ros-foxy-rtabmap-viz, ros-foxy-ros-workspace
+Description: RTAB-Map's main launch files.
