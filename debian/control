@@ -1,0 +1,12 @@
+Source: ros-foxy-rtabmap-slam
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-foxy-ament-cmake-ros, ros-foxy-cv-bridge, ros-foxy-geometry-msgs, ros-foxy-nav-msgs, ros-foxy-nav2-msgs, ros-foxy-rclcpp, ros-foxy-rclcpp-components, ros-foxy-rtabmap-msgs, ros-foxy-rtabmap-sync, ros-foxy-rtabmap-util, ros-foxy-sensor-msgs, ros-foxy-std-msgs, ros-foxy-std-srvs, ros-foxy-tf2, ros-foxy-tf2-ros, ros-foxy-visualization-msgs, ros-foxy-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-foxy-rtabmap-slam
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-foxy-cv-bridge, ros-foxy-geometry-msgs, ros-foxy-nav-msgs, ros-foxy-nav2-msgs, ros-foxy-rclcpp, ros-foxy-rclcpp-components, ros-foxy-rtabmap-msgs, ros-foxy-rtabmap-sync, ros-foxy-rtabmap-util, ros-foxy-sensor-msgs, ros-foxy-std-msgs, ros-foxy-std-srvs, ros-foxy-tf2, ros-foxy-tf2-ros, ros-foxy-visualization-msgs, ros-foxy-ros-workspace
+Description: RTAB-Map's SLAM package.
