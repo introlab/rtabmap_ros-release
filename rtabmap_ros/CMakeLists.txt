@@ -1,6 +1,16 @@
 cmake_minimum_required(VERSION 3.5)
 project(rtabmap_ros)
 
-find_package(ament_cmake REQUIRED)
+find_package(catkin REQUIRED COMPONENTS
+)
 
-ament_package()
+catkin_package()
+
+#############
+## Install ##
+#############
+
+install(DIRECTORY launch
+   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
