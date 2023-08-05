@@ -143,9 +143,11 @@ tracks:
     - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
       :{release_inc} --os-name rhel
     devel_branch: iron-devel
+    last_release: 0.21.2-iron
+    last_version: 0.21.2
     name: rtabmap_ros
     patches: null
-    release_inc: 0
+    release_inc: '1'
     release_repo_url: null
     release_tag: :{version}-iron
     ros_distro: iron
