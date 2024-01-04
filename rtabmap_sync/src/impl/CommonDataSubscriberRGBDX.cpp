@@ -35,7 +35,6 @@ namespace rtabmap_sync {
 
 #define IMAGE_CONVERSION() \
 		UASSERT(!imagesMsg->rgbd_images.empty()); \
-		callbackCalled(); \
 		std::vector<cv_bridge::CvImageConstPtr> imageMsgs(imagesMsg->rgbd_images.size()); \
 		std::vector<cv_bridge::CvImageConstPtr> depthMsgs(imagesMsg->rgbd_images.size()); \
 		std::vector<sensor_msgs::msg::CameraInfo> cameraInfoMsgs; \
@@ -527,7 +526,8 @@ void CommonDataSubscriber::setupRGBDXCallbacks(
 		}
 		else
 		{
-			rgbdXSubOnly_ = node.create_subscription<rtabmap_msgs::msg::RGBDImages>("rgbd_images", rclcpp::QoS(1).reliability(qosOdom_), std::bind(&CommonDataSubscriber::rgbdXCallback, this, std::placeholders::_1));
+			rgbdXSub_.unsubscribe();
+			rgbdXSubOnly_ = node.create_subscription<rtabmap_msgs::msg::RGBDImages>("rgbd_images", rclcpp::QoS(1).reliability(qosImage_), std::bind(&CommonDataSubscriber::rgbdXCallback, this, std::placeholders::_1));
 
 			subscribedTopicsMsg_ =
 					uFormat("\n%s subscribed to:\n   %s",
