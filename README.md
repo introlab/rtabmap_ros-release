@@ -25,30 +25,29 @@ RTAB-Map's ROS2 package (branch `ros2`). **ROS2 Foxy minimum required**: current
  <table>
     <tbody>
         <tr>
-           <td rowspan="2">ROS 1</td>
-           <td>Melodic</td>
-            <td><a href="http://build.ros.org/job/Mbin_ubv8_uBv8__rtabmap_ros__ubuntu_bionic_arm64__binary/"><img src="http://build.ros.org/buildStatus/icon?job=Mbin_ubv8_uBv8__rtabmap_ros__ubuntu_bionic_arm64__binary" alt="Build Status"/></td>
-        </tr>
-        <tr>
+            <td rowspan="1">ROS 1</td>
             <td>Noetic</td>
             <td><a href="http://build.ros.org/job/Nbin_ufv8_uFv8__rtabmap_ros__ubuntu_focal_arm64__binary/"><img src="http://build.ros.org/buildStatus/icon?job=Nbin_ufv8_uFv8__rtabmap_ros__ubuntu_focal_arm64__binary" alt="Build Status"/></td>
         </tr>
         <tr>
-            <td rowspan="4">ROS 2</td>
-            <td>Foxy</td>
-            <td><a href="http://build.ros2.org/job/Fbin_uF64__rtabmap_ros__ubuntu_focal_amd64__binary/"><img src="http://build.ros2.org/buildStatus/icon?job=Fbin_uF64__rtabmap_ros__ubuntu_focal_amd64__binary" alt="Build Status"/></td>
-        </tr>
-        <tr>
-            <td>Galactic</td>
-            <td><a href="http://build.ros2.org/job/Gbin_uF64__rtabmap_ros__ubuntu_focal_amd64__binary/"><img src="http://build.ros2.org/buildStatus/icon?job=Gbin_uF64__rtabmap_ros__ubuntu_focal_amd64__binary" alt="Build Status"/></td>
-        </tr>
-        <tr>
+            <td rowspan="3">ROS 2</td>
             <td>Humble</td>
             <td><a href="http://build.ros2.org/job/Hbin_uJ64__rtabmap_ros__ubuntu_jammy_amd64__binary/"><img src="http://build.ros2.org/buildStatus/icon?job=Hbin_uJ64__rtabmap_ros__ubuntu_jammy_amd64__binary" alt="Build Status"/></td>
         </tr>
         <tr>
+            <td>Iron</td>
+            <td><a href="http://build.ros2.org/job/Ibin_uJ64__rtabmap_ros__ubuntu_jammy_amd64__binary/"><img src="http://build.ros2.org/buildStatus/icon?job=Ibin_uJ64__rtabmap_ros__ubuntu_jammy_amd64__binary" alt="Build Status"/></td>
+        </tr>
+        <tr>
             <td>Rolling</td>
             <td><a href="http://build.ros2.org/job/Rbin_uJ64__rtabmap_ros__ubuntu_jammy_amd64__binary/"><img src="http://build.ros2.org/buildStatus/icon?job=Rbin_uJ64__rtabmap_ros__ubuntu_jammy_amd64__binary" alt="Build Status"/></td>
+        </tr>
+        <tr>
+           <td>Docker</td>
+           <td>
+             <a href="https://hub.docker.com/r/introlab3it/rtabmap_ros">rtabmap_ros</a>
+           </td>
+           <td><img src="https://img.shields.io/docker/pulls/introlab3it/rtabmap_ros.svg?label=pulls" alt="Docker Pulls"/></td>
         </tr>
     </tbody>
 </table>
@@ -93,6 +92,16 @@ ros2 launch rtabmap_launch rtabmap.launch.py \
 
 # Installation 
 
+### Binaries
+```bash
+sudo apt install ros-$ROS_DISTRO-rtabmap-ros
+```
+
+### From Source
+* Make sure to uninstall any rtabmap binaries:
+    ```
+    sudo apt remove ros-$ROS_DISTRO-rtabmap*
+    ```
 * RTAB-Map ROS2 package:
     ```bash
     cd ~/ros2_ws
@@ -143,4 +152,4 @@ ros2 launch rtabmap_launch rtabmap.launch.py \
     ros2 launch nav2_bringup rviz_launch.py
     ```
     
-See [rtabmap_demos/launch](https://github.com/introlab/rtabmap_ros/tree/ros2/rtabmap_demos/launch) and [rtabmap_examples/launch](https://github.com/introlab/rtabmap_ros/tree/ros2/rtabmap_demos/launch) subfolders for some other ROS2 examples with turtlebot3 in simulation and a RGB-D camera.
+See [rtabmap_demos/launch](https://github.com/introlab/rtabmap_ros/tree/ros2/rtabmap_demos/launch) and [rtabmap_examples/launch](https://github.com/introlab/rtabmap_ros/tree/ros2/rtabmap_examples/launch) subfolders for some other ROS2 examples with turtlebot3 in simulation and a RGB-D camera.

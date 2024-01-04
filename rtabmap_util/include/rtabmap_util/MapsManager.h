@@ -31,22 +31,27 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/core/Signature.h>
 #include <rtabmap/core/Parameters.h>
 #include <rtabmap/core/FlannIndex.h>
+#include <rtabmap/core/LocalGrid.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 
-#ifdef RTABMAP_OCTOMAP
-#ifdef WITH_OCTOMAP_MSGS
+#if defined(WITH_OCTOMAP_MSGS) and defined(RTABMAP_OCTOMAP)
 #include <octomap_msgs/msg/octomap.hpp>
 #endif
+
+#if defined(WITH_GRID_MAP_ROS) and defined(RTABMAP_GRIDMAP)
+#include <grid_map_msgs/msg/grid_map.hpp>
 #endif
 
 namespace rtabmap {
 class OctoMap;
 class Memory;
 class OccupancyGrid;
+class LocalGridMaker;
+class GridMap;
 
 }  // namespace rtabmap
 
@@ -94,6 +99,7 @@ public:
 	const rtabmap::OctoMap * getOctomap() const {return octomap_;}
 #endif
 	const rtabmap::OccupancyGrid * getOccupancyGrid() const {return occupancyGrid_;}
+	const rtabmap::LocalGridMaker * getLocalMapMaker() const {return localMapMaker_;}
 
 private:
 	// mapping stuff
@@ -123,6 +129,9 @@ private:
 	rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr octoMapEmptySpace_;
 	rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr octoMapProj_;
 #endif
+#if defined(WITH_GRID_MAP_ROS) and defined(RTABMAP_GRIDMAP)
+	rclcpp::Publisher<grid_map_msgs::msg::GridMap>::SharedPtr elevationMapPub_;
+#endif
 
 	std::map<int, rtabmap::Transform> assembledGroundPoses_;
 	std::map<int, rtabmap::Transform> assembledObstaclePoses_;
@@ -133,12 +142,10 @@ private:
 	std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr > groundClouds_;
 	std::map<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr > obstacleClouds_;
 
-	std::map<int, rtabmap::Transform> gridPoses_;
-	cv::Mat gridMap_;
-	std::map<int, std::pair< std::pair<cv::Mat, cv::Mat>, cv::Mat> > gridMaps_; // < <ground, obstacles>, empty cells >
-	std::map<int, cv::Point3f> gridMapsViewpoints_;
+	rtabmap::LocalGridCache localMaps_;
 
 	rtabmap::OccupancyGrid * occupancyGrid_;
+	rtabmap::LocalGridMaker * localMapMaker_;
 	bool gridUpdated_;
 
 #ifdef RTABMAP_OCTOMAP
@@ -146,6 +153,11 @@ private:
 #endif
 	int octomapTreeDepth_;
 	bool octomapUpdated_;
+
+#ifdef RTABMAP_GRIDMAP
+	rtabmap::GridMap * elevationMap_;
+#endif
+	bool elevationMapUpdated_;
 
 	rtabmap::ParametersMap parameters_;
 
