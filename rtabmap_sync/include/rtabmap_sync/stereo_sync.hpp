@@ -39,6 +39,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <message_filters/subscriber.h>
 
 #include "rtabmap_msgs/msg/rgbd_image.hpp"
+#include "rtabmap_sync/SyncDiagnostic.h"
 
 namespace rtabmap_sync
 {
@@ -58,9 +59,6 @@ public:
 			  const sensor_msgs::msg::CameraInfo::ConstSharedPtr cameraInfoRight);
 private:
 	double compressedRate_;
-	std::thread * warningThread_;
-	std::string subscribedTopicsMsg_;
-	bool callbackCalled_;
 	rclcpp::Time lastCompressedPublished_;
 
 	rclcpp::Publisher<rtabmap_msgs::msg::RGBDImage>::SharedPtr rgbdImagePub_;
@@ -76,6 +74,8 @@ private:
 
 	typedef message_filters::sync_policies::ExactTime<sensor_msgs::msg::Image, sensor_msgs::msg::Image, sensor_msgs::msg::CameraInfo, sensor_msgs::msg::CameraInfo> MyExactSyncPolicy;
 	message_filters::Synchronizer<MyExactSyncPolicy> * exactSync_;
+
+	std::unique_ptr<SyncDiagnostic> syncDiagnostic_;
 };
 
 }
