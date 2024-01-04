@@ -31,6 +31,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/filters/filter.h>
+#include <rtabmap/core/LocalGridMaker.h>
 
 #include <rtabmap_conversions/MsgConversion.h>
 
@@ -73,7 +74,7 @@ ObstaclesDetection::ObstaclesDetection(const rclcpp::NodeOptions & options) :
 		RCLCPP_ERROR(this->get_logger(), "obstacles_detection: Parameter \"%s\" is true but map_frame_id is not set!", rtabmap::Parameters::kGridMapFrameProjection().c_str());
 	}
 
-	grid_.parseParameters(gridParameters);
+	localMapMaker_.parseParameters(gridParameters);
 
 	tfBuffer_ = std::make_shared< tf2_ros::Buffer >(this->get_clock());
 	tfListener_ = std::make_shared< tf2_ros::TransformListener >(*tfBuffer_);
@@ -84,8 +85,6 @@ ObstaclesDetection::ObstaclesDetection(const rclcpp::NodeOptions & options) :
 
 	cloudSub_ = create_subscription<sensor_msgs::msg::PointCloud2>("cloud", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos), std::bind(&ObstaclesDetection::callback, this, std::placeholders::_1));
 }
-
-
 
 void ObstaclesDetection::callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloudMsg)
 {
@@ -149,7 +148,7 @@ void ObstaclesDetection::callback(const sensor_msgs::msg::PointCloud2::ConstShar
 		inputCloud = rtabmap::util3d::transformPointCloud(inputCloud, localTransform);
 
 		pcl::IndicesPtr flatObstacles(new std::vector<int>);
-		pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = grid_.segmentCloud<pcl::PointXYZ>(
+		pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = localMapMaker_.segmentCloud<pcl::PointXYZ>(
 				inputCloud,
 				pcl::IndicesPtr(new std::vector<int>),
 				pose,
