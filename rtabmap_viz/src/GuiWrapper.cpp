@@ -112,12 +112,14 @@ GuiWrapper::GuiWrapper(const rclcpp::NodeOptions & options) :
 
 	// To receive odometry events
 	std::string initCachePath;
+	bool subscribeInfoOnly = false;
 	frameId_ = this->declare_parameter("frame_id", frameId_);
 	this->get_parameter_or("odom_frame_id", odomFrameId_, odomFrameId_); // set to use odom from TF, ros2: already declared in CommonDataSubscriber
 	waitForTransform_ = this->declare_parameter("wait_for_transform", waitForTransform_);
 	odomSensorSync_ = this->declare_parameter("odom_sensor_sync", odomSensorSync_);
 	maxOdomUpdateRate_ = this->declare_parameter("max_odom_update_rate", maxOdomUpdateRate_);
 	cameraNodeName_ = this->declare_parameter("camera_node_name", cameraNodeName_); // used to pause the rtabmap_ros/camera when pausing the process
+	subscribeInfoOnly = this->declare_parameter("subscribe_info_only", subscribeInfoOnly);
 	initCachePath = this->declare_parameter("init_cache_path", initCachePath);
 	if(initCachePath.size())
 	{
@@ -142,13 +144,21 @@ GuiWrapper::GuiWrapper(const rclcpp::NodeOptions & options) :
 
 	republishNodeDataPub_ = this->create_publisher<std_msgs::msg::Int32MultiArray>("republish_node_data", 1);
 
-	infoTopic_.subscribe(this, "info");
-	mapDataTopic_.subscribe(this, "mapData");
-	infoMapSync_ = new message_filters::Synchronizer<MyInfoMapSyncPolicy>(
-			MyInfoMapSyncPolicy(this->getQueueSize()),
-			infoTopic_,
-			mapDataTopic_);
-	infoMapSync_->registerCallback(std::bind(&GuiWrapper::infoMapCallback, this, std::placeholders::_1, std::placeholders::_2));
+	if(subscribeInfoOnly)
+	{
+	    RCLCPP_INFO(this->get_logger(), "rtabmap_viz: subscribe_info_only=true");
+		infoOnlyTopic_ = this->create_subscription<rtabmap_msgs::msg::Info>("info", 1, std::bind(&GuiWrapper::infoCallback, this, std::placeholders::_1));
+	}
+	else
+	{
+		infoTopic_.subscribe(this, "info");
+	    mapDataTopic_.subscribe(this, "mapData");
+	    infoMapSync_ = new message_filters::Synchronizer<MyInfoMapSyncPolicy>(
+			    MyInfoMapSyncPolicy(this->getQueueSize()),
+			    infoTopic_,
+			    mapDataTopic_);
+	    infoMapSync_->registerCallback(std::bind(&GuiWrapper::infoMapCallback, this, std::placeholders::_1, std::placeholders::_2));
+	}
 
 	goalTopic_.subscribe(this, "goal_node");
 	pathTopic_.subscribe(this, "global_path");
@@ -196,6 +206,41 @@ void GuiWrapper::infoMapCallback(
 	stat.setConstraints(links);
 
 	this->post(new RtabmapEvent(stat));
+
+	tick(infoMsg->header.stamp);
+
+}
+
+void GuiWrapper::infoCallback(
+		const rtabmap_msgs::msg::Info::ConstSharedPtr infoMsg)
+{
+	rtabmap::Statistics stat;
+
+	// Info from ROS
+	rtabmap_conversions::infoFromROS(*infoMsg, stat);
+
+	// mapToOdom can be recovered from statistics
+	if(stat.data().find(Statistics::kLoopMapToOdom_x()) != stat.data().end() &&
+	   stat.data().find(Statistics::kLoopMapToOdom_y()) != stat.data().end() &&
+	   stat.data().find(Statistics::kLoopMapToOdom_z()) != stat.data().end() &&
+	   stat.data().find(Statistics::kLoopMapToOdom_roll()) != stat.data().end() &&
+	   stat.data().find(Statistics::kLoopMapToOdom_pitch()) != stat.data().end() &&
+	   stat.data().find(Statistics::kLoopMapToOdom_yaw()) != stat.data().end())
+	{
+		rtabmap::Transform mapToOdom;
+		mapToOdom = rtabmap::Transform(
+			stat.data().at(Statistics::kLoopMapToOdom_x()),
+			stat.data().at(Statistics::kLoopMapToOdom_y()),
+			stat.data().at(Statistics::kLoopMapToOdom_z()),
+			stat.data().at(Statistics::kLoopMapToOdom_roll())*M_PI/180.f,
+			stat.data().at(Statistics::kLoopMapToOdom_pitch())*M_PI/180.f,
+			stat.data().at(Statistics::kLoopMapToOdom_yaw())*M_PI/180.f);
+		stat.setMapCorrection(mapToOdom);
+	}
+
+	this->post(new RtabmapEvent(stat));
+
+	tick(infoMsg->header.stamp);
 }
 
 void GuiWrapper::goalPathCallback(
@@ -1081,6 +1126,109 @@ void GuiWrapper::commonOdomCallback(
 				rtabmap::CameraModel(),
 				0,
 				rtabmap_conversions::timestampFromROS(odomHeader.stamp)),
+		odomMsg.get()?rtabmap_conversions::transformFromPoseMsg(odomMsg->pose.pose):odomT,
+		info);
+
+	QMetaObject::invokeMethod(mainWindow_, "processOdometry", Q_ARG(rtabmap::OdometryEvent, odomEvent), Q_ARG(bool, ignoreData));
+}
+
+void GuiWrapper::commonSensorDataCallback(
+		const rtabmap_msgs::msg::SensorData::ConstSharedPtr & sensorDataMsg,
+		const nav_msgs::msg::Odometry::ConstSharedPtr & odomMsg,
+		const rtabmap_msgs::msg::OdomInfo::ConstSharedPtr & odomInfoMsg)
+{
+	UASSERT(sensorDataMsg.get());
+	std_msgs::msg::Header odomHeader;
+	std::string frameId = frameId_;
+	if(odomMsg.get())
+	{
+		odomHeader = odomMsg->header;
+		if(!odomMsg->child_frame_id.empty())
+		{
+			frameId = odomMsg->child_frame_id;
+		}
+		else
+		{
+			RCLCPP_WARN(this->get_logger(), "Received odom topic with child_frame_id not set! Using \"%s\" as base frame.", frameId_.c_str());
+		}
+	}
+	else
+	{
+		odomHeader = sensorDataMsg->header;
+		odomHeader.frame_id = odomFrameId_;
+	}
+
+	Transform odomT = rtabmap_conversions::getTransform(odomHeader.frame_id, frameId, odomHeader.stamp, *tfBuffer_, waitForTransform_);
+	cv::Mat covariance = cv::Mat::eye(6,6,CV_64FC1);
+	if(odomMsg.get())
+	{
+		UASSERT(odomMsg->twist.covariance.size() == 36);
+		if(odomMsg->twist.covariance[0] != 0 &&
+			 odomMsg->twist.covariance[7] != 0 &&
+			 odomMsg->twist.covariance[14] != 0 &&
+			 odomMsg->twist.covariance[21] != 0 &&
+			 odomMsg->twist.covariance[28] != 0 &&
+			 odomMsg->twist.covariance[35] != 0)
+		{
+			covariance = cv::Mat(6,6,CV_64FC1,(void*)odomMsg->twist.covariance.data()).clone();
+		}
+	}
+	else if(odomInfoMsg.get() && odomInfoMsg->covariance.size() == 36)
+	{
+		if(odomInfoMsg->covariance[0] != 0 &&
+			 odomInfoMsg->covariance[7] != 0 &&
+			 odomInfoMsg->covariance[14] != 0 &&
+			 odomInfoMsg->covariance[21] != 0 &&
+			 odomInfoMsg->covariance[28] != 0 &&
+			 odomInfoMsg->covariance[35] != 0)
+		{
+			covariance = cv::Mat(6,6,CV_64FC1,(void*)odomInfoMsg->covariance.data()).clone();
+		}
+	}
+	if(odomHeader.frame_id.empty())
+	{
+		RCLCPP_ERROR(this->get_logger(), "Odometry frame not set!?");
+		return;
+	}
+
+	rtabmap::SensorData data;
+	rtabmap::OdometryInfo info;
+	bool ignoreData = false;
+
+	// limit update rate
+	if(maxOdomUpdateRate_<=0.0 ||
+	   (UTimer::now() - lastOdomInfoUpdateTime_ > 1.0/maxOdomUpdateRate_ &&
+	   !mainWindow_->isProcessingOdometry() &&
+	   !mainWindow_->isProcessingStatistics()))
+	{
+		lastOdomInfoUpdateTime_ = UTimer::now();
+
+		data = rtabmap_conversions::sensorDataFromROS(*sensorDataMsg);
+		data.uncompressData();
+
+		if(odomInfoMsg.get())
+		{
+			info = rtabmap_conversions::odomInfoFromROS(*odomInfoMsg);
+		}
+		ignoreData = false;
+	}
+	else if(odomInfoMsg.get())
+	{
+		data = rtabmap_conversions::sensorDataFromROS(*sensorDataMsg);
+		data.clearRawData();
+		data.clearCompressedData();
+		info = rtabmap_conversions::odomInfoFromROS(*odomInfoMsg).copyWithoutData();
+		ignoreData = true;
+	}
+	else
+	{
+		// don't update GUI odom stuff if we don't use visual odometry
+		return;
+	}
+
+	info.reg.covariance = covariance;
+	rtabmap::OdometryEvent odomEvent(
+		data,
 		odomMsg.get()?rtabmap_conversions::transformFromPoseMsg(odomMsg->pose.pose):odomT,
 		info);
 
