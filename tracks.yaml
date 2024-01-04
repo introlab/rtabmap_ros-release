@@ -69,8 +69,8 @@ tracks:
     - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
       :{release_inc} --os-name rhel
     devel_branch: humble-devel
-    last_release: 0.21.1-humble
-    last_version: 0.21.1
+    last_release: 0.21.3-humble
+    last_version: 0.21.3
     name: rtabmap_ros
     patches: null
     release_inc: '1'
