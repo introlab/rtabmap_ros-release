@@ -18,6 +18,7 @@ find_package(stereo_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(tf2 REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(laser_geometry REQUIRED)
 find_package(pcl_conversions REQUIRED)
@@ -26,10 +27,9 @@ find_package(message_filters REQUIRED)
 find_package(rtabmap_msgs REQUIRED)
 find_package(rtabmap_conversions REQUIRED)
 
-MESSAGE(STATUS "rtabmap_conversions_TARGETS = ${rtabmap_conversions_TARGETS}")
-
 # Optional components
 find_package(octomap_msgs)
+find_package(grid_map_ros)
 
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -46,6 +46,7 @@ SET(Libraries
    nav_msgs
    std_msgs
    tf2
+   tf2_geometry_msgs
    tf2_ros
    laser_geometry
    pcl_conversions
@@ -63,19 +64,19 @@ SET(rtabmap_util_plugins_lib_src
    src/MapsManager.cpp
    src/nodelets/point_cloud_xyzrgb.cpp
    src/nodelets/point_cloud_xyz.cpp
-#   src/nodelets/disparity_to_depth.cpp # not ported to ROS2
+   src/nodelets/disparity_to_depth.cpp
    src/nodelets/pointcloud_to_depthimage.cpp 
    src/nodelets/obstacles_detection.cpp
    src/nodelets/point_cloud_aggregator.cpp
    src/nodelets/point_cloud_assembler.cpp
-#   src/nodelets/imu_to_tf.cpp # not ported to ROS2
+   src/nodelets/imu_to_tf.cpp
    src/nodelets/lidar_deskewing.cpp
    src/nodelets/rgbd_relay.cpp
    src/nodelets/rgbd_split.cpp
 )
 
 
-# If octomap is found, add definition
+# If octomap is found, add dependency
 IF(octomap_msgs_FOUND)
 MESSAGE(STATUS "WITH octomap_msgs")
 include_directories(
@@ -87,6 +88,18 @@ SET(Libraries
 )
 ADD_DEFINITIONS("-DWITH_OCTOMAP_MSGS")
 ENDIF(octomap_msgs_FOUND)
+
+# If grid_map is found, add dependency
+IF(grid_map_ros_FOUND)
+MESSAGE(STATUS "WITH grid_map_ros")
+include_directories(
+  ${grid_map_ros_INCLUDE_DIRS}
+)
+SET(Libraries
+  grid_map_ros
+  ${Libraries}
+)
+ENDIF(grid_map_ros_FOUND)
 
 ############################
 ## Declare a cpp library
@@ -100,12 +113,20 @@ target_include_directories(rtabmap_util_plugins
     $<INSTALL_INTERFACE:include>
 )
 
+IF(octomap_msgs_FOUND)
+  target_compile_definitions(rtabmap_util_plugins PUBLIC -DWITH_OCTOMAP_MSGS)
+ENDIF(octomap_msgs_FOUND)
+
+IF(grid_map_ros_FOUND)
+  target_compile_definitions(rtabmap_util_plugins PUBLIC -DWITH_GRID_MAP_ROS)
+ENDIF(grid_map_ros_FOUND)
+
 ament_target_dependencies(rtabmap_util_plugins ${Libraries})
 
 rclcpp_components_register_nodes(rtabmap_util_plugins "rtabmap_util::RGBDRelay")
 rclcpp_components_register_nodes(rtabmap_util_plugins "rtabmap_util::RGBDSplit")
-#rclcpp_components_register_nodes(rtabmap_util_plugins "rtabmap_util::DisparityToDepth")
-#rclcpp_components_register_nodes(rtabmap_util_plugins "rtabmap_util::ImuToTF")
+rclcpp_components_register_nodes(rtabmap_util_plugins "rtabmap_util::DisparityToDepth")
+rclcpp_components_register_nodes(rtabmap_util_plugins "rtabmap_util::ImuToTF")
 rclcpp_components_register_nodes(rtabmap_util_plugins "rtabmap_util::LidarDeskewing")
 rclcpp_components_register_nodes(rtabmap_util_plugins "rtabmap_util::PointCloudXYZ")
 rclcpp_components_register_nodes(rtabmap_util_plugins "rtabmap_util::PointCloudXYZRGB")
@@ -134,10 +155,15 @@ set_target_properties(rtabmap_rgbd_split PROPERTIES OUTPUT_NAME "rgbd_split")
 #target_link_libraries(rtabmap_map_assembler rtabmap_util_plugins rtabmap_util_plugins)
 #set_target_properties(rtabmap_map_assembler PROPERTIES OUTPUT_NAME "map_assembler")
 
-#add_executable(rtabmap_imu_to_tf src/ImuToTFNode.cpp)
-#ament_target_dependencies(rtabmap_imu_to_tf ${Libraries})
-#target_link_libraries(rtabmap_imu_to_tf rtabmap_util_plugins)
-#set_target_properties(rtabmap_imu_to_tf PROPERTIES OUTPUT_NAME "imu_to_tf")
+add_executable(rtabmap_imu_to_tf src/ImuToTFNode.cpp)
+ament_target_dependencies(rtabmap_imu_to_tf ${Libraries})
+target_link_libraries(rtabmap_imu_to_tf rtabmap_util_plugins)
+set_target_properties(rtabmap_imu_to_tf PROPERTIES OUTPUT_NAME "imu_to_tf")
+
+add_executable(rtabmap_disparity_to_depth src/DisparityToDepthNode.cpp)
+ament_target_dependencies(rtabmap_disparity_to_depth ${Libraries})
+target_link_libraries(rtabmap_disparity_to_depth rtabmap_util_plugins)
+set_target_properties(rtabmap_disparity_to_depth PROPERTIES OUTPUT_NAME "disparity_to_depth")
 
 add_executable(rtabmap_lidar_deskewing src/LidarDeskewingNode.cpp)
 ament_target_dependencies(rtabmap_lidar_deskewing ${Libraries})
@@ -203,6 +229,7 @@ install(PROGRAMS
 #  scripts/gazebo_ground_truth.py
   scripts/transform_to_tf.py
   scripts/yaml_to_camera_info.py
+  scripts/republish_tf_static.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -218,6 +245,8 @@ install(TARGETS
 #   rtabmap_map_optimizer
 #   rtabmap_data_player
 #   rtabmap_odom_msg_to_tf
+   rtabmap_imu_to_tf
+   rtabmap_disparity_to_depth
    rtabmap_rgbd_relay
    rtabmap_rgbd_split
    rtabmap_lidar_deskewing
