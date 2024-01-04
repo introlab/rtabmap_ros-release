@@ -33,7 +33,7 @@ IF(${nav2_msgs_VERSION_MAJOR} EQUAL 0)
 ENDIF()
 
 #optional
-find_package(octomap_msgs)
+find_package(apriltag_msgs)
 
 IF(WIN32)
 add_compile_options(-bigobj)
@@ -70,11 +70,15 @@ SET(rtabmap_slam_plugins_lib_src
    src/CoreWrapper.cpp
 )
 
-# If octomap is found, add definition
-IF(octomap_msgs_FOUND)
-MESSAGE(STATUS "WITH octomap_msgs")
-ADD_DEFINITIONS("-DWITH_OCTOMAP_MSGS")
-ENDIF(octomap_msgs_FOUND)
+# If apriltag_msgs is found, add definition
+IF(apriltag_msgs_FOUND)
+MESSAGE(STATUS "WITH apriltag_msgs")
+ADD_DEFINITIONS("-DWITH_APRILTAG_MSGS")
+SET(Libraries
+   ${Libraries}
+   apriltag_msgs
+)
+ENDIF(apriltag_msgs_FOUND)
 
 ############################
 ## Declare a cpp library
