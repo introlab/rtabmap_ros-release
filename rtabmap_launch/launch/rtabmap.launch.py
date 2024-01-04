@@ -81,7 +81,7 @@ def launch_setup(context, *args, **kwargs):
             arguments=[LaunchConfiguration('depth_image_transport'), 'raw'],
             namespace=LaunchConfiguration('namespace')),
         Node(
-            package='rtabmap_sync', executable='rgbd_sync', output="screen",
+            package='rtabmap_sync', executable='rgbd_sync', name="rgbd_sync", output="screen",
             condition=IfCondition(PythonExpression(["'", LaunchConfiguration('stereo'), "' != 'true' and '", LaunchConfiguration('rgbd_sync'), "' == 'true'"])),
             parameters=[{
                 "approx_sync": LaunchConfiguration('approx_rgbd_sync'),
@@ -115,7 +115,7 @@ def launch_setup(context, *args, **kwargs):
             arguments=[LaunchConfiguration('rgb_image_transport'), 'raw'],
             namespace=LaunchConfiguration('namespace')),
         Node(
-            package='rtabmap_sync', executable='stereo_sync', output="screen",
+            package='rtabmap_sync', executable='stereo_sync', name="stereo_sync", output="screen",
             condition=IfCondition(PythonExpression(["'", LaunchConfiguration('stereo'), "' == 'true' and '", LaunchConfiguration('rgbd_sync'), "' == 'true'"])),
             parameters=[{
                 "approx_sync": LaunchConfiguration('approx_rgbd_sync'),
@@ -133,25 +133,28 @@ def launch_setup(context, *args, **kwargs):
             
         # Relay rgbd_image
         Node(
-            package='rtabmap_util', executable='rgbd_relay', output="screen",
+            package='rtabmap_util', executable='rgbd_relay', name="rgbd_relay", output="screen",
             condition=IfCondition(PythonExpression(["'", LaunchConfiguration('rgbd_sync'), "' != 'true' and '", LaunchConfiguration('subscribe_rgbd'), "' == 'true' and '", LaunchConfiguration('compressed'), "' != 'true'"])),
+            parameters=[{
+                "qos": LaunchConfiguration('qos_image')}],
             remappings=[
-                ("rgbd_image", LaunchConfiguration('rgbd_topic'))],
+                ("rgbd_image", LaunchConfiguration('rgbd_topic')),
+                ("rgbd_image_relay", LaunchConfiguration('rgbd_topic_relay'))],
             namespace=LaunchConfiguration('namespace')),
         Node(
-            package='rtabmap_util', executable='rgbd_relay', output="screen",
+            package='rtabmap_util', executable='rgbd_relay', name="rgbd_relay_uncompress", output="screen",
             condition=IfCondition(PythonExpression(["'", LaunchConfiguration('rgbd_sync'), "' != 'true' and '", LaunchConfiguration('subscribe_rgbd'), "' == 'true' and '", LaunchConfiguration('compressed'), "' == 'true'"])),
             parameters=[{
                 "uncompress": True,
                 "qos": LaunchConfiguration('qos_image')}],
             remappings=[
                 ("rgbd_image", [LaunchConfiguration('rgbd_topic'), "/compressed"]),
-                ([LaunchConfiguration('rgbd_topic'), "/compressed_relay"], LaunchConfiguration('rgbd_topic_relay'))],
+                ("rgbd_image_relay", LaunchConfiguration('rgbd_topic_relay'))],
             namespace=LaunchConfiguration('namespace')),
                 
         # RGB-D odometry
         Node(
-            package='rtabmap_odom', executable='rgbd_odometry', output="screen",
+            package='rtabmap_odom', executable='rgbd_odometry', name="rgbd_odometry", output="screen",
             condition=IfCondition(PythonExpression(["'", LaunchConfiguration('icp_odometry'), "' != 'true' and '", LaunchConfiguration('visual_odometry'), "' == 'true' and '", LaunchConfiguration('stereo'), "' != 'true'"])),
             parameters=[{
                 "frame_id": LaunchConfiguration('frame_id'),
@@ -185,7 +188,7 @@ def launch_setup(context, *args, **kwargs):
         
         # Stereo odometry
         Node(
-            package='rtabmap_odom', executable='stereo_odometry', output="screen",
+            package='rtabmap_odom', executable='stereo_odometry', name="stereo_odometry", output="screen",
             condition=IfCondition(PythonExpression(["'", LaunchConfiguration('icp_odometry'), "' != 'true' and '", LaunchConfiguration('visual_odometry'), "' == 'true' and '", LaunchConfiguration('stereo'), "' == 'true'"])),
             parameters=[{
                 "frame_id": LaunchConfiguration('frame_id'),
@@ -220,7 +223,7 @@ def launch_setup(context, *args, **kwargs):
             
         # ICP odometry
         Node(
-            package='rtabmap_odom', executable='icp_odometry', output="screen",
+            package='rtabmap_odom', executable='icp_odometry', name="icp_odometry", output="screen",
             condition=IfCondition(LaunchConfiguration('icp_odometry')),
             parameters=[{
                 "frame_id": LaunchConfiguration('frame_id'),
@@ -248,7 +251,7 @@ def launch_setup(context, *args, **kwargs):
             namespace=LaunchConfiguration('namespace')),
 
         Node(
-            package='rtabmap_slam', executable='rtabmap', output="screen",
+            package='rtabmap_slam', executable='rtabmap', name="rtabmap", output="screen",
             parameters=[{
                 "subscribe_depth": LaunchConfiguration('depth'),
                 "subscribe_rgbd": LaunchConfiguration('subscribe_rgbd'),
@@ -309,7 +312,7 @@ def launch_setup(context, *args, **kwargs):
             namespace=LaunchConfiguration('namespace')),
 
         Node(
-            package='rtabmap_viz', executable='rtabmap_viz', output='screen',
+            package='rtabmap_viz', executable='rtabmap_viz', name="rtabmap_viz", output='screen',
             parameters=[{
                 "subscribe_depth": LaunchConfiguration('depth'),
                 "subscribe_rgbd": LaunchConfiguration('subscribe_rgbd'),
@@ -342,16 +345,16 @@ def launch_setup(context, *args, **kwargs):
                 ("scan", LaunchConfiguration('scan_topic')),
                 ("scan_cloud", LaunchConfiguration('scan_cloud_topic')),
                 ("odom", LaunchConfiguration('odom_topic'))],
-            condition=IfCondition(LaunchConfiguration("rtabmapviz")),
+            condition=IfCondition(LaunchConfiguration("rtabmap_viz")),
             arguments=[LaunchConfiguration("gui_cfg")],
             prefix=LaunchConfiguration('launch_prefix'),
             namespace=LaunchConfiguration('namespace')),
         Node(
-            package='rviz2', executable='rviz2', output='screen',
+            package='rviz2', executable='rviz2', name="rviz2", output='screen',
             condition=IfCondition(LaunchConfiguration("rviz")),
             arguments=[["-d"], [LaunchConfiguration("rviz_cfg")]]),
         Node(
-            package='rtabmap_util', executable='point_cloud_xyzrgb', output='screen',
+            package='rtabmap_util', executable='point_cloud_xyzrgb', name="point_cloud_xyzrgb", output='screen',
             condition=IfCondition(LaunchConfiguration("rviz")),
             parameters=[{
                 "decimation": 4,
@@ -383,14 +386,14 @@ def generate_launch_description():
         DeclareLaunchArgument('stereo', default_value='false', description='Use stereo input instead of RGB-D.'),
 
         DeclareLaunchArgument('localization', default_value='false', description='Launch in localization mode.'),
-        DeclareLaunchArgument('rtabmapviz',   default_value='true',  description='Launch RTAB-Map UI (optional).'),
+        DeclareLaunchArgument('rtabmap_viz',  default_value='true',  description='Launch RTAB-Map UI (optional).'),
         DeclareLaunchArgument('rviz',         default_value='false', description='Launch RVIZ (optional).'),
 
         DeclareLaunchArgument('use_sim_time', default_value='false', description='Use simulation (Gazebo) clock if true'),
 
         # Config files
         DeclareLaunchArgument('cfg',      default_value='',                        description='To change RTAB-Map\'s parameters, set the path of config file (*.ini) generated by the standalone app.'),
-        DeclareLaunchArgument('gui_cfg',  default_value='~/.ros/rtabmap_gui.ini',  description='Configuration path of rtabmapviz.'),
+        DeclareLaunchArgument('gui_cfg',  default_value='~/.ros/rtabmap_gui.ini',  description='Configuration path of rtabmap_viz.'),
         DeclareLaunchArgument('rviz_cfg', default_value=config_rviz,               description='Configuration path of rviz2.'),
 
         DeclareLaunchArgument('frame_id',       default_value='base_link',          description='Fixed frame id of the robot (base frame), you may set "base_link" or "base_footprint" if they are published. For camera-only config, this could be "camera_link".'),
@@ -471,7 +474,7 @@ def generate_launch_description():
         DeclareLaunchArgument('gps_topic',  default_value='/gps/fix', description='GPS async subscription. This is used for SLAM graph optimization and loop closure candidates selection.'),
 
         # Tag/Landmark
-        DeclareLaunchArgument('tag_topic',            default_value='/tag_detections', description='AprilTag topic async subscription. This is used for SLAM graph optimization and loop closure detection. Landmark poses are also published accordingly to current optimized map.'),
+        DeclareLaunchArgument('tag_topic',            default_value='/detections', description='AprilTag topic async subscription. This is used for SLAM graph optimization and loop closure detection. Landmark poses are also published accordingly to current optimized map. Required: Remove optional frame name parameters from apriltag\'s cfg file so that TF frame can be deducted from topic\'s family and id.'),
         DeclareLaunchArgument('tag_linear_variance',  default_value='0.0001',          description=''),
         DeclareLaunchArgument('tag_angular_variance', default_value='9999.0',            description='>=9999 means rotation is ignored in optimization, when rotation estimation of the tag is not reliable or not computed.'),
         DeclareLaunchArgument('fiducial_topic',       default_value='/fiducial_transforms', description='aruco_detect async subscription, use tag_linear_variance and tag_angular_variance to set covariance.'),
