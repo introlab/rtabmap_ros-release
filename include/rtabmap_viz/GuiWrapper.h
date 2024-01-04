@@ -71,6 +71,7 @@ protected:
 
 private:
 	void infoMapCallback(const rtabmap_msgs::msg::Info::ConstSharedPtr infoMsg, const rtabmap_msgs::msg::MapData::ConstSharedPtr mapMsg);
+	void infoCallback(const rtabmap_msgs::msg::Info::ConstSharedPtr infoMsg);
 	void goalPathCallback(const rtabmap_msgs::msg::Goal::ConstSharedPtr goalMsg, const nav_msgs::msg::Path::ConstSharedPtr pathMsg);
 	void goalReachedCallback(const std_msgs::msg::Bool::ConstSharedPtr value);
 
@@ -115,6 +116,11 @@ private:
 			const rtabmap_msgs::msg::UserData::ConstSharedPtr & userDataMsg,
 			const rtabmap_msgs::msg::OdomInfo::ConstSharedPtr& odomInfoMsg);
 
+	virtual void commonSensorDataCallback(
+			const rtabmap_msgs::msg::SensorData::ConstSharedPtr & sensorDataMsg,
+			const nav_msgs::msg::Odometry::ConstSharedPtr & odomMsg,
+			const rtabmap_msgs::msg::OdomInfo::ConstSharedPtr & odomInfoMsg);
+
 	void defaultCallback(const nav_msgs::msg::Odometry::SharedPtr & odomMsg);
 
 	void processRequestedMap(const rtabmap_msgs::msg::MapData & map);
@@ -141,6 +147,7 @@ private:
 
 	message_filters::Subscriber<rtabmap_msgs::msg::Info> infoTopic_;
 	message_filters::Subscriber<rtabmap_msgs::msg::MapData> mapDataTopic_;
+	rclcpp::Subscription<rtabmap_msgs::msg::Info>::SharedPtr infoOnlyTopic_;
 
 	message_filters::Subscriber<rtabmap_msgs::msg::Goal> goalTopic_;
 	message_filters::Subscriber<nav_msgs::msg::Path> pathTopic_;
