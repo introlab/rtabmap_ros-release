@@ -25,15 +25,24 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include "rtabmap_util/imu_to_tf.hpp"
-#include "rtabmap/utilite/ULogger.h"
-#include "rclcpp/rclcpp.hpp"
+#include "ros/ros.h"
+#include "nodelet/loader.h"
 
 int main(int argc, char **argv)
 {
-	ULogger::setType(ULogger::kTypeConsole);
-	rclcpp::init(argc, argv);
-	rclcpp::spin(std::make_shared<rtabmap_util::ImuToTF>(rclcpp::NodeOptions()));
-	rclcpp::shutdown();
+	ros::init(argc, argv, "imu_to_tf");
+
+	nodelet::V_string nargv;
+	for(int i=1;i<argc;++i)
+	{
+		nargv.push_back(argv[i]);
+	}
+
+	nodelet::Loader nodelet;
+	nodelet::M_string remap(ros::names::getRemappings());
+	std::string nodelet_name = ros::this_node::getName();
+	nodelet.load(nodelet_name, "rtabmap_util/imu_to_tf", remap, nargv);
+	ros::spin();
 	return 0;
 }
+

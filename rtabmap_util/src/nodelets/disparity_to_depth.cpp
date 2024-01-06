@@ -25,119 +25,116 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <rtabmap_util/disparity_to_depth.hpp>
-#include <sensor_msgs/image_encodings.hpp>
+#include <ros/ros.h>
+#include <pluginlib/class_list_macros.hpp>
+#include <nodelet/nodelet.h>
 
-#include <image_transport/image_transport.hpp>
+#include <sensor_msgs/Image.h>
+#include <sensor_msgs/image_encodings.h>
+#include <stereo_msgs/DisparityImage.h>
+
+#include <image_transport/image_transport.h>
 
 #include <cv_bridge/cv_bridge.h>
 
 namespace rtabmap_util
 {
 
-DisparityToDepth::DisparityToDepth(const rclcpp::NodeOptions & options) :
-	rclcpp::Node("disparity_to_depth", options)
+class DisparityToDepth : public nodelet::Nodelet
 {
-	int qos = 0;
-	qos = this->declare_parameter("qos", qos);
+public:
+	DisparityToDepth() {}
 
-	auto node = rclcpp::Node::make_shared(this->get_name());
-	image_transport::ImageTransport it(node);
-	pub32f_ = image_transport::create_publisher(node.get(), "depth", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos).get_rmw_qos_profile());
-	pub16u_ = image_transport::create_publisher(node.get(), "depth_raw", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos).get_rmw_qos_profile());
+	virtual ~DisparityToDepth(){}
 
-	sub_ = create_subscription<stereo_msgs::msg::DisparityImage>("disparity", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos), std::bind(&DisparityToDepth::callback, this, std::placeholders::_1));
-}
-
-DisparityToDepth::~DisparityToDepth(){}
-
-void DisparityToDepth::callback(const stereo_msgs::msg::DisparityImage::ConstSharedPtr disparityMsg)
-{
-	if(disparityMsg->image.encoding.compare(sensor_msgs::image_encodings::TYPE_32FC1) !=0)
+private:
+	virtual void onInit()
 	{
-		RCLCPP_ERROR(this->get_logger(), "Input type must be disparity=32FC1");
-		return;
+		ros::NodeHandle & nh = getNodeHandle();
+		ros::NodeHandle & pnh = getPrivateNodeHandle();
+
+		image_transport::ImageTransport it(nh);
+		pub32f_ = it.advertise("depth", 1);
+		pub16u_ = it.advertise("depth_raw", 1);
+		sub_ = nh.subscribe("disparity", 1, &DisparityToDepth::callback, this);
 	}
 
-	bool publish32f = pub32f_.getNumSubscribers();
-	bool publish16u = pub16u_.getNumSubscribers();
-
-	if(publish32f || publish16u)
+	void callback(const stereo_msgs::DisparityImageConstPtr& disparityMsg)
 	{
-		// sensor_msgs::image_encodings::TYPE_32FC1
-		cv::Mat disparity(disparityMsg->image.height, disparityMsg->image.width, CV_32FC1, const_cast<uchar*>(disparityMsg->image.data.data()));
+		if(disparityMsg->image.encoding.compare(sensor_msgs::image_encodings::TYPE_32FC1) !=0)
+		{
+			NODELET_ERROR("Input type must be disparity=32FC1");
+			return;
+		}
 
-		cv::Mat depth32f;
-		cv::Mat depth16u;
-		if(publish32f)
+		bool publish32f = pub32f_.getNumSubscribers();
+		bool publish16u = pub16u_.getNumSubscribers();
+
+		if(publish32f || publish16u)
 		{
-			depth32f = cv::Mat::zeros(disparity.rows, disparity.cols, CV_32F);
-		}
-		if(publish16u)
-		{
-			depth16u = cv::Mat::zeros(disparity.rows, disparity.cols, CV_16U);
-		}
-		float * depth32fPtr=0;
-		unsigned short * depth16uPtr=0;
-		for (int i = 0; i < disparity.rows; ++i)
-		{
-			const float * rowPtr = (const float*)disparity.ptr(i);
+			// sensor_msgs::image_encodings::TYPE_32FC1
+			cv::Mat disparity(disparityMsg->image.height, disparityMsg->image.width, CV_32FC1, const_cast<uchar*>(disparityMsg->image.data.data()));
+
+			cv::Mat depth32f;
+			cv::Mat depth16u;
 			if(publish32f)
 			{
-				depth32fPtr = (float*)depth32f.ptr(i);
+				depth32f = cv::Mat::zeros(disparity.rows, disparity.cols, CV_32F);
 			}
 			if(publish16u)
 			{
-				depth16uPtr = (unsigned short*)depth16u.ptr(i);
+				depth16u = cv::Mat::zeros(disparity.rows, disparity.cols, CV_16U);
 			}
-			for (int j = 0; j < disparity.cols; ++j)
+			for (int i = 0; i < disparity.rows; i++)
 			{
-				const float & disparity_value = rowPtr[j];
-				if (disparity_value > disparityMsg->min_disparity && disparity_value < disparityMsg->max_disparity)
+				for (int j = 0; j < disparity.cols; j++)
 				{
-					// baseline * focal / disparity
-					float depth = disparityMsg->t * disparityMsg->f / disparity_value;
-					if(publish32f)
+					float disparity_value = disparity.at<float>(i,j);
+					if (disparity_value > disparityMsg->min_disparity && disparity_value < disparityMsg->max_disparity)
 					{
-						depth32fPtr[j] = depth;
-					}
-					if(publish16u)
-					{
-						depth16uPtr[j] = (unsigned short)(depth*1000.0f);
+						// baseline * focal / disparity
+						float depth = disparityMsg->T * disparityMsg->f / disparity_value;
+						if(publish32f)
+						{
+							depth32f.at<float>(i,j) = depth;
+						}
+						if(publish16u)
+						{
+							depth16u.at<unsigned short>(i,j) = (unsigned short)(depth*1000.0f);
+						}
 					}
 				}
 			}
+
+			if(publish32f)
+			{
+				// convert to ROS sensor_msg::Image
+				cv_bridge::CvImage cvDepth(disparityMsg->header, sensor_msgs::image_encodings::TYPE_32FC1, depth32f);
+				sensor_msgs::Image depthMsg;
+				cvDepth.toImageMsg(depthMsg);
+
+				//publish the message
+				pub32f_.publish(depthMsg);
+			}
+
+			if(publish16u)
+			{
+				// convert to ROS sensor_msg::Image
+				cv_bridge::CvImage cvDepth(disparityMsg->header, sensor_msgs::image_encodings::TYPE_16UC1, depth16u);
+				sensor_msgs::Image depthMsg;
+				cvDepth.toImageMsg(depthMsg);
+
+				//publish the message
+				pub16u_.publish(depthMsg);
+			}
 		}
-
-		if(publish32f)
-		{
-			// convert to ROS sensor_msg::Image
-			cv_bridge::CvImage cvDepth(disparityMsg->header, sensor_msgs::image_encodings::TYPE_32FC1, depth32f);
-			sensor_msgs::msg::Image depthMsg;
-			cvDepth.toImageMsg(depthMsg);
-
-			//publish the message
-			pub32f_.publish(depthMsg);
-		}
-
-		if(publish16u)
-		{
-			// convert to ROS sensor_msg::Image
-			cv_bridge::CvImage cvDepth(disparityMsg->header, sensor_msgs::image_encodings::TYPE_16UC1, depth16u);
-			sensor_msgs::msg::Image depthMsg;
-			cvDepth.toImageMsg(depthMsg);
-
-			//publish the message
-			pub16u_.publish(depthMsg);
-		}
-	}
 }
 
+private:
+	image_transport::Publisher pub32f_;
+	image_transport::Publisher pub16u_;
+	ros::Subscriber sub_;
+};
+
+PLUGINLIB_EXPORT_CLASS(rtabmap_util::DisparityToDepth, nodelet::Nodelet);
 }
-
-#include "rclcpp_components/register_node_macro.hpp"
-
-// Register the component with class_loader.
-// This acts as a sort of entry point, allowing the component to be discoverable when its library
-// is being loaded into a running process.
-RCLCPP_COMPONENTS_REGISTER_NODE(rtabmap_util::DisparityToDepth)
