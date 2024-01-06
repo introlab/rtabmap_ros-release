@@ -3,7 +3,7 @@ project(rtabmap_sync)
 
 find_package(catkin REQUIRED COMPONENTS
             cv_bridge roscpp sensor_msgs nav_msgs image_transport
-            nodelet message_filters rtabmap_msgs rtabmap_conversions
+            nodelet message_filters rtabmap_msgs rtabmap_conversions diagnostic_updater
 )
 
 option(RTABMAP_SYNC_MULTI_RGBD "Build with multi RGBD camera synchronization support"  OFF)
@@ -33,7 +33,7 @@ catkin_package(
   INCLUDE_DIRS include
   LIBRARIES rtabmap_sync rtabmap_sync_plugins
   CATKIN_DEPENDS cv_bridge roscpp sensor_msgs nav_msgs image_transport
-                 nodelet message_filters rtabmap_msgs rtabmap_conversions
+                 nodelet message_filters rtabmap_msgs rtabmap_conversions diagnostic_updater
   CFG_EXTRAS extra_configs.cmake
 )
 
@@ -55,6 +55,7 @@ SET(rtabmap_sync_lib_src
    src/impl/CommonDataSubscriberRGBDX.cpp
    src/impl/CommonDataSubscriberScan.cpp
    src/impl/CommonDataSubscriberOdom.cpp
+   src/impl/CommonDataSubscriberSensorData.cpp
 )
 IF(RTABMAP_SYNC_MULTI_RGBD)
   SET(rtabmap_sync_lib_src
@@ -120,6 +121,7 @@ install(TARGETS
    rtabmap_rgbd_sync
    rtabmap_rgbdx_sync
    rtabmap_stereo_sync
+   rtabmap_rgb_sync
    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
