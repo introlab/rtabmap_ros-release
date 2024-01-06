@@ -26,88 +26,87 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include <rtabmap_sync/CommonDataSubscriber.h>
+#include <rtabmap/utilite/UConversion.h>
+#include <rtabmap/core/Compression.h>
+#include <rtabmap_conversions/MsgConversion.h>
+#include <cv_bridge/cv_bridge.h>
 
 namespace rtabmap_sync {
 
-void CommonDataSubscriber::odomCallback(
-		const nav_msgs::OdometryConstPtr& odomMsg)
+// SensorData
+void CommonDataSubscriber::sensorDataCallback(
+		const rtabmap_msgs::SensorDataConstPtr& imagesMsg)
 {
-	rtabmap_msgs::UserDataConstPtr userDataMsg; // Null
-	sensor_msgs::PointCloud2ConstPtr scan3dMsg; // Null
+	nav_msgs::OdometryConstPtr odomMsg; // Null
 	rtabmap_msgs::OdomInfoConstPtr odomInfoMsg; // null
-	commonOdomCallback(odomMsg, userDataMsg, odomInfoMsg);
+	commonSensorDataCallback(imagesMsg, odomMsg, odomInfoMsg);
 }
-void CommonDataSubscriber::odomInfoCallback(
-		const nav_msgs::OdometryConstPtr& odomMsg,
+void CommonDataSubscriber::sensorDataInfoCallback(
+		const rtabmap_msgs::SensorDataConstPtr& imagesMsg,
 		const rtabmap_msgs::OdomInfoConstPtr& odomInfoMsg)
 {
-	rtabmap_msgs::UserDataConstPtr userDataMsg; // Null
-	sensor_msgs::LaserScanConstPtr scan2dMsg; // Null
-	commonOdomCallback(odomMsg, userDataMsg, odomInfoMsg);
+	nav_msgs::OdometryConstPtr odomMsg; // Null
+	commonSensorDataCallback(imagesMsg, odomMsg, odomInfoMsg);
 }
-#ifdef RTABMAP_SYNC_USER_DATA
-void CommonDataSubscriber::odomDataCallback(
-		const nav_msgs::OdometryConstPtr& odomMsg,
-		const rtabmap_msgs::UserDataConstPtr & userDataMsg)
+// SensorData + Odom
+void CommonDataSubscriber::sensorDataOdomCallback(
+		const nav_msgs::OdometryConstPtr & odomMsg,
+		const rtabmap_msgs::SensorDataConstPtr& imagesMsg)
 {
 	rtabmap_msgs::OdomInfoConstPtr odomInfoMsg; // null
-	commonOdomCallback(odomMsg, userDataMsg, odomInfoMsg);
+	commonSensorDataCallback(imagesMsg, odomMsg, odomInfoMsg);
 }
-void CommonDataSubscriber::odomDataInfoCallback(
-		const nav_msgs::OdometryConstPtr& odomMsg,
-		const rtabmap_msgs::UserDataConstPtr & userDataMsg,
+void CommonDataSubscriber::sensorDataOdomInfoCallback(
+		const nav_msgs::OdometryConstPtr & odomMsg,
+		const rtabmap_msgs::SensorDataConstPtr& imagesMsg,
 		const rtabmap_msgs::OdomInfoConstPtr& odomInfoMsg)
 {
-	sensor_msgs::PointCloud2ConstPtr scan3dMsg; // Null
-	commonOdomCallback(odomMsg, userDataMsg, odomInfoMsg);
+	commonSensorDataCallback(imagesMsg, odomMsg, odomInfoMsg);
 }
-#endif
 
-void CommonDataSubscriber::setupOdomCallbacks(
+void CommonDataSubscriber::setupSensorDataCallbacks(
 		ros::NodeHandle & nh,
 		ros::NodeHandle & pnh,
-		bool subscribeUserData,
+		bool subscribeOdom,
 		bool subscribeOdomInfo,
 		int queueSize,
 		bool approxSync)
 {
-	ROS_INFO("Setup scan callback");
+	ROS_INFO("Setup SensorData callback");
 
-	if(subscribeUserData || subscribeOdomInfo)
+	sensorDataSub_.subscribe(nh, "sensor_data", queueSize);
+	if(subscribeOdom)
 	{
 		odomSub_.subscribe(nh, "odom", queueSize);
-
-#ifdef RTABMAP_SYNC_USER_DATA
-		if(subscribeUserData)
-		{
-			userDataSub_.subscribe(nh, "user_data", queueSize);
-			if(subscribeOdomInfo)
-			{
-				subscribedToOdomInfo_ = true;
-				odomInfoSub_.subscribe(nh, "odom_info", queueSize);
-				SYNC_DECL3(CommonDataSubscriber, odomDataInfo, approxSync, queueSize, odomSub_, userDataSub_, odomInfoSub_);
-			}
-			else
-			{
-				SYNC_DECL2(CommonDataSubscriber, odomData, approxSync, queueSize, odomSub_, userDataSub_);
-			}
-		}
-		else 
-#endif
 		if(subscribeOdomInfo)
 		{
 			subscribedToOdomInfo_ = true;
 			odomInfoSub_.subscribe(nh, "odom_info", queueSize);
-			SYNC_DECL2(CommonDataSubscriber, odomInfo, approxSync, queueSize, odomSub_, odomInfoSub_);
+			SYNC_DECL3(CommonDataSubscriber, sensorDataOdomInfo, approxSync, queueSize, odomSub_, sensorDataSub_, odomInfoSub_);
+		}
+		else
+		{
+			SYNC_DECL2(CommonDataSubscriber, sensorDataOdom, approxSync, queueSize, odomSub_, sensorDataSub_);
 		}
 	}
 	else
 	{
-		odomSubOnly_ = nh.subscribe("odom", queueSize, &CommonDataSubscriber::odomCallback, this);
-		subscribedTopicsMsg_ =
-				uFormat("\n%s subscribed to:\n   %s",
-				ros::this_node::getName().c_str(),
-				odomSubOnly_.getTopic().c_str());
+		if(subscribeOdomInfo)
+		{
+			subscribedToOdomInfo_ = true;
+			odomInfoSub_.subscribe(nh, "odom_info", queueSize);
+			SYNC_DECL2(CommonDataSubscriber, sensorDataInfo, approxSync, queueSize, sensorDataSub_, odomInfoSub_);
+		}
+		else
+		{
+			sensorDataSub_.unsubscribe();
+			sensorDataSubOnly_ = nh.subscribe("sensor_data", queueSize, &CommonDataSubscriber::sensorDataCallback, this);
+
+			subscribedTopicsMsg_ =
+					uFormat("\n%s subscribed to:\n   %s",
+					ros::this_node::getName().c_str(),
+					sensorDataSubOnly_.getTopic().c_str());
+		}
 	}
 }
 
