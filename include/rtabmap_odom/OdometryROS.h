@@ -38,6 +38,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <std_msgs/Header.h>
 #include <sensor_msgs/Imu.h>
 
+#include <diagnostic_updater/diagnostic_updater.h>
+
 #include <rtabmap_msgs/ResetPose.h>
 #include <rtabmap/core/SensorData.h>
 #include <rtabmap/core/Parameters.h>
@@ -45,6 +47,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <boost/thread.hpp>
 
 #include "rtabmap_util/ULogToRosout.h"
+#include "rtabmap_sync/SyncDiagnostic.h"
 
 namespace rtabmap {
 class Odometry;
@@ -77,8 +80,7 @@ public:
 	bool isPaused() const {return paused_;}
 
 protected:
-	void startWarningThread(const std::string & subscribedTopicsMsg, bool approxSync);
-	void callbackCalled() {callbackCalled_ = true;}
+	void initDiagnosticMsg(const std::string & subscribedTopicsMsg, bool approxSync, const std::string & subscribedTopic = "");
 
 	virtual void flushCallbacks() = 0;
 	tf::TransformListener & tfListener() {return tfListener_;}
@@ -88,7 +90,6 @@ protected:
 	virtual void postProcessData(const rtabmap::SensorData & data, const std_msgs::Header & header) const {}
 
 private:
-	void warningLoop(const std::string & subscribedTopicsMsg, bool approxSync);
 	virtual void onInit();
 	virtual void onOdomInit() = 0;
 	virtual void updateParameters(rtabmap::ParametersMap & parameters) {}
@@ -98,8 +99,6 @@ private:
 
 private:
 	rtabmap::Odometry * odometry_;
-	boost::thread * warningThread_;
-	bool callbackCalled_;
 
 	// parameters
 	std::string frameId_;
@@ -114,6 +113,7 @@ private:
 	bool waitForTransform_;
 	double waitForTransformDuration_;
 	bool publishNullWhenLost_;
+	bool publishCompressedSensorData_;
 	rtabmap::ParametersMap parameters_;
 
 	ros::Publisher odomPub_;
@@ -123,6 +123,9 @@ private:
 	ros::Publisher odomLocalScanMap_;
 	ros::Publisher odomLastFrame_;
 	ros::Publisher odomRgbdImagePub_;
+	ros::Publisher odomSensorDataPub_;
+	ros::Publisher odomSensorDataFeaturesPub_;
+	ros::Publisher odomSensorDataCompressedPub_;
 	ros::ServiceServer resetSrv_;
 	ros::ServiceServer resetToPoseSrv_;
 	ros::ServiceServer pauseSrv_;
@@ -147,6 +150,8 @@ private:
 	double expectedUpdateRate_;
 	double maxUpdateRate_;
 	double minUpdateRate_;
+	std::string compressionImgFormat_;
+	bool compressionParallelized_;
 	int odomStrategy_;
 	bool waitIMUToinit_;
 	bool imuProcessed_;
@@ -154,6 +159,19 @@ private:
 	std::pair<rtabmap::SensorData, std_msgs::Header > bufferedData_;
 
 	rtabmap_util::ULogToRosout ulogToRosout_;
+
+	class OdomStatusTask : public diagnostic_updater::DiagnosticTask
+	{
+	public:
+		OdomStatusTask();
+		void setStatus(bool isLost);
+		void run(diagnostic_updater::DiagnosticStatusWrapper &stat);
+	private:
+		bool lost_;
+		bool dataReceived_;
+	};
+	OdomStatusTask statusDiagnostic_;
+	std::unique_ptr<rtabmap_sync::SyncDiagnostic> syncDiagnostic_;
 };
 
 }
