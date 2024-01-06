@@ -157,6 +157,11 @@ private:
 		cloud_sub_ = nh.subscribe("scan_cloud", queueSize, &ICPOdometry::callbackCloud, this);
 
 		filtered_scan_pub_ = nh.advertise<sensor_msgs::PointCloud2>("odom_filtered_input_scan", 1);
+
+		initDiagnosticMsg(uFormat("\n%s subscribed to %s and %s (make sure only one of this topic is published, otherwise remap one to a dummy topic name).",
+					getName().c_str(),
+					scan_sub_.getTopic().c_str(),
+					cloud_sub_.getTopic().c_str()), true);
 	}
 
 	virtual void updateParameters(ParametersMap & parameters)
@@ -329,6 +334,7 @@ private:
 			scan_sub_.shutdown();
 			return;
 		}
+
 		scanReceived_ = true;
 		if(this->isPaused())
 		{
@@ -371,6 +377,7 @@ private:
 					*scanMsg, 
 					scanOut,
 					this->tfListener(),
+					-1.0,
 					laser_geometry::channel_option::Intensity | laser_geometry::channel_option::Timestamp);
 
 			if(guessFrameId().empty() && previousStamp() > 0 && !velocityGuess().isNull())
@@ -570,6 +577,7 @@ private:
 			cloud_sub_.shutdown();
 			return;
 		}
+
 		cloudReceived_ = true;
 		if(this->isPaused())
 		{
