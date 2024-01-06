@@ -35,7 +35,6 @@ namespace rtabmap_sync {
 
 #define IMAGE_CONVERSION() \
 		UASSERT(!imagesMsg->rgbd_images.empty()); \
-		callbackCalled(); \
 		std::vector<cv_bridge::CvImageConstPtr> imageMsgs(imagesMsg->rgbd_images.size()); \
 		std::vector<cv_bridge::CvImageConstPtr> depthMsgs(imagesMsg->rgbd_images.size()); \
 		std::vector<sensor_msgs::CameraInfo> cameraInfoMsgs; \
@@ -524,6 +523,7 @@ void CommonDataSubscriber::setupRGBDXCallbacks(
 		}
 		else
 		{
+			rgbdXSub_.unsubscribe();
 			rgbdXSubOnly_ = nh.subscribe("rgbd_images", queueSize, &CommonDataSubscriber::rgbdXCallback, this);
 
 			subscribedTopicsMsg_ =
