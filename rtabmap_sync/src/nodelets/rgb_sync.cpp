@@ -51,6 +51,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rtabmap/core/Compression.h"
 #include "rtabmap/utilite/UConversion.h"
 
+#include "rtabmap_sync/SyncDiagnostic.h"
+
 namespace rtabmap_sync
 {
 
@@ -59,25 +61,14 @@ class RgbSync : public nodelet::Nodelet
 public:
 	RgbSync() :
 		compressedRate_(0),
-		warningThread_(0),
-		callbackCalled_(false),
 		approxSync_(0),
 		exactSync_(0)
 	{}
 
 	virtual ~RgbSync()
 	{
-		if(approxSync_)
-			delete approxSync_;
-		if(exactSync_)
-			delete exactSync_;
-
-		if(warningThread_)
-		{
-			callbackCalled_=true;
-			warningThread_->join();
-			delete warningThread_;
-		}
+		delete approxSync_;
+		delete exactSync_;
 	}
 
 private:
@@ -130,35 +121,25 @@ private:
 							approxSync&&approxSyncMaxInterval!=std::numeric_limits<double>::max()?uFormat(", max interval=%fs", approxSyncMaxInterval).c_str():"",
 							imageSub_.getTopic().c_str(),
 							cameraInfoSub_.getTopic().c_str());
+		NODELET_INFO(subscribedTopicsMsg.c_str());
 
-		warningThread_ = new boost::thread(boost::bind(&RgbSync::warningLoop, this, subscribedTopicsMsg, approxSync));
-		NODELET_INFO("%s", subscribedTopicsMsg.c_str());
-	}
-
-	void warningLoop(const std::string & subscribedTopicsMsg, bool approxSync)
-	{
-		ros::Duration r(5.0);
-		while(!callbackCalled_)
-		{
-			r.sleep();
-			if(!callbackCalled_)
-			{
-				ROS_WARN("%s: Did not receive data since 5 seconds! Make sure the input topics are "
-						"published (\"$ rostopic hz my_topic\") and the timestamps in their "
-						"header are set. %s%s",
-						getName().c_str(),
-						approxSync?"":"Parameter \"approx_sync\" is false, which means that input "
-							"topics should have all the exact timestamp for the callback to be called.",
-						subscribedTopicsMsg.c_str());
-			}
-		}
+		syncDiagnostic_.reset(new SyncDiagnostic(nh, pnh, getName()));
+		syncDiagnostic_->init(rgb_nh.resolveName("image_rect"),
+			uFormat("%s: Did not receive data since 5 seconds! Make sure the input topics are "
+					"published (\"$ rostopic hz my_topic\") and the timestamps in their "
+					"header are set. %s%s",
+					getName().c_str(),
+					approxSync?"":"Parameter \"approx_sync\" is false, which means that input "
+						"topics should have all the exact timestamp for the callback to be called.",
+					subscribedTopicsMsg.c_str()));
 	}
 
 	void callback(
 			  const sensor_msgs::ImageConstPtr& image,
 			  const sensor_msgs::CameraInfoConstPtr& cameraInfo)
 	{
-		callbackCalled_ = true;
+		syncDiagnostic_->tick(image->header.stamp);
+
 		if(rgbdImagePub_.getNumSubscribers() || rgbdImageCompressedPub_.getNumSubscribers())
 		{
 			double stamp = image->header.stamp.toSec();
@@ -212,8 +193,6 @@ private:
 
 private:
 	double compressedRate_;
-	boost::thread * warningThread_;
-	bool callbackCalled_;
 	ros::Time lastCompressedPublished_;
 
 	ros::Publisher rgbdImagePub_;
@@ -227,6 +206,8 @@ private:
 
 	typedef message_filters::sync_policies::ExactTime<sensor_msgs::Image, sensor_msgs::CameraInfo> MyExactSyncPolicy;
 	message_filters::Synchronizer<MyExactSyncPolicy> * exactSync_;
+
+	std::unique_ptr<SyncDiagnostic> syncDiagnostic_;
 };
 
 PLUGINLIB_EXPORT_CLASS(rtabmap_sync::RgbSync, nodelet::Nodelet);
