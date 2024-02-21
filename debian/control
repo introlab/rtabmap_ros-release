@@ -1,0 +1,12 @@
+Source: ros-humble-rtabmap-launch
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-humble-ament-cmake, ros-humble-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-humble-rtabmap-launch
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-humble-rtabmap-msgs, ros-humble-rtabmap-odom, ros-humble-rtabmap-rviz-plugins, ros-humble-rtabmap-slam, ros-humble-rtabmap-util, ros-humble-rtabmap-viz, ros-humble-ros-workspace
+Description: RTAB-Map's main launch files.
