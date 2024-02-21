@@ -1,0 +1,12 @@
+Source: ros-noetic-rtabmap-odom
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-noetic-catkin, ros-noetic-cv-bridge, ros-noetic-image-geometry, ros-noetic-laser-geometry, ros-noetic-message-filters, ros-noetic-nav-msgs, ros-noetic-nodelet, ros-noetic-pcl-conversions, ros-noetic-pcl-ros, ros-noetic-pluginlib, ros-noetic-roscpp, ros-noetic-rtabmap-conversions, ros-noetic-rtabmap-msgs, ros-noetic-rtabmap-sync, ros-noetic-rtabmap-util, ros-noetic-sensor-msgs
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-noetic-rtabmap-odom
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-noetic-cv-bridge, ros-noetic-image-geometry, ros-noetic-laser-geometry, ros-noetic-message-filters, ros-noetic-nav-msgs, ros-noetic-nodelet, ros-noetic-pcl-conversions, ros-noetic-pcl-ros, ros-noetic-pluginlib, ros-noetic-roscpp, ros-noetic-rtabmap-conversions, ros-noetic-rtabmap-msgs, ros-noetic-rtabmap-sync, ros-noetic-rtabmap-util, ros-noetic-sensor-msgs
+Description: RTAB-Map's odometry package.
