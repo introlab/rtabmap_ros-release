@@ -3,21 +3,25 @@
 
 #include "rtabmap/utilite/UStl.h"
 
-#include <diagnostic_updater/diagnostic_updater.h>
-#include <diagnostic_updater/publisher.h>
+#include <diagnostic_updater/diagnostic_updater.hpp>
+#include <diagnostic_updater/publisher.hpp>
 
+#include "rtabmap_conversions/MsgConversion.h"
 #include "rtabmap/utilite/ULogger.h"
+
+using namespace std::chrono_literals;
 
 namespace rtabmap_sync {
 
 class SyncDiagnostic {
     public:
-        SyncDiagnostic(ros::NodeHandle h = ros::NodeHandle(), ros::NodeHandle ph = ros::NodeHandle("~"), std::string nodeName = ros::this_node::getName(), double tolerance = 0.1, int windowSize = 5) :
-            diagnosticUpdater_(h, ph, nodeName),
+        SyncDiagnostic(rclcpp::Node * node, double tolerance = 0.1, int windowSize = 5) :
+        	node_(node),
+			diagnosticUpdater_(node),
             frequencyStatus_(diagnostic_updater::FrequencyStatusParam(&targetFrequency_, &targetFrequency_, tolerance)),
-            timeStampStatus_(diagnostic_updater::TimeStampStatusParam()),
-            compositeTask_("Sync status"),
-            lastCallbackCalledStamp_(ros::Time::now().toSec()-1),
+			timeStampStatus_(diagnostic_updater::TimeStampStatusParam()),
+			compositeTask_("Sync status"),
+            lastCallbackCalledStamp_(rtabmap_conversions::timestampFromROS(node_->now())-1),
             targetFrequency_(0.0),
             windowSize_(windowSize)
     {
@@ -46,14 +50,14 @@ class SyncDiagnostic {
         }
         diagnosticUpdater_.setHardwareID(strList.empty()?"none":uJoin(strList, "/"));
         diagnosticUpdater_.force_update();
-        diagnosticTimer_ = ros::NodeHandle().createTimer(ros::Duration(1), &SyncDiagnostic::diagnosticTimerCallback, this);
+        diagnosticTimer_ = node_->create_wall_timer(1s, std::bind(&SyncDiagnostic::diagnosticTimerCallback, this), nullptr);
     }
 
-    void tick(const ros::Time & stamp, double targetFrequency = 0)
+    void tick(const rclcpp::Time & stamp, double targetFrequency = 0)
     {
         frequencyStatus_.tick();
-        timeStampStatus_.tick(stamp);
-        double singlePeriod = stamp.toSec() - lastCallbackCalledStamp_;
+		timeStampStatus_.tick(stamp);
+        double singlePeriod = rtabmap_conversions::timestampFromROS(stamp) - lastCallbackCalledStamp_;
 
         window_.push_back(singlePeriod);
         if(window_.size() > windowSize_)
@@ -78,31 +82,30 @@ class SyncDiagnostic {
         {
             targetFrequency_ = targetFrequency;
         }
-        lastCallbackCalledStamp_ = stamp.toSec();
+        lastCallbackCalledStamp_ = rtabmap_conversions::timestampFromROS(stamp);
     }
 
 private:
-    void diagnosticTimerCallback(const ros::TimerEvent& event)
+    void diagnosticTimerCallback()
     {
-        diagnosticUpdater_.update();
-
-        if(ros::Time::now().toSec()-lastCallbackCalledStamp_ >= 5 && !topicsNotReceivedWarningMsg_.empty())
+        if(rtabmap_conversions::timestampFromROS(node_->now())-lastCallbackCalledStamp_ >= 5 && !topicsNotReceivedWarningMsg_.empty())
         {
-            ROS_WARN_THROTTLE(5, "%s", topicsNotReceivedWarningMsg_.c_str());
+        	RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000, "%s", topicsNotReceivedWarningMsg_.c_str());
         }
     }
 
-    private:
-        std::string topicsNotReceivedWarningMsg_;
-        diagnostic_updater::Updater diagnosticUpdater_;
-        diagnostic_updater::FrequencyStatus frequencyStatus_;
-        diagnostic_updater::TimeStampStatus timeStampStatus_;
-        diagnostic_updater::CompositeDiagnosticTask compositeTask_;
-        ros::Timer diagnosticTimer_;
-        double lastCallbackCalledStamp_;
-        double targetFrequency_;
-        int windowSize_;
-        std::deque<double> window_;
+private:
+    rclcpp::Node * node_;
+	std::string topicsNotReceivedWarningMsg_;
+	diagnostic_updater::Updater diagnosticUpdater_;
+	diagnostic_updater::FrequencyStatus frequencyStatus_;
+	diagnostic_updater::TimeStampStatus timeStampStatus_;
+	diagnostic_updater::CompositeDiagnosticTask compositeTask_;
+	rclcpp::TimerBase::SharedPtr diagnosticTimer_;
+	double lastCallbackCalledStamp_;
+	double targetFrequency_;
+	int windowSize_;
+	std::deque<double> window_;
 
 };
 

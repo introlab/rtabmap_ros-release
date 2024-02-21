@@ -28,7 +28,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef PREFERENCESDIALOGROS_H_
 #define PREFERENCESDIALOGROS_H_
 
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
+#include <rclcpp/executor.hpp>
 #include <rtabmap/gui/PreferencesDialog.h>
 
 using namespace rtabmap;
@@ -36,7 +37,7 @@ using namespace rtabmap;
 class PreferencesDialogROS : public PreferencesDialog
 {
 public:
-	PreferencesDialogROS(const QString & configFile, const std::string & rtabmapNodeName);
+	PreferencesDialogROS(rclcpp::Node * node, const QString & configFile, const std::string & rtabmapNodeName);
 	virtual ~PreferencesDialogROS();
 
 	virtual QString getIniFilePath() const;
@@ -48,15 +49,15 @@ public slots:
 
 protected:
 	virtual QString getParamMessage();
-	bool hasAllParameters(const ros::NodeHandle & nh, const rtabmap::ParametersMap & parameters);
 
 	virtual void readCameraSettings(const QString & filePath);
 	virtual bool readCoreSettings(const QString & filePath);
-	virtual void writeCameraSettings(const QString & filePath) const {}
+	virtual void writeCameraSettings(const QString &) const {}
 	virtual void writeCoreSettings(const QString & filePath) const;
 
 private:
 	QString configFile_;
+	rclcpp::Node * node_;
 	std::string rtabmapNodeName_;
 };
 
