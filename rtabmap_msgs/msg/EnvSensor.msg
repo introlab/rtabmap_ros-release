@@ -1,5 +1,5 @@
 
-Header header
+std_msgs/Header header
 
 # EnvSensor
 int32 type
