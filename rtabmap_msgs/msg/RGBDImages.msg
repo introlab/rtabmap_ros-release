@@ -1,4 +1,4 @@
 
-std_msgs/Header header
+Header header
 
 RGBDImage[] rgbd_images

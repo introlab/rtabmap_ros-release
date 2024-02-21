@@ -34,65 +34,50 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <signal.h>
 
 QApplication * app = 0;
+ros::AsyncSpinner * spinner = 0;
 
-void my_handler(int){
-	UINFO("rtabmap_viz: ctrl-c catched! Exiting Qt app...");
+void my_handler(int s){
+	ROS_INFO("rtabmapviz: ctrl-c catched! Exiting Qt app...");
+	ros::shutdown();
 	app->exit(-1);
 }
 
 int main(int argc, char** argv)
 {
-	UINFO("Starting node...");
+	ROS_INFO("Starting node...");
 
 	ULogger::setType(ULogger::kTypeConsole);
 	ULogger::setLevel(ULogger::kWarning);
 
-	rclcpp::init(argc, argv);
+	ros::init(argc, argv, "rtabmap_viz");
 
 	app = new QApplication(argc, argv);
 	app->connect( app, SIGNAL( lastWindowClosed() ), app, SLOT( quit() ) );
 
-	std::vector<std::string> arguments;
-	for(int i=1;i<argc;++i)
-	{
-		arguments.push_back(argv[i]);
-	}
+	rtabmap_viz::GuiWrapper * gui = new rtabmap_viz::GuiWrapper(argc, argv);
 
-	int r;
-	{
-		rclcpp::NodeOptions options;
-		options.arguments(arguments);
-		auto node = std::make_shared<rtabmap_viz::GuiWrapper>(options);
+	// Catch ctrl-c to close the gui
+	// (Place this after QApplication's constructor)
+	struct sigaction sigIntHandler;
+	sigIntHandler.sa_handler = my_handler;
+	sigemptyset(&sigIntHandler.sa_mask);
+	sigIntHandler.sa_flags = 0;
+	sigaction(SIGINT, &sigIntHandler, NULL);
 
-		// Catch ctrl-c to close the gui
-		// (Place this after QApplication's constructor)
-		struct sigaction sigIntHandler;
-		sigIntHandler.sa_handler = my_handler;
-		sigemptyset(&sigIntHandler.sa_mask);
-		sigIntHandler.sa_flags = 0;
-		sigaction(SIGINT, &sigIntHandler, NULL);
+	// Here start the ROS events loop
+	spinner = new ros::AsyncSpinner(1); // Use 1 thread
+	spinner->start();
 
-		// Here start the ROS events loop
-		rclcpp::executors::SingleThreadedExecutor executor; //Use 1 thread
-		executor.add_node(node);
-		auto spin_executor = [&executor]() {
-			executor.spin();
-		  };
+	ROS_INFO("rtabmap_viz started.");
+	// Now wait for application to finish
+	int r = app->exec();// MUST be called by the Main Thread
 
-		// Launch executer
-		std::thread execution_thread(spin_executor);
+	ROS_INFO("rtabmap_viz stopping spinner...");
+	delete spinner;
 
-		RCLCPP_INFO(node->get_logger(), "rtabmap_viz started.");
-		// Now wait for application to finish
-		r = app->exec();// MUST be called by the Main Thread
-
-		RCLCPP_INFO(node->get_logger(), "rtabmap_viz stopping spinner...");
-		rclcpp::shutdown();
-		execution_thread.join();
-
-		RCLCPP_INFO(node->get_logger(), "rtabmap_viz: All done! Closing...");
-	}
+	ROS_INFO("rtabmap_viz deleting qt stuff...");
+	delete gui;
 	delete app;
-
+	ROS_INFO("rtabmap_viz: All done! Closing...");
 	return r;
 }
