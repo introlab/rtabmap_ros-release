@@ -1,0 +1,12 @@
+Source: ros-jazzy-rtabmap-demos
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-jazzy-ament-cmake, ros-jazzy-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-jazzy-rtabmap-demos
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-jazzy-rtabmap-odom, ros-jazzy-rtabmap-rviz-plugins, ros-jazzy-rtabmap-slam, ros-jazzy-rtabmap-util, ros-jazzy-rtabmap-viz, ros-jazzy-ros-workspace
+Description: RTAB-Map's demo launch files.
