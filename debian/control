@@ -1,0 +1,13 @@
+Source: ros-jazzy-rtabmap-conversions
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-jazzy-ament-cmake, ros-jazzy-cv-bridge, ros-jazzy-geometry-msgs, ros-jazzy-image-geometry, ros-jazzy-laser-geometry, ros-jazzy-pcl-conversions, ros-jazzy-rclcpp, ros-jazzy-rclcpp-components, ros-jazzy-ros-environment, ros-jazzy-rtabmap, ros-jazzy-rtabmap-msgs, ros-jazzy-sensor-msgs, ros-jazzy-std-msgs, ros-jazzy-tf2, ros-jazzy-tf2-eigen, ros-jazzy-tf2-geometry-msgs, ros-jazzy-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-jazzy-rtabmap-conversions
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-jazzy-cv-bridge, ros-jazzy-geometry-msgs, ros-jazzy-image-geometry, ros-jazzy-laser-geometry, ros-jazzy-pcl-conversions, ros-jazzy-rclcpp, ros-jazzy-rclcpp-components, ros-jazzy-rtabmap, ros-jazzy-rtabmap-msgs, ros-jazzy-sensor-msgs, ros-jazzy-std-msgs, ros-jazzy-tf2, ros-jazzy-tf2-eigen, ros-jazzy-tf2-geometry-msgs, ros-jazzy-ros-workspace
+Description: RTAB-Map's conversions package.
+ This package can be used to convert rtabmap_msgs's msgs into RTAB-Map's library objects.
