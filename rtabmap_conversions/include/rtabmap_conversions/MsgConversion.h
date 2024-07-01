@@ -40,7 +40,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/features2d/features2d.hpp>
+#ifdef PRE_ROS_IRON
 #include <cv_bridge/cv_bridge.h>
+#else
+#include <cv_bridge/cv_bridge.hpp>
+#endif
 
 #include <rtabmap/core/Transform.h>
 #include <rtabmap/core/Link.h>
@@ -209,11 +213,11 @@ rtabmap::Transform getTransform(
 
 // get moving transform accordingly to a fixed frame. For example get
 // transform of /base_link between two stamps accordingly to /odom frame.
-rtabmap::Transform getTransform(
-		const std::string & sourceTargetFrame,
+rtabmap::Transform getMovingTransform(
+		const std::string & movingFrame,
 		const std::string & fixedFrame,
-		const rclcpp::Time & stampSource,
-		const rclcpp::Time & stampTarget,
+		const rclcpp::Time & stampFrom,
+		const rclcpp::Time & stampTo,
 		tf2_ros::Buffer & tfBuffer,
 		double waitForTransform);
 
