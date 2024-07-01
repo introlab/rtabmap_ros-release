@@ -1,0 +1,12 @@
+Source: ros-iron-rtabmap-ros
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-iron-ament-cmake, ros-iron-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-iron-rtabmap-ros
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-iron-rtabmap-conversions, ros-iron-rtabmap-demos, ros-iron-rtabmap-examples, ros-iron-rtabmap-launch, ros-iron-rtabmap-msgs, ros-iron-rtabmap-odom, ros-iron-rtabmap-python, ros-iron-rtabmap-rviz-plugins, ros-iron-rtabmap-slam, ros-iron-rtabmap-sync, ros-iron-rtabmap-util, ros-iron-rtabmap-viz, ros-iron-ros-workspace
+Description: RTAB-Map Stack
