@@ -1,0 +1,12 @@
+Source: ros-iron-rtabmap-rviz-plugins
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-iron-ament-cmake-ros, ros-iron-pcl-conversions, ros-iron-pluginlib, ros-iron-rclcpp, ros-iron-rtabmap-conversions, ros-iron-rtabmap-msgs, ros-iron-rviz-common, ros-iron-rviz-default-plugins, ros-iron-rviz-rendering, ros-iron-sensor-msgs, ros-iron-std-msgs, ros-iron-tf2, ros-iron-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-iron-rtabmap-rviz-plugins
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-iron-pcl-conversions, ros-iron-pluginlib, ros-iron-rclcpp, ros-iron-rtabmap-conversions, ros-iron-rtabmap-msgs, ros-iron-rviz-common, ros-iron-rviz-default-plugins, ros-iron-rviz-rendering, ros-iron-sensor-msgs, ros-iron-std-msgs, ros-iron-tf2, ros-iron-ros-workspace
+Description: RTAB-Map's rviz plugins.
