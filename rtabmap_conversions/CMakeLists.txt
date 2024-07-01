@@ -19,7 +19,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 
-find_package(RTABMap 0.21.4 REQUIRED)
+find_package(RTABMap 0.21.5 REQUIRED)
 
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -46,6 +46,10 @@ if("$ENV{ROS_DISTRO}" STRLESS "humble")
   add_definitions(-DPRE_ROS_HUMBLE)
 endif()
 
+IF("$ENV{ROS_DISTRO}" STRLESS "iron")
+  add_definitions(-DPRE_ROS_IRON)
+ENDIF()
+
 ###########
 ## Build ##
 ###########
@@ -57,6 +61,10 @@ target_include_directories(rtabmap_conversions
     $<INSTALL_INTERFACE:include>
 )
 ament_target_dependencies(rtabmap_conversions ${Libraries})
+
+IF("$ENV{ROS_DISTRO}" STRLESS "iron")
+  target_compile_definitions(rtabmap_conversions PUBLIC -DPRE_ROS_IRON)
+ENDIF()
 
 #############
 ## Install ##
