@@ -1,3 +1,39 @@
+## rtabmap_ros (humble) - 0.21.5-1
+
+The packages in the `rtabmap_ros` repository were released into the `humble` distro by running `/usr/bin/bloom-release --ros-distro humble rtabmap_ros` on `Mon, 01 Jul 2024 02:47:02 -0000`
+
+These packages were released:
+- `rtabmap_conversions`
+- `rtabmap_demos`
+- `rtabmap_examples`
+- `rtabmap_launch`
+- `rtabmap_msgs`
+- `rtabmap_odom`
+- `rtabmap_python`
+- `rtabmap_ros`
+- `rtabmap_rviz_plugins`
+- `rtabmap_slam`
+- `rtabmap_sync`
+- `rtabmap_util`
+- `rtabmap_viz`
+
+Version of package(s) in repository `rtabmap_ros`:
+
+- upstream repository: https://github.com/introlab/rtabmap_ros.git
+- release repository: https://github.com/introlab/rtabmap_ros-release.git
+- rosdistro version: `0.21.4-2`
+- old version: `0.21.4-2`
+- new version: `0.21.5-1`
+
+Versions of tools used:
+
+- bloom version: `0.12.0`
+- catkin_pkg version: `1.0.0`
+- rosdep version: `0.24.0`
+- rosdistro version: `0.9.1`
+- vcstools version: `0.1.42`
+
+
 ## rtabmap_ros (noetic) - 0.21.5-1
 
 The packages in the `rtabmap_ros` repository were released into the `noetic` distro by running `/usr/bin/bloom-release --ros-distro noetic rtabmap_ros` on `Mon, 01 Jul 2024 02:36:31 -0000`
