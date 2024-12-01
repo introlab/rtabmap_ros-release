@@ -1402,6 +1402,7 @@ rtabmap::Signature nodeFromROS(const rtabmap_msgs::Node & msg)
 	std::multimap<int, int> words;
 	std::vector<cv::KeyPoint> wordsKpts;
 	std::vector<cv::Point3f> words3D;
+
 	cv::Mat wordsDescriptors = rtabmap::uncompressData(msg.word_descriptors);
 
 	if(msg.word_id_keys.size() != msg.word_id_values.size())
@@ -1456,6 +1457,7 @@ rtabmap::Signature nodeFromROS(const rtabmap_msgs::Node & msg)
 	}
 	s.setWords(words, wordsKpts, words3D, wordsDescriptors);
 	s.sensorData() = sensorDataFromROS(msg.data);
+	s.sensorData().setId(msg.id);
 	return s;
 }
 void nodeToROS(const rtabmap::Signature & signature, rtabmap_msgs::Node & msg)
@@ -2591,6 +2593,24 @@ bool convertScanMsg(
 		double waitForTransform,
 		bool outputInFrameId)
 {
+	// scan message validation check
+	if(scan2dMsg.angle_increment == 0.0f) {
+		ROS_ERROR("convertScanMsg: angle_increment should not be 0!");
+		return false;
+	}
+	if(scan2dMsg.range_min > scan2dMsg.range_max) {
+		ROS_ERROR("convertScanMsg: range_min (%f) should be smaller than range_max (%f)!", scan2dMsg.range_min, scan2dMsg.range_max);
+		return false;
+	}
+	if(scan2dMsg.angle_increment > 0 && scan2dMsg.angle_max < scan2dMsg.angle_min) {
+		ROS_ERROR("convertScanMsg: Angle increment (%f) should be negative if angle_min(%f) > angle_max(%f)!", scan2dMsg.angle_increment, scan2dMsg.angle_min, scan2dMsg.angle_max);
+		return false;
+	}
+	else if (scan2dMsg.angle_increment < 0 && scan2dMsg.angle_max > scan2dMsg.angle_min) {
+		ROS_ERROR("convertScanMsg: Angle increment (%f) should positive if angle_min(%f) < angle_max(%f)!", scan2dMsg.angle_increment, scan2dMsg.angle_min, scan2dMsg.angle_max);
+		return false;
+	}
+
 	// make sure the frame of the laser is updated during the whole scan time
 	rtabmap::Transform tmpT = getMovingTransform(
 			scan2dMsg.header.frame_id,
