@@ -1,14 +1,14 @@
 
-std_msgs/Header header
+Header header
 
 ##
 # /map to /odom transform
 # Always identity when the graph is optimized from the latest pose.
 ##
-geometry_msgs/Transform map_to_odom
+geometry_msgs/Transform mapToOdom
 
 # The poses
-int32[] poses_id
+int32[] posesId
 geometry_msgs/Pose[] poses
 
 # The links
