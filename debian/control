@@ -1,0 +1,12 @@
+Source: ros-noetic-rtabmap-python
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-noetic-catkin, ros-noetic-rospy
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-noetic-rtabmap-python
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-noetic-rospy
+Description: RTAB-Map's python package.
