@@ -1,0 +1,12 @@
+Source: ros-jazzy-rtabmap-rviz-plugins
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-jazzy-ament-cmake-ros, ros-jazzy-pcl-conversions, ros-jazzy-pluginlib, ros-jazzy-rclcpp, ros-jazzy-rtabmap-conversions, ros-jazzy-rtabmap-msgs, ros-jazzy-rviz-common, ros-jazzy-rviz-default-plugins, ros-jazzy-rviz-rendering, ros-jazzy-sensor-msgs, ros-jazzy-std-msgs, ros-jazzy-tf2, ros-jazzy-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-jazzy-rtabmap-rviz-plugins
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-jazzy-pcl-conversions, ros-jazzy-pluginlib, ros-jazzy-rclcpp, ros-jazzy-rtabmap-conversions, ros-jazzy-rtabmap-msgs, ros-jazzy-rviz-common, ros-jazzy-rviz-default-plugins, ros-jazzy-rviz-rendering, ros-jazzy-sensor-msgs, ros-jazzy-std-msgs, ros-jazzy-tf2, ros-jazzy-ros-workspace
+Description: RTAB-Map's rviz plugins.
