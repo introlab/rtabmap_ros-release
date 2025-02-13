@@ -28,23 +28,16 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef INFO_DISPLAY_H
 #define INFO_DISPLAY_H
 
-#include <memory>
-#include <set>
-#include <string>
-#include <vector>
-#include <utility>
+#include <rtabmap_msgs/Info.h>
 
-#include <rtabmap_rviz_plugins/visibility.h>
-#include <rtabmap_msgs/msg/info.hpp>
-
-#include <rviz_common/display.hpp>
-#include "rviz_common/message_filter_display.hpp"
+#include <rviz/message_filter_display.h>
 #include <rtabmap/core/Transform.h>
+#include <ros/callback_queue.h>
 
 namespace rtabmap_rviz_plugins
 {
 
-class RTABMAP_RVIZ_PLUGINS_PUBLIC InfoDisplay: public rviz_common::MessageFilterDisplay<rtabmap_msgs::msg::Info>
+class InfoDisplay: public rviz::MessageFilterDisplay<rtabmap_msgs::Info>
 {
 Q_OBJECT
 public:
@@ -59,15 +52,18 @@ protected:
 	virtual void onInitialize();
 
 	/** @brief Process a single message.  Overridden from MessageFilterDisplay. */
-	virtual void processMessage( const rtabmap_msgs::msg::Info::ConstSharedPtr cloud );
+	virtual void processMessage( const rtabmap_msgs::InfoConstPtr& cloud );
 
 private:
+	ros::AsyncSpinner spinner_;
+	ros::CallbackQueue cbqueue_;
+
 	QString info_;
 	int globalCount_;
 	int localCount_;
 	std::map<std::string, float> statistics_;
 	rtabmap::Transform loopTransform_;
-	std::mutex info_mutex_;
+	boost::mutex info_mutex_;
 };
 
 } // namespace rtabmap_rviz_plugins

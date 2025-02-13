@@ -1,10 +1,16 @@
 cmake_minimum_required(VERSION 3.5)
 project(rtabmap_launch)
 
-find_package(ament_cmake REQUIRED)
-
-install(DIRECTORY launch
-   DESTINATION share/${PROJECT_NAME}
+find_package(catkin REQUIRED COMPONENTS
 )
 
-ament_package()
+catkin_package()
+
+#############
+## Install ##
+#############
+
+install(DIRECTORY launch
+   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
