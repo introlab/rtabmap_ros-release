@@ -1,3 +1,41 @@
+## rtabmap_ros (noetic) - 0.21.10-1
+
+The packages in the `rtabmap_ros` repository were released into the `noetic` distro by running `/usr/bin/bloom-release --rosdistro noetic rtabmap_ros` on `Thu, 13 Feb 2025 04:01:11 -0000`
+
+These packages were released:
+- `rtabmap_conversions`
+- `rtabmap_costmap_plugins`
+- `rtabmap_demos`
+- `rtabmap_examples`
+- `rtabmap_launch`
+- `rtabmap_legacy`
+- `rtabmap_msgs`
+- `rtabmap_odom`
+- `rtabmap_python`
+- `rtabmap_ros`
+- `rtabmap_rviz_plugins`
+- `rtabmap_slam`
+- `rtabmap_sync`
+- `rtabmap_util`
+- `rtabmap_viz`
+
+Version of package(s) in repository `rtabmap_ros`:
+
+- upstream repository: https://github.com/introlab/rtabmap_ros.git
+- release repository: https://github.com/introlab/rtabmap_ros-release.git
+- rosdistro version: `0.21.9-1`
+- old version: `0.21.9-1`
+- new version: `0.21.10-1`
+
+Versions of tools used:
+
+- bloom version: `0.12.0`
+- catkin_pkg version: `1.0.0`
+- rosdep version: `0.25.1`
+- rosdistro version: `1.0.1`
+- vcstools version: `0.1.42`
+
+
 ## rtabmap_ros (jazzy) - 0.21.10-1
 
 The packages in the `rtabmap_ros` repository were released into the `jazzy` distro by running `/usr/bin/bloom-release --rosdistro jazzy rtabmap_ros` on `Thu, 13 Feb 2025 03:54:16 -0000`
