@@ -1,0 +1,12 @@
+Source: ros-humble-rtabmap-rviz-plugins
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-humble-ament-cmake-ros, ros-humble-pcl-conversions, ros-humble-pluginlib, ros-humble-rclcpp, ros-humble-rtabmap-conversions, ros-humble-rtabmap-msgs, ros-humble-rviz-common, ros-humble-rviz-default-plugins, ros-humble-rviz-rendering, ros-humble-sensor-msgs, ros-humble-std-msgs, ros-humble-tf2, ros-humble-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-humble-rtabmap-rviz-plugins
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-humble-pcl-conversions, ros-humble-pluginlib, ros-humble-rclcpp, ros-humble-rtabmap-conversions, ros-humble-rtabmap-msgs, ros-humble-rviz-common, ros-humble-rviz-default-plugins, ros-humble-rviz-rendering, ros-humble-sensor-msgs, ros-humble-std-msgs, ros-humble-tf2, ros-humble-ros-workspace
+Description: RTAB-Map's rviz plugins.
