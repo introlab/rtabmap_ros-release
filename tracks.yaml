@@ -225,7 +225,7 @@ tracks:
     last_version: 0.22.0
     name: rtabmap_ros
     patches: null
-    release_inc: '1'
+    release_inc: '2'
     release_repo_url: null
     release_tag: :{version}-kilted
     ros_distro: kilted
