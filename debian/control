@@ -1,0 +1,12 @@
+Source: ros-rolling-rtabmap-demos
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-rolling-ament-cmake, ros-rolling-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-rolling-rtabmap-demos
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-rolling-rtabmap-odom, ros-rolling-rtabmap-rviz-plugins, ros-rolling-rtabmap-slam, ros-rolling-rtabmap-util, ros-rolling-rtabmap-viz, ros-rolling-ros-workspace
+Description: RTAB-Map's demo launch files.
