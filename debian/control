@@ -1,0 +1,12 @@
+Source: ros-rolling-rtabmap-slam
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-rolling-ament-cmake-ros, ros-rolling-apriltag-msgs, ros-rolling-aruco-msgs, ros-rolling-aruco-opencv-msgs, ros-rolling-cv-bridge, ros-rolling-geometry-msgs, ros-rolling-nav-msgs, ros-rolling-rclcpp, ros-rolling-rclcpp-components, ros-rolling-ros-environment, ros-rolling-rtabmap-msgs, ros-rolling-rtabmap-sync, ros-rolling-rtabmap-util, ros-rolling-sensor-msgs, ros-rolling-std-msgs, ros-rolling-std-srvs, ros-rolling-tf2, ros-rolling-tf2-ros, ros-rolling-visualization-msgs, ros-rolling-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-rolling-rtabmap-slam
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-rolling-apriltag-msgs, ros-rolling-aruco-msgs, ros-rolling-aruco-opencv-msgs, ros-rolling-cv-bridge, ros-rolling-geometry-msgs, ros-rolling-nav-msgs, ros-rolling-rclcpp, ros-rolling-rclcpp-components, ros-rolling-rtabmap-msgs, ros-rolling-rtabmap-sync, ros-rolling-rtabmap-util, ros-rolling-sensor-msgs, ros-rolling-std-msgs, ros-rolling-std-srvs, ros-rolling-tf2, ros-rolling-tf2-ros, ros-rolling-visualization-msgs, ros-rolling-ros-workspace
+Description: RTAB-Map's SLAM package.
