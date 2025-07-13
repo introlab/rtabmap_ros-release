@@ -1,0 +1,13 @@
+Source: ros-rolling-rtabmap-conversions
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-rolling-ament-cmake, ros-rolling-cv-bridge, ros-rolling-geometry-msgs, ros-rolling-image-geometry, ros-rolling-laser-geometry, ros-rolling-pcl-conversions, ros-rolling-rclcpp, ros-rolling-rclcpp-components, ros-rolling-ros-environment, ros-rolling-rtabmap, ros-rolling-rtabmap-msgs, ros-rolling-sensor-msgs, ros-rolling-std-msgs, ros-rolling-tf2, ros-rolling-tf2-eigen, ros-rolling-tf2-geometry-msgs, ros-rolling-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-rolling-rtabmap-conversions
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-rolling-cv-bridge, ros-rolling-geometry-msgs, ros-rolling-image-geometry, ros-rolling-laser-geometry, ros-rolling-pcl-conversions, ros-rolling-rclcpp, ros-rolling-rclcpp-components, ros-rolling-rtabmap, ros-rolling-rtabmap-msgs, ros-rolling-sensor-msgs, ros-rolling-std-msgs, ros-rolling-tf2, ros-rolling-tf2-eigen, ros-rolling-tf2-geometry-msgs, ros-rolling-ros-workspace
+Description: RTAB-Map's conversions package.
+ This package can be used to convert rtabmap_msgs's msgs into RTAB-Map's library objects.
