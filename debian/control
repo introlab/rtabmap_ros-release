@@ -1,0 +1,12 @@
+Source: ros-kilted-rtabmap-rviz-plugins
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-kilted-ament-cmake-ros, ros-kilted-pcl-conversions, ros-kilted-pluginlib, ros-kilted-rclcpp, ros-kilted-ros-environment, ros-kilted-rtabmap-conversions, ros-kilted-rtabmap-msgs, ros-kilted-rviz-common, ros-kilted-rviz-default-plugins, ros-kilted-rviz-rendering, ros-kilted-sensor-msgs, ros-kilted-std-msgs, ros-kilted-tf2, ros-kilted-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-kilted-rtabmap-rviz-plugins
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-kilted-pcl-conversions, ros-kilted-pluginlib, ros-kilted-rclcpp, ros-kilted-rtabmap-conversions, ros-kilted-rtabmap-msgs, ros-kilted-rviz-common, ros-kilted-rviz-default-plugins, ros-kilted-rviz-rendering, ros-kilted-sensor-msgs, ros-kilted-std-msgs, ros-kilted-tf2, ros-kilted-ros-workspace
+Description: RTAB-Map's rviz plugins.
