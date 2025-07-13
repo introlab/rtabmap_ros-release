@@ -221,11 +221,11 @@ tracks:
     - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
       :{release_inc} --os-name rhel
     devel_branch: kilted-devel
-    last_release: 0.22.0-kilted
-    last_version: 0.22.0
+    last_release: 0.22.1-kilted
+    last_version: 0.22.1
     name: rtabmap_ros
     patches: null
-    release_inc: '2'
+    release_inc: '1'
     release_repo_url: null
     release_tag: :{version}-kilted
     ros_distro: kilted
