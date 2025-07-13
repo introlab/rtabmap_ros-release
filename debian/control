@@ -1,0 +1,12 @@
+Source: ros-rolling-rtabmap-ros
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-rolling-ament-cmake, ros-rolling-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-rolling-rtabmap-ros
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-rolling-rtabmap-conversions, ros-rolling-rtabmap-demos, ros-rolling-rtabmap-examples, ros-rolling-rtabmap-launch, ros-rolling-rtabmap-msgs, ros-rolling-rtabmap-odom, ros-rolling-rtabmap-python, ros-rolling-rtabmap-rviz-plugins, ros-rolling-rtabmap-slam, ros-rolling-rtabmap-sync, ros-rolling-rtabmap-util, ros-rolling-rtabmap-viz, ros-rolling-ros-workspace
+Description: RTAB-Map Stack
