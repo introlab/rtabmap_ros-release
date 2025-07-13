@@ -1,0 +1,12 @@
+Source: ros-kilted-rtabmap-sync
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-kilted-ament-cmake-ros, ros-kilted-cv-bridge, ros-kilted-diagnostic-updater, ros-kilted-image-transport, ros-kilted-message-filters, ros-kilted-nav-msgs, ros-kilted-rclcpp, ros-kilted-rclcpp-components, ros-kilted-ros-environment, ros-kilted-rtabmap-conversions, ros-kilted-rtabmap-msgs, ros-kilted-sensor-msgs, ros-kilted-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-kilted-rtabmap-sync
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-kilted-cv-bridge, ros-kilted-diagnostic-updater, ros-kilted-image-transport, ros-kilted-message-filters, ros-kilted-nav-msgs, ros-kilted-rclcpp, ros-kilted-rclcpp-components, ros-kilted-rtabmap-conversions, ros-kilted-rtabmap-msgs, ros-kilted-sensor-msgs, ros-kilted-ros-workspace
+Description: RTAB-Map's synchronization package.
