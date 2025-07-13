@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>rtabmap_slam</name>
-  <version>0.22.0</version>
+  <version>0.22.1</version>
   <description>RTAB-Map's SLAM package.</description>
   <maintainer email="matlabbe@gmail.com">Mathieu Labbe</maintainer>
   <author>Mathieu Labbe</author>
@@ -17,7 +17,7 @@
   <depend>cv_bridge</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
-  <!-- depend>nav2_msgs</depend> Not available on kilted -->
+  <depend>nav2_msgs</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
   <depend>sensor_msgs</depend>
@@ -27,6 +27,9 @@
   <depend>tf2_ros</depend>
   <depend>visualization_msgs</depend>
   <depend>apriltag_msgs</depend>
+  <depend>aruco_msgs</depend>
+  <depend>aruco_opencv_msgs</depend>
+  <!-- depend>aruco_markers_msgs</depend --> <!-- binaries only available on humble -->
   
   <depend>rtabmap_msgs</depend>
   <depend>rtabmap_util</depend>
