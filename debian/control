@@ -1,0 +1,12 @@
+Source: ros-rolling-rtabmap-examples
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-rolling-ament-cmake, ros-rolling-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-rolling-rtabmap-examples
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-rolling-imu-filter-madgwick, ros-rolling-rtabmap-odom, ros-rolling-rtabmap-rviz-plugins, ros-rolling-rtabmap-slam, ros-rolling-rtabmap-util, ros-rolling-rtabmap-viz, ros-rolling-tf2-ros, ros-rolling-ros-workspace
+Description: RTAB-Map's example launch files.
