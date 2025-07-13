@@ -1,0 +1,12 @@
+Source: ros-rolling-rtabmap-util
+Section: misc
+Priority: optional
+Maintainer: Mathieu Labbe <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-rolling-ament-cmake, ros-rolling-cv-bridge, ros-rolling-image-transport, ros-rolling-laser-geometry, ros-rolling-message-filters, ros-rolling-nav-msgs, ros-rolling-octomap-msgs, ros-rolling-pcl-conversions, ros-rolling-pcl-ros, ros-rolling-rclcpp, ros-rolling-rclcpp-components, ros-rolling-ros-environment, ros-rolling-rtabmap-conversions, ros-rolling-rtabmap-msgs, ros-rolling-sensor-msgs, ros-rolling-std-msgs, ros-rolling-stereo-msgs, ros-rolling-tf2, ros-rolling-tf2-geometry-msgs, ros-rolling-tf2-ros, ros-rolling-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-rolling-rtabmap-util
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-rolling-cv-bridge, ros-rolling-image-transport, ros-rolling-laser-geometry, ros-rolling-message-filters, ros-rolling-nav-msgs, ros-rolling-octomap-msgs, ros-rolling-pcl-conversions, ros-rolling-pcl-ros, ros-rolling-rclcpp, ros-rolling-rclcpp-components, ros-rolling-rtabmap-conversions, ros-rolling-rtabmap-msgs, ros-rolling-sensor-msgs, ros-rolling-std-msgs, ros-rolling-stereo-msgs, ros-rolling-tf2, ros-rolling-tf2-geometry-msgs, ros-rolling-tf2-ros, ros-rolling-ros-workspace
+Description: RTAB-Map's various useful nodes and nodelets.
