@@ -5,6 +5,16 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+  # issues #1285 #1288
+  find_library(
+    builtin_interfaces__rosidl_generator_c_LIB NAMES builtin_interfaces__rosidl_generator_c
+    PATHS "/opt/ros/$ENV{ROS_DISTRO}/lib"
+    NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED
+  )
+endif()
+
+
 find_package(ament_cmake REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -50,6 +60,10 @@ IF("$ENV{ROS_DISTRO}" STRLESS "iron")
   add_definitions(-DPRE_ROS_IRON)
 ENDIF()
 
+IF("$ENV{ROS_DISTRO}" STRLESS "kilted")
+  add_definitions(-DPRE_ROS_KILTED)
+ENDIF()
+
 ###########
 ## Build ##
 ###########
@@ -63,7 +77,9 @@ target_include_directories(rtabmap_conversions
 ament_target_dependencies(rtabmap_conversions ${Libraries})
 
 IF("$ENV{ROS_DISTRO}" STRLESS "iron")
-  target_compile_definitions(rtabmap_conversions PUBLIC -DPRE_ROS_IRON)
+  target_compile_definitions(rtabmap_conversions PUBLIC -DPRE_ROS_IRON -DPRE_ROS_KILTED)
+ELSEIF("$ENV{ROS_DISTRO}" STRLESS "kilted")
+  target_compile_definitions(rtabmap_conversions PUBLIC -DPRE_ROS_KILTED)
 ENDIF()
 
 #############
