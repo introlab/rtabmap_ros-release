@@ -1,0 +1,12 @@
+Source: ros-lyrical-rtabmap-rviz-plugins
+Section: misc
+Priority: optional
+Maintainer: "Mathieu Labbe" <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), qtbase5-private-dev, ros-lyrical-ament-cmake-ros, ros-lyrical-pcl-conversions, ros-lyrical-pluginlib, ros-lyrical-rclcpp, ros-lyrical-ros-environment, ros-lyrical-rtabmap-conversions, ros-lyrical-rtabmap-msgs, ros-lyrical-rviz-common, ros-lyrical-rviz-default-plugins, ros-lyrical-rviz-rendering, ros-lyrical-sensor-msgs, ros-lyrical-std-msgs, ros-lyrical-tf2, ros-lyrical-ros-workspace
+Homepage: https://index.ros.org/p/rtabmap_rviz_plugins/#lyrical
+Standards-Version: 3.9.2
+
+Package: ros-lyrical-rtabmap-rviz-plugins
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-lyrical-pcl-conversions, ros-lyrical-pluginlib, ros-lyrical-rclcpp, ros-lyrical-rtabmap-conversions, ros-lyrical-rtabmap-msgs, ros-lyrical-rviz-common, ros-lyrical-rviz-default-plugins, ros-lyrical-rviz-rendering, ros-lyrical-sensor-msgs, ros-lyrical-std-msgs, ros-lyrical-tf2, ros-lyrical-ros-workspace
+Description: RTAB-Map's rviz plugins.
