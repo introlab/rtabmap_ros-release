@@ -1,0 +1,12 @@
+Source: ros-lyrical-rtabmap-python
+Section: misc
+Priority: optional
+Maintainer: "Mathieu Labbe" <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), python3-pytest <!nocheck>, ros-lyrical-ament-copyright <!nocheck>, ros-lyrical-ament-flake8 <!nocheck>, ros-lyrical-ament-pep257 <!nocheck>, ros-lyrical-ros-workspace, python3-all, python3-setuptools, dh-python
+Homepage: https://index.ros.org/p/rtabmap_python/#lyrical
+Standards-Version: 3.9.2
+
+Package: ros-lyrical-rtabmap-python
+Architecture: any
+Depends: ${python3:Depends}, ${misc:Depends}, ros-lyrical-ros-workspace
+Description: RTAB-Map's python package.
