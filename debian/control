@@ -1,0 +1,12 @@
+Source: ros-humble-rtabmap-costmap-plugins
+Section: misc
+Priority: optional
+Maintainer: "Mathieu Labbe" <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-humble-ament-cmake-ros, ros-humble-nav2-costmap-2d, ros-humble-pluginlib, ros-humble-rclcpp, ros-humble-ros-environment, ros-humble-visualization-msgs, ros-humble-ros-workspace
+Homepage: https://index.ros.org/p/rtabmap_costmap_plugins/#humble
+Standards-Version: 3.9.2
+
+Package: ros-humble-rtabmap-costmap-plugins
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-humble-nav2-costmap-2d, ros-humble-pluginlib, ros-humble-rclcpp, ros-humble-visualization-msgs, ros-humble-ros-workspace
+Description: RTAB-Map's costmap plugins.
