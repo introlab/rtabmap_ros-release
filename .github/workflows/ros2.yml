@@ -3,9 +3,9 @@ name: ros2
 
 on:
   push:
-    branches: [ jazzy-devel ]
+    branches: [ kilted-devel ]
   pull_request:
-    branches: [ jazzy-devel ]
+    branches: [ kilted-devel ]
 
 env:
   BUILD_TYPE: Release
@@ -20,9 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        ros_distro: [jazzy]
+        ros_distro: [ kilted ]
         include:
-        - ros_distro: jazzy
+        - ros_distro: kilted
           skip_keys: ''
           packages: 'rtabmap_ros'
       fail-fast: false
@@ -38,7 +38,7 @@ jobs:
         sudo apt update
         sudo apt upgrade -y
     - run: |
-        echo "repositories:\n  introlab/rtabmap:\n    type: git\n    url: https://github.com/introlab/rtabmap.git\n    version: jazzy-devel\n" > /tmp/deps.repos &&\
+        echo "repositories:\n  introlab/rtabmap:\n    type: git\n    url: https://github.com/introlab/rtabmap.git\n    version: kilted-devel\n" > /tmp/deps.repos &&\
         cat /tmp/deps.repos
     - uses: ros-tooling/action-ros-ci@v0.4
       with:
@@ -47,4 +47,3 @@ jobs:
         vcs-repo-file-url: /tmp/deps.repos
         rosdep-check: true
         rosdep-skip-keys: "${{ matrix.skip_keys }}"
-
