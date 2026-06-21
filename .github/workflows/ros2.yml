@@ -3,9 +3,9 @@ name: ros2
 
 on:
   push:
-    branches: [ humble-devel ]
+    branches: [ jazzy-devel ]
   pull_request:
-    branches: [ humble-devel ]
+    branches: [ jazzy-devel ]
 
 env:
   BUILD_TYPE: Release
@@ -20,9 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        ros_distro: [humble]
+        ros_distro: [jazzy]
         include:
-        - ros_distro: humble
+        - ros_distro: jazzy
           skip_keys: ''
           packages: 'rtabmap_ros'
       fail-fast: false
@@ -38,7 +38,7 @@ jobs:
         sudo apt update
         sudo apt upgrade -y
     - run: |
-        echo "repositories:\n  introlab/rtabmap:\n    type: git\n    url: https://github.com/introlab/rtabmap.git\n    version: humble-devel\n" > /tmp/deps.repos &&\
+        echo "repositories:\n  introlab/rtabmap:\n    type: git\n    url: https://github.com/introlab/rtabmap.git\n    version: jazzy-devel\n" > /tmp/deps.repos &&\
         cat /tmp/deps.repos
     - uses: ros-tooling/action-ros-ci@v0.4
       with:
@@ -47,3 +47,4 @@ jobs:
         vcs-repo-file-url: /tmp/deps.repos
         rosdep-check: true
         rosdep-skip-keys: "${{ matrix.skip_keys }}"
+
