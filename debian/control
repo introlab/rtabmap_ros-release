@@ -1,0 +1,12 @@
+Source: ros-lyrical-rtabmap-util
+Section: misc
+Priority: optional
+Maintainer: "Mathieu Labbe" <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-lyrical-ament-cmake, ros-lyrical-cv-bridge, ros-lyrical-image-geometry, ros-lyrical-image-transport, ros-lyrical-laser-geometry, ros-lyrical-message-filters, ros-lyrical-nav-msgs, ros-lyrical-octomap-msgs, ros-lyrical-pcl-conversions, ros-lyrical-pcl-ros, ros-lyrical-rclcpp, ros-lyrical-rclcpp-components, ros-lyrical-ros-environment, ros-lyrical-rtabmap-conversions, ros-lyrical-rtabmap-msgs, ros-lyrical-rtabmap-sync, ros-lyrical-sensor-msgs, ros-lyrical-std-msgs, ros-lyrical-stereo-msgs, ros-lyrical-tf2, ros-lyrical-tf2-geometry-msgs, ros-lyrical-tf2-ros, ros-lyrical-ros-workspace
+Homepage: https://index.ros.org/p/rtabmap_util/#lyrical
+Standards-Version: 3.9.2
+
+Package: ros-lyrical-rtabmap-util
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-lyrical-cv-bridge, ros-lyrical-image-geometry, ros-lyrical-image-transport, ros-lyrical-laser-geometry, ros-lyrical-message-filters, ros-lyrical-nav-msgs, ros-lyrical-octomap-msgs, ros-lyrical-pcl-conversions, ros-lyrical-pcl-ros, ros-lyrical-rclcpp, ros-lyrical-rclcpp-components, ros-lyrical-rtabmap-conversions, ros-lyrical-rtabmap-msgs, ros-lyrical-rtabmap-sync, ros-lyrical-sensor-msgs, ros-lyrical-std-msgs, ros-lyrical-stereo-msgs, ros-lyrical-tf2, ros-lyrical-tf2-geometry-msgs, ros-lyrical-tf2-ros, ros-lyrical-ros-workspace
+Description: RTAB-Map's various useful nodes and nodelets.
