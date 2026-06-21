@@ -1,0 +1,12 @@
+Source: ros-lyrical-rtabmap-examples
+Section: misc
+Priority: optional
+Maintainer: "Mathieu Labbe" <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-lyrical-ament-cmake, ros-lyrical-ros-workspace
+Homepage: https://index.ros.org/p/rtabmap_examples/#lyrical
+Standards-Version: 3.9.2
+
+Package: ros-lyrical-rtabmap-examples
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-lyrical-imu-filter-madgwick, ros-lyrical-rtabmap-odom, ros-lyrical-rtabmap-rviz-plugins, ros-lyrical-rtabmap-slam, ros-lyrical-rtabmap-util, ros-lyrical-rtabmap-viz, ros-lyrical-tf2-ros, ros-lyrical-ros-workspace
+Description: RTAB-Map's example launch files.
