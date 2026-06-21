@@ -3,9 +3,9 @@ name: ros2
 
 on:
   push:
-    branches: [ kilted-devel ]
+    branches: [ lyrical-devel ]
   pull_request:
-    branches: [ kilted-devel ]
+    branches: [ lyrical-devel ]
 
 env:
   BUILD_TYPE: Release
@@ -20,10 +20,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        ros_distro: [ kilted ]
+        ros_distro: [lyrical]
         include:
-        - ros_distro: kilted
-          skip_keys: ''
+        - ros_distro: lyrical
+          skip_keys: '' # skip keys shoudl be empty when release on ROSDISTRO_devel branch, comment these keys in the appriopriate package.
+          # rtabmap_costmap_plugins cannot be built, missing nav2 on lyrical, commented from rtabmap_ros package. 
+          # Make sure rosdistro doesn't declare rtabmap_costmap_plugins.
           packages: 'rtabmap_ros'
       fail-fast: false
     container:
@@ -38,7 +40,7 @@ jobs:
         sudo apt update
         sudo apt upgrade -y
     - run: |
-        echo "repositories:\n  introlab/rtabmap:\n    type: git\n    url: https://github.com/introlab/rtabmap.git\n    version: kilted-devel\n" > /tmp/deps.repos &&\
+        echo "repositories:\n  introlab/rtabmap:\n    type: git\n    url: https://github.com/introlab/rtabmap.git\n    version: lyrical-devel\n" > /tmp/deps.repos &&\
         cat /tmp/deps.repos
     - uses: ros-tooling/action-ros-ci@v0.4
       with:
