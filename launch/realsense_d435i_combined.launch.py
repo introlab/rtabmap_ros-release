@@ -2,21 +2,11 @@
 #   A realsense D435i
 #   Install realsense2 ros2 package (ros-$ROS_DISTRO-realsense2-camera)
 # Example:
-#   $ ros2 launch rtabmap_examples realsense_d435i_stereo.launch.py
+#   $ ros2 launch rtabmap_examples realsense_d435i_combined.launch.py
 #
-#
-#
-#
-# VINS-Fusion example:
-#   Add to your ros2 workspace the package https://github.com/zinuok/VINS-Fusion-ROS2
-#   Apply this patch https://gist.github.com/matlabbe/ebbb343cd744da9d6d6d6ded2e1557fd
-#      -> Revert "#define USE_GPU" change if you want to build VINS-Fusion with GPU support.
-#   That may be counterintuitive, but we need to build VINS-Fusion first, then rebuild rtabmap with VINS-Fusion support.
-#      -> in your ros2 workspace, do "colcon build --packages-select vins"
-#      -> go back under rtabmap library repo, then rebuild/install with "cmake -DWITH_VINS_FUSION=ON ..."
-#      -> do "colcon build" in your ros2 workspace again to rebuild rtabmap_ros
-#   $ ros2 launch rtabmap_examples realsense_d435i_stereo.launch.py odom_args:="--Odom/Strategy 9 OdomVINSFusion/ConfigPath ~/ros2_ws/src/VINS-Fusion-ROS2/config/realsense_d435i/realsense_stereo_imu_config.yaml"
-#      -> set "imu: 1" in realsense_stereo_imu_config.yaml to do stereo inertial odometry, otherwise only stereo odometry is done.
+# Description: In this example, we feed visual odometry with IR stereo images 
+#              for better pose estimation while seding RGB-D data to slam for 
+#              a colored map.
 #
 import os
 
@@ -30,18 +20,28 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
 def generate_launch_description():
-    parameters={
+    vo_parameters={
           'frame_id':'camera_link',
-          'subscribe_stereo':True,
-          'subscribe_odom_info':True,
           'wait_imu_to_init':True}
 
-    remappings=[
+    vo_remappings=[
           ('imu', '/imu/data'),
           ('left/image_rect', '/camera/infra1/image_rect_raw'),
           ('left/camera_info', '/camera/infra1/camera_info'),
           ('right/image_rect', '/camera/infra2/image_rect_raw'),
           ('right/camera_info', '/camera/infra2/camera_info')]
+    
+    slam_parameters={
+          'frame_id':'camera_link',
+          'subscribe_depth':True,
+          'subscribe_odom_info':True,
+          'approx_sync':False}
+
+    slam_remappings=[
+          ('imu', '/imu/data'),
+          ('rgb/image', '/camera/color/image_raw'),
+          ('rgb/camera_info', '/camera/color/camera_info'),
+          ('depth/image', '/camera/aligned_depth_to_color/image_raw')]
 
     return LaunchDescription([
 
@@ -73,26 +73,28 @@ def generate_launch_description():
                                   'unite_imu_method': LaunchConfiguration('unite_imu_method'),
                                   'enable_infra1': 'true',
                                   'enable_infra2': 'true',
-                                  'enable_sync': 'true'}.items(),
+                                  'align_depth.enable': 'true',
+                                  'enable_sync': 'true',
+                                  'rgb_camera.profile': '640x360x30'}.items(),
         ),
 
         Node(
             package='rtabmap_odom', executable='stereo_odometry', output='screen',
-            parameters=[parameters],
+            parameters=[vo_parameters],
             arguments=[LaunchConfiguration("args"), LaunchConfiguration("odom_args")],
-            remappings=remappings),
+            remappings=vo_remappings),
 
         Node(
             package='rtabmap_slam', executable='rtabmap', output='screen',
-            parameters=[parameters],
-            remappings=remappings,
+            parameters=[slam_parameters],
+            remappings=slam_remappings,
             arguments=['-d', LaunchConfiguration("args")]),
 
         Node(
             package='rtabmap_viz', executable='rtabmap_viz', output='screen',
-            parameters=[parameters,
+            parameters=[slam_parameters,
                         {'odometry_node_name': "stereo_odometry"}],
-            remappings=remappings),
+            remappings=slam_remappings),
                 
         # Compute quaternion of the IMU
         Node(
