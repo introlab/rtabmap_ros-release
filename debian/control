@@ -1,0 +1,12 @@
+Source: ros-lyrical-rtabmap-launch
+Section: misc
+Priority: optional
+Maintainer: "Mathieu Labbe" <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-lyrical-ament-cmake, ros-lyrical-ros-workspace
+Homepage: https://index.ros.org/p/rtabmap_launch/#lyrical
+Standards-Version: 3.9.2
+
+Package: ros-lyrical-rtabmap-launch
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-lyrical-rtabmap-msgs, ros-lyrical-rtabmap-odom, ros-lyrical-rtabmap-rviz-plugins, ros-lyrical-rtabmap-slam, ros-lyrical-rtabmap-util, ros-lyrical-rtabmap-viz, ros-lyrical-ros-workspace
+Description: RTAB-Map's main launch files.
