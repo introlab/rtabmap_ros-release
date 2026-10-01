@@ -1,0 +1,12 @@
+Source: ros-lyrical-rtabmap-msgs
+Section: misc
+Priority: optional
+Maintainer: "Mathieu Labbe" <matlabbe@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-lyrical-ament-cmake, ros-lyrical-builtin-interfaces, ros-lyrical-geometry-msgs, ros-lyrical-ros-environment, ros-lyrical-rosidl-default-generators, ros-lyrical-sensor-msgs, ros-lyrical-std-msgs, ros-lyrical-std-srvs, ros-lyrical-ros-workspace, ros-lyrical-rosidl-typesupport-fastrtps-c, ros-lyrical-rosidl-typesupport-fastrtps-cpp
+Homepage: https://index.ros.org/p/rtabmap_msgs/#lyrical
+Standards-Version: 3.9.2
+
+Package: ros-lyrical-rtabmap-msgs
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-lyrical-builtin-interfaces, ros-lyrical-geometry-msgs, ros-lyrical-rosidl-default-runtime, ros-lyrical-sensor-msgs, ros-lyrical-std-msgs, ros-lyrical-std-srvs, ros-lyrical-ros-workspace
+Description: RTAB-Map's msgs package.
