@@ -107,8 +107,13 @@ PointCloudToDepthImage::PointCloudToDepthImage(const rclcpp::NodeOptions & optio
 	RCLCPP_INFO(this->get_logger(), "  decimation=%d", decimation_);
 	RCLCPP_INFO(this->get_logger(), "  upscale=%s (upscale_depth_error_ratio=%f)", upscale_?"true":"false", upscaleDepthErrorRatio_);
 
+#ifdef PRE_ROS_LYRICAL
 	depthImage16Pub_ = image_transport::create_publisher(this, "image_raw", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos).get_rmw_qos_profile()); // 16 bits unsigned in mm
-	depthImage32Pub_ = image_transport::create_publisher(this, "image", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos).get_rmw_qos_profile());// 32 bits float in meters
+	depthImage32Pub_ = image_transport::create_publisher(this, "image", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos).get_rmw_qos_profile());// 32 bits float in meters	
+#else
+	depthImage16Pub_ = image_transport::create_publisher(*this, "image_raw", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos)); // 16 bits unsigned in mm
+	depthImage32Pub_ = image_transport::create_publisher(*this, "image", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos));// 32 bits float in meters
+#endif
 	pointCloudTransformedPub_ = create_publisher<sensor_msgs::msg::PointCloud2>("cloud_transformed", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos));
 	cameraInfo16Pub_ = create_publisher<sensor_msgs::msg::CameraInfo>(depthImage16Pub_.getTopic()+"/camera_info", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qosCamInfo));
 	cameraInfo32Pub_ = create_publisher<sensor_msgs::msg::CameraInfo>(depthImage32Pub_.getTopic()+"/camera_info", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qosCamInfo));
@@ -159,9 +164,10 @@ void PointCloudToDepthImage::callback(
 
 		if(cloudDisplacement.isNull())
 		{
-			RCLCPP_ERROR(this->get_logger(), "Could not find transform between %s and %s, accordingly to %s, aborting!",
-				pointCloud2Msg->header.frame_id.c_str(), 
-				cameraInfoMsg->header.frame_id.c_str(),
+			RCLCPP_ERROR(this->get_logger(), "Could not find how %s moved between the cloud (%f) and the camera info (%f) stamps, accordingly to %s, aborting!",
+				pointCloud2Msg->header.frame_id.c_str(),
+				cloudStamp,
+				infoStamp,
 				fixedFrameId_.c_str());
 			return;
 		}
