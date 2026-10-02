@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2010-2016, Mathieu Labbe - IntRoLab - Universite de Sherbrooke
+Copyright (c) 2010-2025, Mathieu Labbe - IntRoLab - Universite de Sherbrooke
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -25,44 +25,33 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include "rtabmap_viz/GuiWrapper.h"
+#include "rtabmap_viz/rgbd_image_viewer.hpp"
 #include "rtabmap/utilite/ULogger.h"
 
 #include <QApplication>
-#include <rtabmap/gui/MainWindow.h>
+#include <rtabmap/gui/CameraViewer.h>
 #include <rtabmap/utilite/ULogger.h>
 #include <signal.h>
 
 QApplication * app = 0;
 
 void my_handler(int){
-	UINFO("rtabmap_viz: ctrl-c catched! Exiting Qt app...");
-	app->exit(0);
+	app->exit(-1);
 }
 
 int main(int argc, char** argv)
 {
-	UINFO("Starting node...");
-
-	ULogger::setType(ULogger::kTypeConsole);
-	ULogger::setLevel(ULogger::kWarning);
-
 	rclcpp::init(argc, argv);
 
 	app = new QApplication(argc, argv);
 	app->connect( app, SIGNAL( lastWindowClosed() ), app, SLOT( quit() ) );
 
-	std::vector<std::string> arguments;
-	for(int i=1;i<argc;++i)
-	{
-		arguments.push_back(argv[i]);
-	}
-
 	int r;
 	{
-		rclcpp::NodeOptions options;
-		options.arguments(arguments);
-		auto node = std::make_shared<rtabmap_viz::GuiWrapper>(options);
+		auto node = std::make_shared<rclcpp::Node>("rgbd_image_viewer");
+		rtabmap::ParametersMap parameters = rtabmap::Parameters::parseArguments(argc, argv, true);
+		rtabmap_viz::RGBDImageViewer viewer(node, parameters);
+    	viewer.show();
 
 		// Catch ctrl-c to close the gui
 		// (Place this after QApplication's constructor)
@@ -82,19 +71,11 @@ int main(int argc, char** argv)
 		// Launch executer
 		std::thread execution_thread(spin_executor);
 
-		RCLCPP_INFO(node->get_logger(), "rtabmap_viz started.");
 		// Now wait for application to finish
 		r = app->exec();// MUST be called by the Main Thread
 
-		RCLCPP_INFO(node->get_logger(), "rtabmap_viz stopping spinner...");
-		if (rclcpp::ok()) {
-			rclcpp::shutdown();
-		}
-		if (execution_thread.joinable()) {
-			execution_thread.join();
-		}
-
-		RCLCPP_INFO(node->get_logger(), "rtabmap_viz: All done! Closing...");
+		rclcpp::shutdown();
+		execution_thread.join();
 	}
 	delete app;
 
