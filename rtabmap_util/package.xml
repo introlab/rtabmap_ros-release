@@ -34,7 +34,7 @@
   <depend>rtabmap_msgs</depend>
   <depend>rtabmap_conversions</depend>
   <depend>rtabmap_sync</depend>
-  <!-- <depend>grid_map_ros</depend> Not available on Lyrical -->
+  <depend>grid_map_ros</depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
 

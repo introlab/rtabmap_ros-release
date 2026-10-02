@@ -3,9 +3,9 @@ name: ros2
 
 on:
   push:
-    branches: [ lyrical-devel ]
+    branches: [ humble-devel ]
   pull_request:
-    branches: [ lyrical-devel ]
+    branches: [ humble-devel ]
   workflow_dispatch:
 
 env:
@@ -21,12 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        ros_distro: [lyrical]
+        ros_distro: [humble]
         ros2_testing: [false, true] # build with main and ros-testing apt repositories
         include:
-        - ros_distro: lyrical
+        - ros_distro: humble
           skip_keys: '' # skip keys shoudl be empty when release on ROSDISTRO_devel branch, comment these keys in the appriopriate package.
-          # velodyne and grid_map_ros are not available on lyrical, they are commented in rtabmap_examples and rtabmap_util packages.
           # Listed packages are built with their dependencies, but only listed packages are tested.
           packages: 'rtabmap_ros rtabmap_conversions rtabmap_odom rtabmap_slam rtabmap_sync rtabmap_util rtabmap_python'
       fail-fast: false
@@ -47,7 +46,7 @@ jobs:
         sudo apt update
         sudo apt upgrade -y
     - run: |
-        echo "repositories:\n  introlab/rtabmap:\n    type: git\n    url: https://github.com/introlab/rtabmap.git\n    version: lyrical-devel\n" > /tmp/deps.repos &&\
+        echo "repositories:\n  introlab/rtabmap:\n    type: git\n    url: https://github.com/introlab/rtabmap.git\n    version: humble-devel\n" > /tmp/deps.repos &&\
         cat /tmp/deps.repos
     - uses: ros-tooling/action-ros-ci@v0.4
       with:
