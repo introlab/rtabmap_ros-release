@@ -38,6 +38,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rtabmap_conversions/MsgConversion.h"
 #include <rtabmap_msgs/msg/rgbd_images.hpp>
 
+#include <rtabmap/core/Compression.h>
 #include <rtabmap/core/util3d.h>
 #include <rtabmap/core/util2d.h>
 #include <rtabmap/utilite/ULogger.h>
@@ -65,13 +66,16 @@ RGBDOdometry::RGBDOdometry(const rclcpp::NodeOptions & options) :
 		exactSync6_(0),
 		topicQueueSize_(10),
 		syncQueueSize_(5),
-		keepColor_(false)
+		keepColor_(false),
+		approxSyncMaxInterval_(0.0)
 {
 	OdometryROS::init(false, true, false);
 }
 
 RGBDOdometry::~RGBDOdometry()
 {
+	this->join(true);
+
 	delete approxSync_;
 	delete exactSync_;
 	delete approxSync2_;
@@ -91,9 +95,8 @@ void RGBDOdometry::onOdomInit()
 	int rgbdCameras = 1;
 	bool approxSync = true;
 	bool subscribeRGBD = false;
-	double approxSyncMaxInterval = 0.0;
 	approxSync = this->declare_parameter("approx_sync", approxSync);
-	approxSyncMaxInterval = this->declare_parameter("approx_sync_max_interval", approxSyncMaxInterval);
+	approxSyncMaxInterval_ = this->declare_parameter("approx_sync_max_interval", approxSyncMaxInterval_);
 	topicQueueSize_ = this->declare_parameter("topic_queue_size", topicQueueSize_);
 	int queueSize = this->declare_parameter("queue_size", -1);
 	if(queueSize != -1)
@@ -113,12 +116,20 @@ void RGBDOdometry::onOdomInit()
 		rgbdCameras = 0;
 	}
 	keepColor_ = this->declare_parameter("keep_color", keepColor_);
-	std::string rgbdTransport = this->declare_parameter("rgb_transport", std::string("raw"));
+	std::string rgbTransport = this->declare_parameter("rgb_transport", std::string("raw"));
+	if(rgbTransport != "raw") {
+		RCLCPP_WARN(this->get_logger(), "Parameter \"rgb_transport\" has been renamed "
+				"to \"image_transport\" and will be removed "
+				"in future versions! The value (%s) is copied to "
+				"\"image_transport\".", rgbTransport.c_str());
+	}
+	std::string imageTransport = this->declare_parameter("image_transport", rgbTransport);
 	std::string depthTransport = this->declare_parameter("depth_transport", std::string("raw"));
+	
 
 	RCLCPP_INFO(this->get_logger(), "RGBDOdometry: approx_sync    = %s", approxSync?"true":"false");
 	if(approxSync)
-		RCLCPP_INFO(this->get_logger(), "RGBDOdometry: approx_sync_max_interval = %f", approxSyncMaxInterval);
+		RCLCPP_INFO(this->get_logger(), "RGBDOdometry: approx_sync_max_interval = %f", approxSyncMaxInterval_);
 	RCLCPP_INFO(this->get_logger(), "RGBDOdometry: topic_queue_size = %d", topicQueueSize_);
 	RCLCPP_INFO(this->get_logger(), "RGBDOdometry: sync_queue_size  = %d", syncQueueSize_);
 	RCLCPP_INFO(this->get_logger(), "RGBDOdometry: qos             = %d", (int)qos());
@@ -126,7 +137,7 @@ void RGBDOdometry::onOdomInit()
 	RCLCPP_INFO(this->get_logger(), "RGBDOdometry: subscribe_rgbd = %s", subscribeRGBD?"true":"false");
 	RCLCPP_INFO(this->get_logger(), "RGBDOdometry: rgbd_cameras   = %d", rgbdCameras);
 	RCLCPP_INFO(this->get_logger(), "RGBDOdometry: keep_color     = %s", keepColor_?"true":"false");
-	RCLCPP_INFO(this->get_logger(), "RGBDOdometry: rgb_transport   = %s", rgbdTransport.c_str());
+	RCLCPP_INFO(this->get_logger(), "RGBDOdometry: image_transport = %s", imageTransport.c_str());
 	RCLCPP_INFO(this->get_logger(), "RGBDOdometry: depth_transport = %s", depthTransport.c_str());
 
 	rclcpp::SubscriptionOptions options;
@@ -165,8 +176,8 @@ void RGBDOdometry::onOdomInit()
 							MyApproxSync2Policy(syncQueueSize_),
 							rgbd_image1_sub_,
 							rgbd_image2_sub_);
-					if(approxSyncMaxInterval > 0.0)
-						approxSync2_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(approxSyncMaxInterval));
+					if(approxSyncMaxInterval_ > 0.0)
+						approxSync2_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(approxSyncMaxInterval_));
 					approxSync2_->registerCallback(std::bind(&RGBDOdometry::callbackRGBD2, this, std::placeholders::_1, std::placeholders::_2));
 				}
 				else
@@ -180,7 +191,7 @@ void RGBDOdometry::onOdomInit()
 				subscribedTopicsMsg = uFormat("\n%s subscribed to (%s sync%s):\n   %s,\n   %s",
 						get_name(),
 						approxSync?"approx":"exact",
-						approxSync&&approxSyncMaxInterval!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval).c_str():"",
+						approxSync&&approxSyncMaxInterval_!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval_).c_str():"",
 						rgbd_image1_sub_.getSubscriber()->get_topic_name(),
 						rgbd_image2_sub_.getSubscriber()->get_topic_name());
 			}
@@ -193,8 +204,8 @@ void RGBDOdometry::onOdomInit()
 							rgbd_image1_sub_,
 							rgbd_image2_sub_,
 							rgbd_image3_sub_);
-					if(approxSyncMaxInterval > 0.0)
-							approxSync3_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(approxSyncMaxInterval));
+					if(approxSyncMaxInterval_ > 0.0)
+							approxSync3_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(approxSyncMaxInterval_));
 					approxSync3_->registerCallback(std::bind(&RGBDOdometry::callbackRGBD3, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 				}
 				else
@@ -209,7 +220,7 @@ void RGBDOdometry::onOdomInit()
 				subscribedTopicsMsg = uFormat("\n%s subscribed to (%s sync%s):\n   %s,\n   %s,\n   %s",
 						get_name(),
 						approxSync?"approx":"exact",
-						approxSync&&approxSyncMaxInterval!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval).c_str():"",
+						approxSync&&approxSyncMaxInterval_!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval_).c_str():"",
 						rgbd_image1_sub_.getSubscriber()->get_topic_name(),
 						rgbd_image2_sub_.getSubscriber()->get_topic_name(),
 						rgbd_image3_sub_.getSubscriber()->get_topic_name());
@@ -224,8 +235,8 @@ void RGBDOdometry::onOdomInit()
 							rgbd_image2_sub_,
 							rgbd_image3_sub_,
 							rgbd_image4_sub_);
-					if(approxSyncMaxInterval > 0.0)
-						approxSync4_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(approxSyncMaxInterval));
+					if(approxSyncMaxInterval_ > 0.0)
+						approxSync4_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(approxSyncMaxInterval_));
 					approxSync4_->registerCallback(std::bind(&RGBDOdometry::callbackRGBD4, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
 				}
 				else
@@ -241,7 +252,7 @@ void RGBDOdometry::onOdomInit()
 				subscribedTopicsMsg = uFormat("\n%s subscribed to (%s sync%s):\n   %s,\n   %s,\n   %s,\n   %s",
 						get_name(),
 						approxSync?"approx":"exact",
-						approxSync&&approxSyncMaxInterval!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval).c_str():"",
+						approxSync&&approxSyncMaxInterval_!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval_).c_str():"",
 						rgbd_image1_sub_.getSubscriber()->get_topic_name(),
 						rgbd_image2_sub_.getSubscriber()->get_topic_name(),
 						rgbd_image3_sub_.getSubscriber()->get_topic_name(),
@@ -258,8 +269,8 @@ void RGBDOdometry::onOdomInit()
 							rgbd_image3_sub_,
 							rgbd_image4_sub_,
 							rgbd_image5_sub_);
-					if(approxSyncMaxInterval > 0.0)
-						approxSync5_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(approxSyncMaxInterval));
+					if(approxSyncMaxInterval_ > 0.0)
+						approxSync5_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(approxSyncMaxInterval_));
 					approxSync5_->registerCallback(std::bind(&RGBDOdometry::callbackRGBD5, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5));
 				}
 				else
@@ -276,7 +287,7 @@ void RGBDOdometry::onOdomInit()
 				subscribedTopicsMsg = uFormat("\n%s subscribed to (%s sync%s):\n   %s \\\n  %s \\\n  %s \\\n   %s \\\n   %s",
 						get_name(),
 						approxSync?"approx":"exact",
-						approxSync&&approxSyncMaxInterval!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval).c_str():"",
+						approxSync&&approxSyncMaxInterval_!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval_).c_str():"",
 						rgbd_image1_sub_.getSubscriber()->get_topic_name(),
 						rgbd_image2_sub_.getSubscriber()->get_topic_name(),
 						rgbd_image3_sub_.getSubscriber()->get_topic_name(),
@@ -295,8 +306,8 @@ void RGBDOdometry::onOdomInit()
 							rgbd_image4_sub_,
 							rgbd_image5_sub_,
 							rgbd_image6_sub_);
-					if(approxSyncMaxInterval > 0.0)
-						approxSync6_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(approxSyncMaxInterval));
+					if(approxSyncMaxInterval_ > 0.0)
+						approxSync6_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(approxSyncMaxInterval_));
 					approxSync6_->registerCallback(std::bind(&RGBDOdometry::callbackRGBD6, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6));
 				}
 				else
@@ -314,7 +325,7 @@ void RGBDOdometry::onOdomInit()
 				subscribedTopicsMsg = uFormat("\n%s subscribed to (%s sync%s):\n   %s \\\n  %s \\\n  %s \\\n   %s \\\n   %s \\\n   %s",
 						get_name(),
 						approxSync?"approx":"exact",
-						approxSync&&approxSyncMaxInterval!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval).c_str():"",
+						approxSync&&approxSyncMaxInterval_!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval_).c_str():"",
 						rgbd_image1_sub_.getTopic().c_str(),
 						rgbd_image2_sub_.getTopic().c_str(),
 						rgbd_image3_sub_.getTopic().c_str(),
@@ -354,25 +365,26 @@ void RGBDOdometry::onOdomInit()
 	}
 	else
 	{
-		image_transport::TransportHints rgb_hints(this, "raw", "rgb_transport");
+		std::string rgbTopic = this->get_node_topics_interface()->resolve_topic_name("rgb/image"); // Humble/Jazzy don't resolve base topic, fixed by https://github.com/ros-perception/image_common/commit/ea7589ae8c1f7ecb83d6aab7b4c890c2d630d27a
+		std::string depthTopic = this->get_node_topics_interface()->resolve_topic_name("depth/image"); // Humble/Jazzy don't resolve base topic, fixed by https://github.com/ros-perception/image_common/commit/ea7589ae8c1f7ecb83d6aab7b4c890c2d630d27a
+#ifdef PRE_ROS_LYRICAL
+		image_transport::TransportHints rgb_hints(this); // using "image_transport" parameter
 		image_transport::TransportHints depth_hints(this, "raw", "depth_transport");
-
-		std::string rgb_topic = get_node_base_interface()->resolve_topic_or_service_name(
-      		"rgb/image", false, false
-		);
-		std::string depth_topic = get_node_base_interface()->resolve_topic_or_service_name(
-      		"depth/image", false, false
-		);
-
-		image_mono_sub_.subscribe(this, rgb_topic, rgb_hints.getTransport(), rclcpp::QoS(topicQueueSize_).reliability((rmw_qos_reliability_policy_t)qos()).get_rmw_qos_profile(), options);
-		image_depth_sub_.subscribe(this, depth_topic, depth_hints.getTransport(), rclcpp::QoS(topicQueueSize_).reliability((rmw_qos_reliability_policy_t)qos()).get_rmw_qos_profile(), options);
+		image_mono_sub_.subscribe(this, rgbTopic, rgb_hints.getTransport(), rclcpp::QoS(topicQueueSize_).reliability((rmw_qos_reliability_policy_t)qos()).get_rmw_qos_profile(), options);
+		image_depth_sub_.subscribe(this, depthTopic, depth_hints.getTransport(), rclcpp::QoS(topicQueueSize_).reliability((rmw_qos_reliability_policy_t)qos()).get_rmw_qos_profile(), options);
+#else
+		image_transport::TransportHints rgb_hints(*this); // using "image_transport" parameter
+		image_transport::TransportHints depth_hints(*this, "raw", "depth_transport");
+		image_mono_sub_.subscribe(*this, rgbTopic, rgb_hints.getTransport(), rclcpp::QoS(topicQueueSize_).reliability((rmw_qos_reliability_policy_t)qos()), options);
+		image_depth_sub_.subscribe(*this, depthTopic, depth_hints.getTransport(), rclcpp::QoS(topicQueueSize_).reliability((rmw_qos_reliability_policy_t)qos()), options);
+#endif
 		info_sub_.subscribe(this, "rgb/camera_info", RCLCPP_QOS(topicQueueSize_, qosCamInfo), options);
 
 		if(approxSync)
 		{
 			approxSync_ = new message_filters::Synchronizer<MyApproxSyncPolicy>(MyApproxSyncPolicy(syncQueueSize_), image_mono_sub_, image_depth_sub_, info_sub_);
-			if(approxSyncMaxInterval > 0.0)
-				approxSync_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(approxSyncMaxInterval));
+			if(approxSyncMaxInterval_ > 0.0)
+				approxSync_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(approxSyncMaxInterval_));
 			approxSync_->registerCallback(std::bind(&RGBDOdometry::callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 		}
 		else
@@ -385,7 +397,7 @@ void RGBDOdometry::onOdomInit()
 		subscribedTopicsMsg = uFormat("\n%s subscribed to (%s sync%s, topic_queue_size=%d, sync_queue_size=%d):\n   %s,\n   %s,\n   %s",
 				get_name(),
 				approxSync?"approx":"exact",
-				approxSync&&approxSyncMaxInterval!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval).c_str():"",
+				approxSync&&approxSyncMaxInterval_!=0.0?uFormat(", max interval=%fs", approxSyncMaxInterval_).c_str():"",
 				topicQueueSize_,
 				syncQueueSize_,
 				image_mono_sub_.getSubscriber().getTopic().c_str(),
@@ -426,36 +438,58 @@ void RGBDOdometry::updateParameters(ParametersMap & parameters)
 void RGBDOdometry::commonCallback(
 			const std::vector<cv_bridge::CvImageConstPtr> & rgbImages,
 			const std::vector<cv_bridge::CvImageConstPtr> & depthImages,
-			const std::vector<sensor_msgs::msg::CameraInfo>& cameraInfos)
+			const std::vector<sensor_msgs::msg::CameraInfo>& cameraInfos,
+			const std::vector<std::vector<rtabmap_msgs::msg::KeyPoint> > & localKeyPointsMsgs,
+			const std::vector<std::vector<rtabmap_msgs::msg::Point3f> > & localPoints3dMsgs,
+			const std::vector<cv::Mat> & localDescriptorsMsgs)
 {
 	UASSERT(rgbImages.size() > 0 && rgbImages.size() == depthImages.size() && rgbImages.size() == cameraInfos.size());
 	rclcpp::Time higherStamp;
-	int imageWidth = rgbImages[0]->image.cols;
-	int imageHeight = rgbImages[0]->image.rows;
+	UASSERT_MSG(rgbImages[0], "RGB image is null!");
+	UASSERT_MSG(depthImages[0], "Depth image is null!");
+
+	// The images are what the local features would otherwise be extracted from, so a frame
+	// that brings its own can leave them out -- which is nearly all of the bandwidth. It
+	// then describes itself with its calibration alone: how big the image would have been,
+	// where the camera is, what it sees. (An RGB-D message with no depth image at all also
+	// used to divide by zero below.)
+	const bool hasRgb = !rgbImages[0]->image.empty();
+	const bool hasDepth = !depthImages[0]->image.empty();
+
+	int imageWidth = hasRgb?rgbImages[0]->image.cols:(int)cameraInfos[0].width;
+	int imageHeight = hasRgb?rgbImages[0]->image.rows:(int)cameraInfos[0].height;
 	int depthWidth = depthImages[0]->image.cols;
 	int depthHeight = depthImages[0]->image.rows;
 
-	UASSERT_MSG(
-			imageWidth/depthWidth == imageHeight/depthHeight,
-			uFormat("rgb=%dx%d depth=%dx%d", imageWidth, imageHeight, depthWidth, depthHeight).c_str());
+	if(hasDepth)
+	{
+		UASSERT_MSG(
+				imageWidth/depthWidth == imageHeight/depthHeight,
+				uFormat("rgb=%dx%d depth=%dx%d", imageWidth, imageHeight, depthWidth, depthHeight).c_str());
+	}
 
 	int cameraCount = rgbImages.size();
 	cv::Mat rgb;
 	cv::Mat depth;
 	std::vector<rtabmap::CameraModel> cameraModels;
+	std::vector<cv::KeyPoint> keypoints;
+	std::vector<cv::Point3f> points3d;
+	cv::Mat descriptors;
 	for(unsigned int i=0; i<rgbImages.size(); ++i)
 	{
-		if(!(rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_8UC1) ==0 ||
+		UASSERT_MSG(rgbImages[i], uFormat("RGB image is null for camera %d", i).c_str());
+		UASSERT_MSG(depthImages[i], uFormat("Depth image is null for camera %d", i).c_str());
+		if((hasRgb && !(rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_8UC1) ==0 ||
 			 rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::MONO8) ==0 ||
 			 rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) ==0 ||
 			 rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::BGR8) == 0 ||
 			 rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::RGB8) == 0 ||
 			 rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::BGRA8) == 0 ||
 			 rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::RGBA8) == 0 ||
-			 rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::BAYER_GRBG8) == 0) ||
-			!(depthImages[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_16UC1) == 0 ||
+			 rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::BAYER_GRBG8) == 0)) ||
+			(hasDepth && !(depthImages[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_16UC1) == 0 ||
 			 depthImages[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_32FC1) == 0 ||
-			 depthImages[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0))
+			 depthImages[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) == 0)))
 		{
 			RCLCPP_ERROR(this->get_logger(), "Input type must be image=mono8,mono16,rgb8,bgr8,bgra8,rgba8 and "
 			"image_depth=32FC1,16UC1,mono16. Current rgb=%s and depth=%s",
@@ -463,20 +497,33 @@ void RGBDOdometry::commonCallback(
 				depthImages[i]->encoding.c_str());
 			return;
 		}
-		UASSERT_MSG(rgbImages[i]->image.cols == imageWidth && rgbImages[i]->image.rows == imageHeight,
-				uFormat("imageWidth=%d vs %d imageHeight=%d vs %d",
-						imageWidth,
-						rgbImages[i]->image.cols,
-						imageHeight,
-						rgbImages[i]->image.rows).c_str());
-		UASSERT_MSG(depthImages[i]->image.cols == depthWidth && depthImages[i]->image.rows == depthHeight,
-				uFormat("depthWidth=%d vs %d depthHeight=%d vs %d",
-						depthWidth,
-						depthImages[i]->image.cols,
-						depthHeight,
-						depthImages[i]->image.rows).c_str());
+		if(hasRgb)
+		{
+			UASSERT_MSG(rgbImages[i]->image.cols == imageWidth && rgbImages[i]->image.rows == imageHeight,
+					uFormat("imageWidth=%d vs %d imageHeight=%d vs %d",
+							imageWidth,
+							rgbImages[i]->image.cols,
+							imageHeight,
+							rgbImages[i]->image.rows).c_str());
+		}
+		if(hasDepth)
+		{
+			UASSERT_MSG(depthImages[i]->image.cols == depthWidth && depthImages[i]->image.rows == depthHeight,
+					uFormat("depthWidth=%d vs %d depthHeight=%d vs %d",
+							depthWidth,
+							depthImages[i]->image.cols,
+							depthHeight,
+							depthImages[i]->image.rows).c_str());
+		}
 
-		rclcpp::Time stamp = rtabmap_conversions::timestampFromROS(rgbImages[i]->header.stamp)>rtabmap_conversions::timestampFromROS(depthImages[i]->header.stamp)?rgbImages[i]->header.stamp:depthImages[i]->header.stamp;
+		// An image that is not there carries no header either, so a frame that has none is
+		// stamped and placed by its calibration, which is all it has.
+		const std::string & cameraFrameId = hasRgb?rgbImages[i]->header.frame_id:cameraInfos[i].header.frame_id;
+		rclcpp::Time stamp = cameraInfos[i].header.stamp;
+		if(hasRgb || hasDepth)
+		{
+			stamp = rtabmap_conversions::timestampFromROS(rgbImages[i]->header.stamp)>rtabmap_conversions::timestampFromROS(depthImages[i]->header.stamp)?rgbImages[i]->header.stamp:depthImages[i]->header.stamp;
+		}
 
 		if(i == 0)
 		{
@@ -487,7 +534,7 @@ void RGBDOdometry::commonCallback(
 			higherStamp = stamp;
 		}
 
-		Transform localTransform = rtabmap_conversions::getTransform(this->frameId(), rgbImages[i]->header.frame_id, stamp, tfBuffer(), waitForTransform());
+		Transform localTransform = rtabmap_conversions::getTransform(this->frameId(), cameraFrameId, stamp, tfBuffer(), waitForTransform());
 		if(localTransform.isNull())
 		{
 			return;
@@ -515,53 +562,75 @@ void RGBDOdometry::commonCallback(
 			}
 		}
 
-		cv_bridge::CvImageConstPtr ptrImage = rgbImages[i];
-		if(rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_8UC1) !=0 &&
-		   rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::MONO8) != 0)
+		if(hasRgb)
 		{
-			if(keepColor_ && rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) != 0)
+			cv_bridge::CvImageConstPtr ptrImage = rgbImages[i];
+			if(rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::TYPE_8UC1) !=0 &&
+			   rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::MONO8) != 0)
 			{
-				ptrImage = cv_bridge::cvtColor(rgbImages[i], "bgr8");
+				if(keepColor_ && rgbImages[i]->encoding.compare(sensor_msgs::image_encodings::MONO16) != 0)
+				{
+					ptrImage = cv_bridge::cvtColor(rgbImages[i], "bgr8");
+				}
+				else
+				{
+					ptrImage = cv_bridge::cvtColor(rgbImages[i], "mono8");
+				}
+			}
+
+			// initialize
+			if(rgb.empty())
+			{
+				rgb = cv::Mat(imageHeight, imageWidth*cameraCount, ptrImage->image.type());
+			}
+
+			if(ptrImage->image.type() == rgb.type())
+			{
+				ptrImage->image.copyTo(cv::Mat(rgb, cv::Rect(i*imageWidth, 0, imageWidth, imageHeight)));
 			}
 			else
 			{
-				ptrImage = cv_bridge::cvtColor(rgbImages[i], "mono8");
+				RCLCPP_ERROR(this->get_logger(), "Some RGB images are not the same type! %d vs %d", ptrImage->image.type(), rgb.type());
+				return;
 			}
 		}
 
-		cv_bridge::CvImageConstPtr ptrDepth = depthImages[i];
+		if(hasDepth)
+		{
+			cv_bridge::CvImageConstPtr ptrDepth = depthImages[i];
+			if(depth.empty())
+			{
+				depth = cv::Mat(depthHeight, depthWidth*cameraCount, ptrDepth->image.type());
+			}
 
-		// initialize
-		if(rgb.empty())
-		{
-			rgb = cv::Mat(imageHeight, imageWidth*cameraCount, ptrImage->image.type());
-		}
-		if(depth.empty())
-		{
-			depth = cv::Mat(depthHeight, depthWidth*cameraCount, ptrDepth->image.type());
-		}
-
-		if(ptrImage->image.type() == rgb.type())
-		{
-			ptrImage->image.copyTo(cv::Mat(rgb, cv::Rect(i*imageWidth, 0, imageWidth, imageHeight)));
-		}
-		else
-		{
-			RCLCPP_ERROR(this->get_logger(), "Some RGB images are not the same type! %d vs %d", ptrImage->image.type(), rgb.type());
-			return;
-		}
-
-		if(ptrDepth->image.type() == depth.type())
-		{
-			ptrDepth->image.copyTo(cv::Mat(depth, cv::Rect(i*depthWidth, 0, depthWidth, depthHeight)));
-		}
-		else
-		{
-			RCLCPP_ERROR(this->get_logger(), "Some Depth images are not the same type! %d vs %d", ptrDepth->image.type(), depth.type());
-			return;
+			if(ptrDepth->image.type() == depth.type())
+			{
+				ptrDepth->image.copyTo(cv::Mat(depth, cv::Rect(i*depthWidth, 0, depthWidth, depthHeight)));
+			}
+			else
+			{
+				RCLCPP_ERROR(this->get_logger(), "Some Depth images are not the same type! %d vs %d", ptrDepth->image.type(), depth.type());
+				return;
+			}
 		}
 
 		cameraModels.push_back(rtabmap_conversions::cameraModelFromROS(cameraInfos[i], localTransform));
+
+		// The images of all cameras are stitched side by side above, so the keypoints of
+		// camera i are shifted by as many images as come before it, and their 3D points,
+		// which arrive in that camera's optical frame, are brought back to the base frame.
+		if(localKeyPointsMsgs.size() == rgbImages.size())
+		{
+			rtabmap_conversions::keypointsFromROS(localKeyPointsMsgs[i], keypoints, imageWidth*i);
+		}
+		if(localPoints3dMsgs.size() == rgbImages.size())
+		{
+			rtabmap_conversions::points3fFromROS(localPoints3dMsgs[i], points3d, localTransform);
+		}
+		if(localDescriptorsMsgs.size() == rgbImages.size())
+		{
+			descriptors.push_back(localDescriptorsMsgs[i]);
+		}
 	}
 
 	rtabmap::SensorData data(
@@ -571,9 +640,30 @@ void RGBDOdometry::commonCallback(
 			0,
 			rtabmap_conversions::timestampFromROS(higherStamp));
 
+	// Features that came with the frame are used as they are: the odometry then skips
+	// detection, description and the depth lookup that would otherwise rebuild them
+	// (see RegistrationVis, which extracts only when the frame carries no keypoints).
+	// They are dropped rather than trusted if the three of them disagree, as using them
+	// out of step would silently mismatch keypoints with their descriptors or 3D points.
+	if(!keypoints.empty())
+	{
+		if((!points3d.empty() && points3d.size() != keypoints.size()) ||
+		   (!descriptors.empty() && descriptors.rows != (int)keypoints.size()))
+		{
+			RCLCPP_ERROR(this->get_logger(), "Ignoring the local features received with this frame: "
+					"%d keypoints, %d 3D points and %d descriptors, which should be the same count "
+					"(or none at all for the 3D points and the descriptors).",
+					(int)keypoints.size(), (int)points3d.size(), descriptors.rows);
+		}
+		else
+		{
+			data.setFeatures(keypoints, points3d, descriptors);
+		}
+	}
+
 	std_msgs::msg::Header header;
 	header.stamp = higherStamp;
-	header.frame_id = rgbImages.size()==1?rgbImages[0]->header.frame_id:"";
+	header.frame_id = rgbImages.size()==1?(hasRgb?rgbImages[0]->header.frame_id:cameraInfos[0].header.frame_id):"";
 	this->processData(data, header);
 }
 
@@ -589,12 +679,17 @@ void RGBDOdometry::callback(
 		std::vector<cv_bridge::CvImageConstPtr> imageMsgs(1);
 		std::vector<cv_bridge::CvImageConstPtr> depthMsgs(1);
 		std::vector<sensor_msgs::msg::CameraInfo> infoMsgs;
-		imageMsgs[0] = cv_bridge::toCvShare(image);
-		depthMsgs[0] = cv_bridge::toCvShare(depth);
+		try{
+			imageMsgs[0] = cv_bridge::toCvShare(image);
+			depthMsgs[0] = cv_bridge::toCvShare(depth);
+		}
+		catch(cv::Exception& e) {
+			UFATAL("Fatal error while converting images (do you have multiple opencv versions? if so, make sure cv_bridge is loading the right opencv libraries on runtime): %s", e.what());
+		}
 		infoMsgs.push_back(*cameraInfo);
 
 		double stampDiff = fabs(rtabmap_conversions::timestampFromROS(image->header.stamp) - rtabmap_conversions::timestampFromROS(depth->header.stamp));
-		if(stampDiff > 0.020)
+		if(approxSyncMaxInterval_==0.0 && stampDiff > 0.020)
 		{
 			RCLCPP_WARN(this->get_logger(), "The time difference between rgb and depth frames is "
 					"high (diff=%fs, rgb=%fs, depth=%fs). You may want "
@@ -608,6 +703,27 @@ void RGBDOdometry::callback(
 		this->commonCallback(imageMsgs, depthMsgs, infoMsgs);
 	}
 }
+
+namespace {
+
+/**
+ * @brief Collects the local features one camera's image carries, cameras in order.
+ *
+ * An image that carries none pushes empty entries rather than nothing, so that the
+ * per-camera indexing still lines up with the images.
+ */
+void appendLocalFeatures(
+		const rtabmap_msgs::msg::RGBDImage & image,
+		std::vector<std::vector<rtabmap_msgs::msg::KeyPoint> > & keyPoints,
+		std::vector<std::vector<rtabmap_msgs::msg::Point3f> > & points3d,
+		std::vector<cv::Mat> & descriptors)
+{
+	keyPoints.push_back(image.key_points);
+	points3d.push_back(image.points);
+	descriptors.push_back(rtabmap::uncompressData(image.descriptors));
+}
+
+}  // namespace
 
 void RGBDOdometry::callbackRGBDX(
 		const rtabmap_msgs::msg::RGBDImages::ConstSharedPtr images)
@@ -624,13 +740,17 @@ void RGBDOdometry::callbackRGBDX(
 		std::vector<cv_bridge::CvImageConstPtr> imageMsgs(images->rgbd_images.size());
 		std::vector<cv_bridge::CvImageConstPtr> depthMsgs(images->rgbd_images.size());
 		std::vector<sensor_msgs::msg::CameraInfo> infoMsgs;
+		std::vector<std::vector<rtabmap_msgs::msg::KeyPoint> > localKeyPoints;
+		std::vector<std::vector<rtabmap_msgs::msg::Point3f> > localPoints3d;
+		std::vector<cv::Mat> localDescriptors;
 		for(size_t i=0; i<images->rgbd_images.size(); ++i)
 		{
 			rtabmap_conversions::toCvShare(images->rgbd_images[i], images, imageMsgs[i], depthMsgs[i]);
 			infoMsgs.push_back(images->rgbd_images[i].rgb_camera_info);
+			appendLocalFeatures(images->rgbd_images[i], localKeyPoints, localPoints3d, localDescriptors);
 		}
 
-		this->commonCallback(imageMsgs, depthMsgs, infoMsgs);
+		this->commonCallback(imageMsgs, depthMsgs, infoMsgs, localKeyPoints, localPoints3d, localDescriptors);
 	}
 }
 
@@ -647,7 +767,12 @@ void RGBDOdometry::callbackRGBD(
 		rtabmap_conversions::toCvShare(image, imageMsgs[0], depthMsgs[0]);
 		infoMsgs.push_back(image->rgb_camera_info);
 
-		this->commonCallback(imageMsgs, depthMsgs, infoMsgs);
+		std::vector<std::vector<rtabmap_msgs::msg::KeyPoint> > localKeyPoints;
+		std::vector<std::vector<rtabmap_msgs::msg::Point3f> > localPoints3d;
+		std::vector<cv::Mat> localDescriptors;
+		appendLocalFeatures(*image, localKeyPoints, localPoints3d, localDescriptors);
+
+		this->commonCallback(imageMsgs, depthMsgs, infoMsgs, localKeyPoints, localPoints3d, localDescriptors);
 	}
 }
 
@@ -667,7 +792,13 @@ void RGBDOdometry::callbackRGBD2(
 		infoMsgs.push_back(image->rgb_camera_info);
 		infoMsgs.push_back(image2->rgb_camera_info);
 
-		this->commonCallback(imageMsgs, depthMsgs, infoMsgs);
+		std::vector<std::vector<rtabmap_msgs::msg::KeyPoint> > localKeyPoints;
+		std::vector<std::vector<rtabmap_msgs::msg::Point3f> > localPoints3d;
+		std::vector<cv::Mat> localDescriptors;
+		appendLocalFeatures(*image, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image2, localKeyPoints, localPoints3d, localDescriptors);
+
+		this->commonCallback(imageMsgs, depthMsgs, infoMsgs, localKeyPoints, localPoints3d, localDescriptors);
 	}
 }
 
@@ -690,7 +821,14 @@ void RGBDOdometry::callbackRGBD3(
 		infoMsgs.push_back(image2->rgb_camera_info);
 		infoMsgs.push_back(image3->rgb_camera_info);
 
-		this->commonCallback(imageMsgs, depthMsgs, infoMsgs);
+		std::vector<std::vector<rtabmap_msgs::msg::KeyPoint> > localKeyPoints;
+		std::vector<std::vector<rtabmap_msgs::msg::Point3f> > localPoints3d;
+		std::vector<cv::Mat> localDescriptors;
+		appendLocalFeatures(*image, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image2, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image3, localKeyPoints, localPoints3d, localDescriptors);
+
+		this->commonCallback(imageMsgs, depthMsgs, infoMsgs, localKeyPoints, localPoints3d, localDescriptors);
 	}
 }
 
@@ -716,7 +854,15 @@ void RGBDOdometry::callbackRGBD4(
 		infoMsgs.push_back(image3->rgb_camera_info);
 		infoMsgs.push_back(image4->rgb_camera_info);
 
-		this->commonCallback(imageMsgs, depthMsgs, infoMsgs);
+		std::vector<std::vector<rtabmap_msgs::msg::KeyPoint> > localKeyPoints;
+		std::vector<std::vector<rtabmap_msgs::msg::Point3f> > localPoints3d;
+		std::vector<cv::Mat> localDescriptors;
+		appendLocalFeatures(*image, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image2, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image3, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image4, localKeyPoints, localPoints3d, localDescriptors);
+
+		this->commonCallback(imageMsgs, depthMsgs, infoMsgs, localKeyPoints, localPoints3d, localDescriptors);
 	}
 }
 
@@ -745,7 +891,16 @@ void RGBDOdometry::callbackRGBD5(
 		infoMsgs.push_back(image4->rgb_camera_info);
 		infoMsgs.push_back(image5->rgb_camera_info);
 
-		this->commonCallback(imageMsgs, depthMsgs, infoMsgs);
+		std::vector<std::vector<rtabmap_msgs::msg::KeyPoint> > localKeyPoints;
+		std::vector<std::vector<rtabmap_msgs::msg::Point3f> > localPoints3d;
+		std::vector<cv::Mat> localDescriptors;
+		appendLocalFeatures(*image, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image2, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image3, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image4, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image5, localKeyPoints, localPoints3d, localDescriptors);
+
+		this->commonCallback(imageMsgs, depthMsgs, infoMsgs, localKeyPoints, localPoints3d, localDescriptors);
 	}
 }
 
@@ -777,7 +932,17 @@ void RGBDOdometry::callbackRGBD6(
 		infoMsgs.push_back(image5->rgb_camera_info);
 		infoMsgs.push_back(image6->rgb_camera_info);
 
-		this->commonCallback(imageMsgs, depthMsgs, infoMsgs);
+		std::vector<std::vector<rtabmap_msgs::msg::KeyPoint> > localKeyPoints;
+		std::vector<std::vector<rtabmap_msgs::msg::Point3f> > localPoints3d;
+		std::vector<cv::Mat> localDescriptors;
+		appendLocalFeatures(*image, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image2, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image3, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image4, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image5, localKeyPoints, localPoints3d, localDescriptors);
+		appendLocalFeatures(*image6, localKeyPoints, localPoints3d, localDescriptors);
+
+		this->commonCallback(imageMsgs, depthMsgs, infoMsgs, localKeyPoints, localPoints3d, localDescriptors);
 	}
 }
 
