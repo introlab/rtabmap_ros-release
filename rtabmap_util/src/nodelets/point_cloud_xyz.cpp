@@ -25,6 +25,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#include <rtabmap_conversions/PointCloudConversion.h>
 #include <rtabmap_util/point_cloud_xyz.hpp>
 
 #include <rtabmap_conversions/MsgConversion.h>
@@ -97,6 +98,7 @@ PointCloudXYZ::PointCloudXYZ(const rclcpp::NodeOptions & options) :
 	normalRadius_ = this->declare_parameter("normal_radius", normalRadius_);
 	filterNaNs_ = this->declare_parameter("filter_nans", filterNaNs_);
 	roiStr = this->declare_parameter("roi_ratios", roiStr);
+	this->declare_parameter("depth_transport", std::string("raw"));
 
 	//parse roi (region of interest)
 	roiRatios_.resize(4, 0);
@@ -156,8 +158,14 @@ PointCloudXYZ::PointCloudXYZ(const rclcpp::NodeOptions & options) :
 
 	cloudPub_ = create_publisher<sensor_msgs::msg::PointCloud2>("cloud", rclcpp::QoS(1).reliability((rmw_qos_reliability_policy_t)qos));
 
-	image_transport::TransportHints hints(this);
-	imageDepthSub_.subscribe(this, "depth/image", hints.getTransport(), rclcpp::QoS(topicQueueSize).reliability((rmw_qos_reliability_policy_t)qos).get_rmw_qos_profile());
+	std::string depthTopic = this->get_node_topics_interface()->resolve_topic_name("depth/image"); // Humble/Jazzy don't resolve base topic, fixed by https://github.com/ros-perception/image_common/commit/ea7589ae8c1f7ecb83d6aab7b4c890c2d630d27a
+#ifdef PRE_ROS_LYRICAL
+	image_transport::TransportHints hints(this, "raw", "depth_transport");
+	imageDepthSub_.subscribe(this, depthTopic, hints.getTransport(), rclcpp::QoS(topicQueueSize).reliability((rmw_qos_reliability_policy_t)qos).get_rmw_qos_profile());
+#else
+	image_transport::TransportHints hints(*this, "raw", "depth_transport");
+	imageDepthSub_.subscribe(*this, depthTopic, hints.getTransport(), rclcpp::QoS(topicQueueSize).reliability((rmw_qos_reliability_policy_t)qos));
+#endif
 	cameraInfoSub_.subscribe(this, "depth/camera_info", RCLCPP_QOS(topicQueueSize, qosCamInfo));
 
 	disparitySub_.subscribe(this, "disparity/image", RCLCPP_QOS(topicQueueSize, qos));
@@ -187,7 +195,13 @@ void PointCloudXYZ::callback(
 	{
 		rclcpp::Time time = now();
 
-		cv_bridge::CvImageConstPtr imageDepthPtr = cv_bridge::toCvShare(depthMsg);
+		cv_bridge::CvImageConstPtr imageDepthPtr;
+		try{
+			imageDepthPtr = cv_bridge::toCvShare(depthMsg);
+		}
+		catch(cv::Exception& e) {
+			UFATAL("Fatal error while converting depth image (do you have multiple opencv versions? if so, make sure cv_bridge is loading the right opencv libraries on runtime): %s", e.what());
+		}
 
 		rtabmap::CameraModel model = rtabmap_conversions::cameraModelFromROS(*cameraInfo);
 
@@ -332,7 +346,7 @@ if(!pclCloud->empty() && (pclCloud->is_dense || !indices->empty()) && (normalK_ 
 		{
 			pclCloudNormal = rtabmap::util3d::removeNaNNormalsFromPointCloud(pclCloudNormal);
 		}
-		pcl::toROSMsg(*pclCloudNormal, *rosCloud);
+		rtabmap_conversions::toPointCloud2Msg(*pclCloudNormal, *rosCloud);
 	}
 	else
 	{
@@ -340,7 +354,7 @@ if(!pclCloud->empty() && (pclCloud->is_dense || !indices->empty()) && (normalK_ 
 		{
 			pclCloud = rtabmap::util3d::removeNaNFromPointCloud(pclCloud);
 		}
-		pcl::toROSMsg(*pclCloud, *rosCloud);
+		rtabmap_conversions::toPointCloud2Msg(*pclCloud, *rosCloud);
 	}
 	rosCloud->header.stamp = header.stamp;
 	rosCloud->header.frame_id = header.frame_id;
