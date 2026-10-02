@@ -28,8 +28,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap_util/visibility.h>
 #include "rclcpp/rclcpp.hpp"
 
-#include <tf2_ros/buffer.h>
-#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.hpp>
+#include <tf2_ros/transform_listener.hpp>
 
 #include <nav_msgs/msg/odometry.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -40,6 +40,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap_conversions/MsgConversion.h>
 #include <rtabmap/core/util3d.h>
 #include <rtabmap/core/util3d_filtering.h>
+#include <rtabmap_sync/SyncDiagnostic.h>
 
 namespace rtabmap_util
 {
@@ -73,8 +74,7 @@ private:
 	void callbackCloud(const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloudMsg);
 
 private:
-	std::thread * warningThread_;
-	bool callbackCalled_;
+	std::unique_ptr<rtabmap_sync::SyncDiagnostic> syncDiagnostic_;
 
 	rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloudSub_;
 	rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloudPub_;
