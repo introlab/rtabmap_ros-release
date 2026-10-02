@@ -41,7 +41,25 @@ include_directories(
 )
 
 SET(Libraries
+   cv_bridge::cv_bridge
+   rclcpp_components::component
+   image_geometry::image_geometry
+   laser_geometry::laser_geometry
+   message_filters::message_filters
+   pcl_conversions::pcl_conversions
+)
+SET(PublicLibraries
+   rclcpp::rclcpp
+   sensor_msgs::sensor_msgs
+   nav_msgs::nav_msgs
+   rtabmap_conversions::rtabmap_conversions
+   rtabmap_msgs::rtabmap_msgs
+   rtabmap_util::rtabmap_util
+   rtabmap_sync::rtabmap_sync
+)
+SET(AmentLibraries
    cv_bridge
+   rclcpp_components
    image_geometry
    laser_geometry
    message_filters
@@ -55,6 +73,10 @@ SET(Libraries
    rtabmap_util
    rtabmap_sync
 )
+
+IF("$ENV{ROS_DISTRO}" STRLESS "lyrical")
+  add_definitions(-DPRE_ROS_LYRICAL)
+ENDIF()
 
 ###########
 ## Build ##
@@ -81,10 +103,13 @@ target_include_directories(rtabmap_odom
 )
 add_library(rtabmap_odom_plugins SHARED ${rtabmap_odom_plugins_lib_src})
 
-ament_target_dependencies(rtabmap_odom ${Libraries})
-ament_target_dependencies(rtabmap_odom_plugins ${Libraries})
-
-target_link_libraries(rtabmap_odom_plugins rtabmap_odom)
+if("$ENV{ROS_DISTRO}" STRLESS "lyrical")
+   ament_target_dependencies(rtabmap_odom ${AmentLibraries})
+else()
+   target_link_libraries(rtabmap_odom PRIVATE ${Libraries} PUBLIC ${PublicLibraries})
+   target_link_libraries(rtabmap_odom_plugins PUBLIC ${Libraries})
+endif()
+target_link_libraries(rtabmap_odom_plugins PUBLIC rtabmap_odom)
 
 rclcpp_components_register_nodes(rtabmap_odom_plugins "rtabmap_odom::RGBDOdometry")
 rclcpp_components_register_nodes(rtabmap_odom_plugins "rtabmap_odom::StereoOdometry")
@@ -92,25 +117,21 @@ rclcpp_components_register_nodes(rtabmap_odom_plugins "rtabmap_odom::ICPOdometry
 
 
 add_executable(rtabmap_rgbd_odometry src/RGBDOdometryNode.cpp)
-ament_target_dependencies(rtabmap_rgbd_odometry ${Libraries})
-target_link_libraries(rtabmap_rgbd_odometry rtabmap_odom_plugins)
+target_link_libraries(rtabmap_rgbd_odometry PRIVATE rtabmap_odom_plugins)
 set_target_properties(rtabmap_rgbd_odometry PROPERTIES OUTPUT_NAME "rgbd_odometry")
 
 add_executable(rtabmap_stereo_odometry src/StereoOdometryNode.cpp)
-ament_target_dependencies(rtabmap_stereo_odometry ${Libraries})
-target_link_libraries(rtabmap_stereo_odometry rtabmap_odom_plugins)
+target_link_libraries(rtabmap_stereo_odometry PRIVATE rtabmap_odom_plugins)
 set_target_properties(rtabmap_stereo_odometry PROPERTIES OUTPUT_NAME "stereo_odometry")
 
 add_executable(rtabmap_icp_odometry src/ICPOdometryNode.cpp)
-ament_target_dependencies(rtabmap_icp_odometry ${Libraries})
-target_link_libraries(rtabmap_icp_odometry rtabmap_odom_plugins)
+target_link_libraries(rtabmap_icp_odometry PRIVATE rtabmap_odom_plugins)
 set_target_properties(rtabmap_icp_odometry PROPERTIES OUTPUT_NAME "icp_odometry")
 
 #############
 ## Install ##
 #############
-
-ament_export_dependencies(${Libraries})
+ament_export_dependencies(${AmentLibraries})
 ament_export_include_directories(include)
 ament_export_targets(${PROJECT_NAME})          # To include downstream with targets
 ament_export_libraries(rtabmap_odom rtabmap_odom_plugins) # To include downstream without targets
@@ -135,5 +156,53 @@ install(DIRECTORY include/
    DESTINATION include
    FILES_MATCHING PATTERN "*.h"
 )
+
+#############
+## Testing ##
+#############
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  find_package(OpenCV REQUIRED COMPONENTS core imgcodecs)
+  # Recorded sensor input is replayed by the tests themselves, not by "ros2 bag play".
+  find_package(rosbag2_cpp REQUIRED)
+
+  # Real frames the visual odometry tests register against, read from the source tree:
+  # these binaries are never installed, and the fixtures are not either. See
+  # test/data/README.md for where they come from.
+  set(rtabmap_odom_test_data_root "${CMAKE_CURRENT_SOURCE_DIR}/test/data")
+
+  # Each node gets its own test binary: a crash or a stuck executor in one node cannot
+  # take the others down, and every binary starts with a clean DDS graph.
+  #
+  # Each binary also gets its own DDS domain. colcon tests packages in parallel and ctest
+  # can run these binaries in parallel, while these suites share topic names -- odom,
+  # rgbd_image, scan_cloud -- with rtabmap_sync's and rtabmap_util's. On a shared domain
+  # they discover each other's publishers and assertions then see traffic the test never
+  # sent. rtabmap_util numbers from 30 and rtabmap_sync from 50; keep the ranges apart.
+  set(rtabmap_odom_test_domain_id 70)
+  macro(rtabmap_odom_add_node_test test_name)
+    ament_add_gtest(${test_name} test/${test_name}.cpp
+      ENV ROS_DOMAIN_ID=${rtabmap_odom_test_domain_id}
+      TIMEOUT 300)
+    math(EXPR rtabmap_odom_test_domain_id "${rtabmap_odom_test_domain_id} + 1")
+    if(TARGET ${test_name})
+      target_include_directories(${test_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test)
+      target_compile_definitions(${test_name} PRIVATE
+        RTABMAP_ODOM_TEST_DATA_ROOT="${rtabmap_odom_test_data_root}")
+      target_link_libraries(${test_name} rtabmap_odom_plugins rtabmap_odom
+        opencv_core opencv_imgcodecs rosbag2_cpp::rosbag2_cpp rtabmap::core)
+      if("$ENV{ROS_DISTRO}" STRLESS "lyrical")
+        ament_target_dependencies(${test_name} ${AmentLibraries})
+      else()
+        target_link_libraries(${test_name} ${Libraries} ${PublicLibraries})
+      endif()
+    endif()
+  endmacro()
+
+  rtabmap_odom_add_node_test(test_odometry_ros)
+  rtabmap_odom_add_node_test(test_rgbd_odometry)
+  rtabmap_odom_add_node_test(test_stereo_odometry)
+  rtabmap_odom_add_node_test(test_icp_odometry)
+endif()
 
 ament_package()

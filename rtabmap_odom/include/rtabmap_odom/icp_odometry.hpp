@@ -44,6 +44,17 @@ using namespace rtabmap;
 namespace rtabmap_odom
 {
 
+/**
+ * @brief Odometry from a laser scanner, 2D or 3D, by scan matching.
+ *
+ * Takes a sensor_msgs::msg::LaserScan or a sensor_msgs::msg::PointCloud2 and registers
+ * each scan against the previous ones with ICP. A cloud whose points carry their own
+ * timestamps is deskewed first, using TF or the last known velocity, since a scan taken
+ * while the robot moves is not one rigid observation.
+ *
+ * @see doc/icp_odometry.md for the topics, the parameters and the shapes it can and
+ *      cannot constrain.
+ */
 class ICPOdometry : public rtabmap_odom::OdometryROS
 {
 public:
@@ -78,6 +89,7 @@ private:
 	double scanNormalGroundUp_;
 	bool deskewing_;
 	bool deskewingSlerp_;
+	int topicQueueSize_;
 	//std::vector<std::shared_ptr<rtabmap_ros::PluginInterface> > plugins_;
 	//pluginlib::ClassLoader<rtabmap_ros::PluginInterface> plugin_loader_;
 	bool scanReceived_ = false;
