@@ -1,3 +1,40 @@
+## rtabmap_ros (kilted) - 0.23.13-1
+
+The packages in the `rtabmap_ros` repository were released into the `kilted` distro by running `/usr/bin/bloom-release --ros-distro kilted rtabmap_ros` on `Fri, 02 Oct 2026 02:47:19 -0000`
+
+These packages were released:
+- `rtabmap_conversions`
+- `rtabmap_costmap_plugins`
+- `rtabmap_demos`
+- `rtabmap_examples`
+- `rtabmap_launch`
+- `rtabmap_msgs`
+- `rtabmap_odom`
+- `rtabmap_python`
+- `rtabmap_ros`
+- `rtabmap_rviz_plugins`
+- `rtabmap_slam`
+- `rtabmap_sync`
+- `rtabmap_util`
+- `rtabmap_viz`
+
+Version of package(s) in repository `rtabmap_ros`:
+
+- upstream repository: https://github.com/introlab/rtabmap_ros.git
+- release repository: https://github.com/introlab/rtabmap_ros-release.git
+- rosdistro version: `0.23.7-1`
+- old version: `0.23.7-1`
+- new version: `0.23.13-1`
+
+Versions of tools used:
+
+- bloom version: `0.14.4`
+- catkin_pkg version: `1.1.0`
+- rosdep version: `0.26.0`
+- rosdistro version: `1.0.1`
+- vcstools version: `0.1.42`
+
+
 ## rtabmap_ros (jazzy) - 0.23.13-1
 
 The packages in the `rtabmap_ros` repository were released into the `jazzy` distro by running `/usr/bin/bloom-release --ros-distro jazzy rtabmap_ros` on `Fri, 02 Oct 2026 02:41:20 -0000`
