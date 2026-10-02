@@ -391,8 +391,8 @@ tracks:
     - git-bloom-generate -y rosdynrpm --prefix release/:{ros_distro} :{ros_distro}
       -i :{release_inc} --require-os fedora rhel
     devel_branch: rolling-devel
-    last_release: 0.22.1-rolling
-    last_version: 0.22.1
+    last_release: 0.23.13-rolling
+    last_version: 0.23.13
     name: rtabmap_ros
     patches: null
     release_inc: '1'
