@@ -1,159 +1,92 @@
-rtabmap_ros
-===========
+# rtabmap_demos
++ [Outdoor Stereo VSLAM](#outdoor-stereo-vslam)
++ [Indoor 2D LiDAR and RGB-D SLAM](#indoor-2d-lidar-and-rgb-d-slam)
++ [Multi-Session Indoor 2D LiDAR and RGB-D SLAM](#multi-session-indoor-2d-lidar-and-rgb-d-slam)
++ [Find-Object with SLAM](#find-object-with-slam)
++ [Turtlebot4 Nav2, 2D LiDAR and RGB-D SLAM](#turtlebot4-nav2-2d-lidar-and-rgb-d-slam)
++ [Turtlebot3 Nav2 and 2D LiDAR SLAM](#turtlebot3-nav2-and-2d-lidar-slam)
++ [Turtlebot3 Nav2 and RGB-D SLAM](#turtlebot3-nav2-and-rgb-d-slam)
++ [Turtlebot3 Nav2, 2D LiDAR and RGB-D SLAM](#turtlebot3-nav2-2d-lidar-and-rgb-d-slam)
++ [Turtlebot3 Nav2, Fake 2D LiDAR and RGB-D SLAM](#turtlebot3-nav2-fake-2d-lidar-and-rgb-d-slam)
++ [Turtlebot3 Nav2, 2D LiDAR SLAM with FusionCore (IMU + wheel UKF)](#turtlebot3-nav2-2d-lidar-slam-with-fusioncore-imu--wheel-ukf)
++ [Champ Quadruped Nav2, Elevation Map and VSLAM](#champ-quadruped-nav2-elevation-map-and-vslam)
++ [Clearpath Husky Nav2, 2D LiDAR and RGB-D SLAM](#clearpath-husky-nav2-2d-lidar-and-rgb-d-slam)
++ [Clearpath Husky Nav2, 3D LiDAR and RGB-D SLAM](#clearpath-husky-nav2-3d-lidar-and-rgb-d-slam)
++ [Clearpath Husky Nav2, 3D LiDAR Assembling and RGB-D SLAM](#clearpath-husky-nav2-3d-lidar-assembling-and-rgb-d-slam)
++ [Isaac Sim Nav2 and Stereo SLAM](#isaac-sim-nav2-and-stereo-slam)
++ [Isaac Sim Nav2 and RGB-D VSLAM](#isaac-sim-nav2-and-rgb-d-vslam)
 
-ROS 2 wrapper for [RTAB-Map](https://github.com/introlab/rtabmap), a graph-based SLAM library with appearance-based loop closure detection. It builds and maintains a 3D map from RGB-D, stereo or lidar data, closes loops on revisited places and exports the result as an occupancy grid, a point cloud or an OctoMap.
+### Outdoor Stereo VSLAM
+[stereo_outdoor_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/stereo_outdoor_demo.launch.py) ([Video](https://youtu.be/qpTS7kg9J3A))
 
-**ROS 2 Humble minimum required.** The interface matches ROS 1: parameters and topic names still follow the [ROS 1 documentation](http://wiki.ros.org/rtabmap_ros) for anything not yet covered by the package pages below.
+![Peek 2024-11-29 10-52](https://github.com/user-attachments/assets/b6dd4a1c-5bd5-4cfa-936d-e8e707bbcb23)
 
-#### CI Latest
+### Indoor 2D LiDAR and RGB-D SLAM
+[robot_mapping_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/robot_mapping_demo.launch.py) (Videos: [rtabmap_viz](https://youtu.be/c0qrEd5rR7M), [rviz](https://youtu.be/MQoSDpAsqps))
 
-| | Build | Docker |
-|---|---|---|
-| ROS 1 | [![ROS 1](https://github.com/introlab/rtabmap_ros/actions/workflows/ros1.yml/badge.svg)](https://github.com/introlab/rtabmap_ros/actions/workflows/ros1.yml) | [![Docker](https://github.com/introlab/rtabmap_ros/actions/workflows/docker.yml/badge.svg)](https://github.com/introlab/rtabmap_ros/actions/workflows/docker.yml) |
-| ROS 2 | [![ROS 2](https://github.com/introlab/rtabmap_ros/actions/workflows/ros2.yml/badge.svg)](https://github.com/introlab/rtabmap_ros/actions/workflows/ros2.yml) | [![Docker ROS 2](https://github.com/introlab/rtabmap_ros/actions/workflows/docker-ros2.yml/badge.svg)](https://github.com/introlab/rtabmap_ros/actions/workflows/docker-ros2.yml) |
+![Peek 2024-11-29 11-07](https://github.com/user-attachments/assets/b02beeea-28ed-4fde-932d-c89bef1a046d)
 
-#### ROS Binaries
+### Multi-Session Indoor 2D LiDAR and RGB-D SLAM
+[multisession_mapping_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/multisession_mapping_demo.launch.py) ([Video](https://youtu.be/XrnyhaxPCro))
 
-| | Distro | Ubuntu | Released | In apt | Build |
-|---|---|---|---|---|---|
-| ROS 1 | Noetic (EOL) | 20.04 | [![released](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fros%2Frosdistro%2Fmaster%2Fnoetic%2Fdistribution.yaml&query=%24.repositories.rtabmap_ros.release.version&label=%20)](https://github.com/ros/rosdistro/blob/master/noetic/distribution.yaml) | [![apt](https://img.shields.io/ros/v/noetic/rtabmap_ros?label=%20)](https://index.ros.org/p/rtabmap_ros/#noetic) |  |
-| ROS 2 | Humble | 22.04 | [![released](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fros%2Frosdistro%2Fmaster%2Fhumble%2Fdistribution.yaml&query=%24.repositories.rtabmap_ros.release.version&label=%20)](https://github.com/ros/rosdistro/blob/master/humble/distribution.yaml) | [![apt](https://img.shields.io/ros/v/humble/rtabmap_ros?label=%20)](https://index.ros.org/p/rtabmap_ros/#humble) | [![build](http://build.ros2.org/buildStatus/icon?job=Hbin_uJ64__rtabmap_ros__ubuntu_jammy_amd64__binary)](http://build.ros2.org/job/Hbin_uJ64__rtabmap_ros__ubuntu_jammy_amd64__binary/) |
-| ROS 2 | Iron (EOL) | 22.04 | [![released](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fros%2Frosdistro%2Fmaster%2Firon%2Fdistribution.yaml&query=%24.repositories.rtabmap_ros.release.version&label=%20)](https://github.com/ros/rosdistro/blob/master/iron/distribution.yaml) | [![apt](https://img.shields.io/ros/v/iron/rtabmap_ros?label=%20)](https://index.ros.org/p/rtabmap_ros/#iron) |  |
-| ROS 2 | Jazzy | 24.04 | [![released](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fros%2Frosdistro%2Fmaster%2Fjazzy%2Fdistribution.yaml&query=%24.repositories.rtabmap_ros.release.version&label=%20)](https://github.com/ros/rosdistro/blob/master/jazzy/distribution.yaml) | [![apt](https://img.shields.io/ros/v/jazzy/rtabmap_ros?label=%20)](https://index.ros.org/p/rtabmap_ros/#jazzy) | [![build](http://build.ros2.org/buildStatus/icon?job=Jbin_uN64__rtabmap_ros__ubuntu_noble_amd64__binary)](http://build.ros2.org/job/Jbin_uN64__rtabmap_ros__ubuntu_noble_amd64__binary/) |
-| ROS 2 | Kilted | 24.04 | [![released](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fros%2Frosdistro%2Fmaster%2Fkilted%2Fdistribution.yaml&query=%24.repositories.rtabmap_ros.release.version&label=%20)](https://github.com/ros/rosdistro/blob/master/kilted/distribution.yaml) | [![apt](https://img.shields.io/ros/v/kilted/rtabmap_ros?label=%20)](https://index.ros.org/p/rtabmap_ros/#kilted) | [![build](http://build.ros2.org/buildStatus/icon?job=Kbin_uN64__rtabmap_ros__ubuntu_noble_amd64__binary)](http://build.ros2.org/job/Kbin_uN64__rtabmap_ros__ubuntu_noble_amd64__binary/) |
-| ROS 2 | Lyrical | 26.04 | [![released](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fros%2Frosdistro%2Fmaster%2Flyrical%2Fdistribution.yaml&query=%24.repositories.rtabmap_ros.release.version&label=%20)](https://github.com/ros/rosdistro/blob/master/lyrical/distribution.yaml) | [![apt](https://img.shields.io/ros/v/lyrical/rtabmap_ros?label=%20)](https://index.ros.org/p/rtabmap_ros/#lyrical) | [![build](http://build.ros2.org/buildStatus/icon?job=Lbin_uR64__rtabmap_ros__ubuntu_resolute_amd64__binary)](http://build.ros2.org/job/Lbin_uR64__rtabmap_ros__ubuntu_resolute_amd64__binary/) |
-| ROS 2 | Rolling | 26.04 | [![released](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fros%2Frosdistro%2Fmaster%2Frolling%2Fdistribution.yaml&query=%24.repositories.rtabmap_ros.release.version&label=%20)](https://github.com/ros/rosdistro/blob/master/rolling/distribution.yaml) | [![apt](https://img.shields.io/ros/v/rolling/rtabmap_ros?label=%20)](https://index.ros.org/p/rtabmap_ros/#rolling) |  |
-| Docker | [rtabmap_ros](https://hub.docker.com/r/introlab3it/rtabmap_ros) | | | ![Docker Pulls](https://img.shields.io/docker/pulls/introlab3it/rtabmap_ros.svg?label=pulls) | |
+![Peek 2024-11-29 11-48](https://github.com/user-attachments/assets/b130e5ab-618f-4c8b-840f-f926b65ab53b)
 
-*Released* is the version bloomed into [rosdistro](https://github.com/ros/rosdistro); *In apt* is what `apt install` actually gives you today. They differ while a release is waiting on a buildfarm sync.
+### Find-Object with SLAM
+[find_object_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/find_object_demo.launch.py) ([Video](https://youtu.be/o1GSQanY-Do))
 
-# Packages
+![Peek 2024-11-29 12-01](https://github.com/user-attachments/assets/b3cc0c67-517a-4f69-b4cc-35d288e96165)
 
-The stack is split into small packages so a pipeline only pulls in what it uses. Package names link to their documentation where it exists; the rest are being written and will be linked as they land.
+### Turtlebot4 Nav2, 2D LiDAR and RGB-D SLAM
+[turtlebot4_sim_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/turtlebot4/turtlebot4_sim_demo.launch.py)
 
-### SLAM
+![Peek 2024-11-29 12-19](https://github.com/user-attachments/assets/5914e34c-19f1-4b7c-b4df-2e7084946888)
+### Turtlebot3 Nav2 and 2D LiDAR SLAM
+[turtlebot3_sim_scan_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/turtlebot3/turtlebot3_sim_scan_demo.launch.py)
 
-| Package | Description |
-|---|---|
-| [`rtabmap_slam`](rtabmap_slam/README.md) | The `rtabmap` node itself: appearance-based loop closure detection, graph optimization, memory management and map assembly. |
-| [`rtabmap_odom`](rtabmap_odom/README.md) | Odometry nodes — `rgbd_odometry`, `stereo_odometry` and `icp_odometry`. Any external odometry can be used instead. |
-| [`rtabmap_sync`](rtabmap_sync/README.md) | Synchronizes camera and lidar topics into a single message so they reach the SLAM node together — `rgbd_sync`, `stereo_sync`, `rgbdx_sync`. |
+![Peek 2024-11-29 12-23](https://github.com/user-attachments/assets/e3c31c5a-5c46-4370-ad17-38c795db7917)
+### Turtlebot3 Nav2 and RGB-D SLAM
+[turtlebot3_sim_rgbd_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/turtlebot3/turtlebot3_sim_rgbd_demo.launch.py)
 
-### Sensor processing
+![Peek 2024-11-29 14-22](https://github.com/user-attachments/assets/5088be17-0875-42cc-b863-d14468c67f26)
+### Turtlebot3 Nav2, 2D LiDAR and RGB-D SLAM
+[turtlebot3_sim_rgbd_scan_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/turtlebot3/turtlebot3_sim_rgbd_scan_demo.launch.py)
 
-| Package | Description |
-|---|---|
-| [`rtabmap_util`](rtabmap_util/README.md) | Utility nodes around the pipeline: format conversions, point cloud filtering and assembly, obstacle detection, map assembly, database replay. Most are useful on their own. |
-| `rtabmap_costmap_plugins` | A variant of nav2's voxel layer that follows the robot along z, keeping the voxel grid centered on the base frame. For robots that change altitude, e.g. drones. |
+![Peek 2024-11-29 13-41](https://github.com/user-attachments/assets/2e878158-b1b6-48a4-801c-72cdb41b4783)
+### Turtlebot3 Nav2, Fake 2D LiDAR and RGB-D SLAM
+[turtlebot3_sim_rgbd_fake_scan_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/turtlebot3/turtlebot3_sim_rgbd_fake_scan_demo.launch.py)
 
-### Interfaces and libraries
+ * Red: Scan generated from camera's depth.
+ * Orange: Locally assembled scans used for proximity detection.
+ * Yellow: The map.
 
-| Package | Description |
-|---|---|
-| `rtabmap_msgs` | Message, service and action definitions used across the stack. |
-| [`rtabmap_conversions`](rtabmap_conversions/README.md) | C++ library converting between RTAB-Map library types and ROS 2 messages. |
-| [`rtabmap_python`](rtabmap_python/README.md) | Python helpers for RTAB-Map's own binary formats, currently the compressed matrices carried in `rtabmap_msgs` fields and database blobs. |
+![Peek 2025-07-04 16-57](https://github.com/user-attachments/assets/8869cf57-35a1-4236-bdab-151b88ae2ea1)
+### Turtlebot3 Nav2, 2D LiDAR SLAM with FusionCore (IMU + wheel UKF)
+[turtlebot3_sim_fusioncore_icp_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/turtlebot3/fusioncore/turtlebot3_sim_fusioncore_icp_demo.launch.py) (Jazzy + Gazebo Harmonic)
 
-### Visualization
+FusionCore (wheel + IMU UKF) and `icp_odometry` run in a feedback loop: FusionCore's stable `odom` frame seeds scan matching via `guess_frame_id`, and the ICP result feeds back into FusionCore as a second velocity source. See [README](launch/turtlebot3/fusioncore/README.md) for architecture details.
 
-| Package | Description |
-|---|---|
-| `rtabmap_viz` | RTAB-Map's own GUI as a ROS 2 node: live graph, loop closures, feature matches and the parameter panel. |
-| `rtabmap_rviz_plugins` | RViz displays for the map graph, the assembled cloud and the SLAM info. |
+![FusionCore icp_odometry demo](https://github.com/user-attachments/assets/e1e07cfb-74e0-48b9-9bfd-32b68ee5a6ef)
+### Champ Quadruped Nav2, Elevation Map and VSLAM
+[champ_sim_vslam.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/champ/champ_sim_vslam.launch.py)
 
-### Launch files
+![Peek 2024-11-29 15-00](https://github.com/user-attachments/assets/d1a27c78-27bc-4901-82a7-59b5d24e6454)
+### Clearpath Husky Nav2, 2D LiDAR and RGB-D SLAM
+[husky_sim_scan2d_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/husky/husky_sim_scan2d_demo.launch.py)
 
-| Package | Description |
-|---|---|
-| `rtabmap_launch` | `rtabmap.launch.py`, the one-line way to bring up the whole stack. |
-| [`rtabmap_examples`](https://github.com/introlab/rtabmap_ros/tree/ros2/rtabmap_examples/launch) | Sensor integration examples: stereo and RGB-D cameras, 3D lidar. |
-| [`rtabmap_demos`](rtabmap_demos/README.md) | Full robot demos: turtlebot3 and turtlebot4, nav2 integration, multi-session mapping. |
+![Peek 2024-11-29 15-30](https://github.com/user-attachments/assets/c8f79b86-253e-4c8e-ac7a-c26584f43fa4)
+### Clearpath Husky Nav2, 3D LiDAR and RGB-D SLAM
+[husky_sim_scan3d_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/husky/husky_sim_scan3d_demo.launch.py)
 
-# Installation
+![Peek 2024-11-29 15-36](https://github.com/user-attachments/assets/a4b6e6ae-38ed-44da-bbfb-d3c30a301f9c)
+### Clearpath Husky Nav2, 3D LiDAR Assembling and RGB-D SLAM
+[husky_sim_scan3d_assemble_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/husky/husky_sim_scan3d_assemble_demo.launch.py)
 
-These instructions are for ROS 2. For ROS 1, follow the [installation instructions](https://github.com/introlab/rtabmap_ros/tree/master#installation) on the [`master`](https://github.com/introlab/rtabmap_ros/tree/master) branch, which also carries the latest version for Noetic.
+![Peek 2024-11-29 16-16](https://github.com/user-attachments/assets/b2235bd2-33d2-4c44-b6e9-9923a524632b)
+### Isaac Sim Nav2 and Stereo SLAM
+[isaac_sim_vslam_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/isaac/isaac_sim_vslam_demo.launch.py)
 
-### Binaries
+![Peek 2024-11-29 17-49](https://github.com/user-attachments/assets/54cd0c82-aaed-47e5-911a-f286b6d2cc17)
+### Isaac Sim Nav2 and RGB-D VSLAM
+[isaac_sim_vslam_demo.launch.py](https://github.com/introlab/rtabmap_ros/blob/ros2/rtabmap_demos/launch/isaac/isaac_sim_vslam_demo.launch.py) stereo:=false vo:=rtabmap
 
-```bash
-sudo apt install ros-$ROS_DISTRO-rtabmap-ros
-```
-
-### From Source
-
-* Make sure to uninstall any rtabmap binaries:
-    ```
-    sudo apt remove ros-$ROS_DISTRO-rtabmap*
-    ```
-* RTAB-Map ROS2 package:
-    ```bash
-    cd ~/ros2_ws
-    git clone https://github.com/introlab/rtabmap.git src/rtabmap
-    git clone --branch ros2 https://github.com/introlab/rtabmap_ros.git src/rtabmap_ros
-    rosdep update && rosdep install --from-paths src --ignore-src -r -y
-    export MAKEFLAGS="-j6" # Can be ignored if you have a lot of RAM (>16GB)
-    colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
-    ```
-
-* To build with `rgbd_cameras>1` support and/or `subscribe_user_data` support:
-    ```bash
-    colcon build --symlink-install --cmake-args -DRTABMAP_SYNC_MULTI_RGBD=ON -DRTABMAP_SYNC_USER_DATA=ON -DCMAKE_BUILD_TYPE=Release
-    ```
-
-### Testing
-
-```bash
-cd ~/ros2_ws
-colcon build --base-paths src/rtabmap_ros
-colcon test --base-paths src/rtabmap_ros
-colcon test-result --verbose
-```
-
-# Usage
-
-* For sensor integration examples (stereo and RGB-D cameras, 3D LiDAR), see [rtabmap_examples](https://github.com/introlab/rtabmap_ros/tree/ros2/rtabmap_examples/launch) sub-folder.
-
-* For robot integration examples (turtlebot3 and turtlebot4, nav2 integration), see [rtabmap_demos](https://github.com/introlab/rtabmap_ros/tree/ros2/rtabmap_demos) sub-folder.
-
-## Logging
-To make RTAB-Map's logs appear ordered with RCLCPP's logs, set the following environment variables in your `.bashrc` (see official "[About Logging](https://docs.ros.org/en/jazzy/Concepts/Intermediate/About-Logging.html)" documentation for more info):
-```bash
-export RCUTILS_LOGGING_USE_STDOUT=1
-export RCUTILS_LOGGING_BUFFERED_STREAM=1
-# Optional, but if you like colored logs:
-export RCUTILS_COLORIZED_OUTPUT=1
-```
-
-## Recommended DDS
-If RTAB-Map's GUI or topic frequency feel laggy (even if processing time looks fast enough), it may be caused by the DDS. I recommend to use [Cyclone DDS](https://docs.ros.org/en/jazzy/Installation/RMW-Implementations/DDS-Implementations/Working-with-Eclipse-CycloneDDS.html), you can try it by adding this before launching any nodes/launch files (or add to your `.bashrc`):
-```bash
-export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-# Cyclone prefers multicast by default, if your router got too much spammed, 
-# disable multicast with (https://github.com/ros2/rmw_cyclonedds/issues/489):
-export CYCLONEDDS_URI="<Disc><DefaultMulticastAddress>0.0.0.0</></>"
-```
-
-# Documentation
-
-* **Package documentation** — the tables above, and the [API reference on docs.ros.org](https://docs.ros.org/en/jazzy/p/rtabmap_ros/).
-* **Examples** — [rtabmap_examples](https://github.com/introlab/rtabmap_ros/tree/ros2/rtabmap_examples/launch) for sensors, [rtabmap_demos](rtabmap_demos/README.md) for full robots.
-* **Parameters** — every `Rtabmap/*`, `Grid/*`, `Odom/*` and other core parameter is listed in the [RTAB-Map parameter reference](https://introlab.github.io/rtabmap/api/latest/parameters.html).
-* **Library API** — [RTAB-Map's own API documentation](https://introlab.github.io/rtabmap/api/latest/).
-* **Papers and videos** — [introlab.github.io/rtabmap](https://introlab.github.io/rtabmap/).
-* **Old tutorials** — the [ROS 1 wiki](http://wiki.ros.org/rtabmap_ros/Tutorials), for anything not covered above; parameters and topic names are unchanged.
-
-## Building the documentation
-
-Each package's API reference is generated with [rosdoc2](https://github.com/ros-infrastructure/rosdoc2) from the Doxygen comments in its public headers, and published to docs.ros.org. rosdoc2 documents one package per invocation, so building the whole stack is a loop over them — run it from the repository root:
-
-```bash
-for pkg in rtabmap_*/; do
-  rosdoc2 build --package-path "$pkg" --output-directory doc_output || break
-done
-```
-
-Each package lands in `doc_output/<package>/index.html`.
-
-# License
-
-BSD-3-Clause, see [LICENSE](LICENSE). RTAB-Map itself may be built with components under other licenses; see the [rtabmap](https://github.com/introlab/rtabmap) repository.
+![Peek 2024-11-30 13-22](https://github.com/user-attachments/assets/240820c6-4dea-4cbf-9431-b4b3af695d51)
