@@ -14,8 +14,43 @@ using namespace std::chrono_literals;
 
 namespace rtabmap_sync {
 
+/**
+ * @brief Reports the rate going into a synchronizer and the rate coming out of it, on
+ *        /diagnostics.
+ *
+ * Every node in this package, and every node built on CommonDataSubscriber, publishes
+ * through one of these. Two statuses rather than one is the whole point: a node can be
+ * receiving all of its inputs and still publish nothing -- one camera lagging is enough
+ * to stop a synchronizer emitting -- and only the pair tells those cases apart.
+ *
+ * @par Expected rate
+ * With no rate given, the target is learned from the gaps between the message stamps,
+ * averaged over a sliding window, and only ever revised upwards to the fastest rate seen.
+ * A node that deliberately publishes slower than it receives -- a throttled or decimated
+ * output -- passes its own rate to tickOutput() instead, so it is judged against what it
+ * meant to do.
+ *
+ * @par Usage
+ * @code
+ * syncDiagnostic_.reset(new SyncDiagnostic(this));
+ * syncDiagnostic_->init(imageSub_.getTopic(), "Did not receive data since 5 seconds!...");
+ * // then, in the callback:
+ * syncDiagnostic_->tickInput(image->header.stamp);
+ * ...
+ * syncDiagnostic_->tickOutput(image->header.stamp);
+ * @endcode
+ *
+ * @note The node passed in is held as a raw pointer and must outlive this object.
+ */
 class SyncDiagnostic {
     public:
+        /**
+         * @param node       the node to publish /diagnostics from; must outlive this object
+         * @param tolerance  fraction by which the measured rate may differ from the
+         *                   expected one before the status stops being OK
+         * @param windowSize number of stamp intervals averaged when learning the expected
+         *                   rate; must be at least 1
+         */
         SyncDiagnostic(rclcpp::Node * node, double tolerance = 0.2, int windowSize = 5) :
 		node_(node),
 		diagnosticUpdater_(node, 2.0),
@@ -34,6 +69,20 @@ class SyncDiagnostic {
         UASSERT(windowSize_ >= 1);
     }
 
+    /**
+     * @brief Registers the tasks and starts publishing.
+     *
+     * @param topic one of the subscribed topics, used only to name the hardware the
+     *              status belongs to: the last two segments are dropped, so
+     *              `/back_camera/left/image` reports as `back_camera`. Pass an empty
+     *              string when no single topic identifies the device; the hardware id is
+     *              then `none`.
+     * @param topicsNotReceivedWarningMsg logged every 5 seconds while nothing is coming
+     *              in. Worth making specific: it is what a user sees when a pipeline is
+     *              silent, so it should name the topics and the likely causes.
+     * @param otherTasks extra tasks to publish in the same message, so a node's own state
+     *              arrives alongside its rates rather than in a separate update.
+     */
     void init(
         const std::string & topic,
         const std::string & topicsNotReceivedWarningMsg,
@@ -62,7 +111,13 @@ class SyncDiagnostic {
         diagnosticTimer_ = node_->create_wall_timer(5s, std::bind(&SyncDiagnostic::diagnosticTimerCallback, this), nullptr);
     }
 
-    void tickInput(const rclcpp::Time & stamp, double expectedFrequency = 0)
+    /**
+     * @brief Records that one input message arrived.
+     * @param stamp             the message stamp; it is also checked against the clock,
+     *                          which is how an unsynchronized sender is caught
+     * @param expectedFrequency the rate to judge against, or 0 to learn it from the stamps
+     */
+    void tickInput(const rclcpp::Time & stamp, double expectedFrequency = 0.0)
     {
         updateFrequency(
             stamp,
@@ -74,9 +129,19 @@ class SyncDiagnostic {
             lastTickInputStamp_);
     }
 
-    void tickOutput(const rclcpp::Time & stamp, double expectedFrequency = 0)
+    /**
+     * @brief Records that one output message was published.
+     * @param stamp             the stamp of what was published
+     * @param expectedFrequency the rate to judge against, or 0 to inherit the rate
+     *                          measured on the input side -- the right default for a
+     *                          node that publishes one output per input
+     */
+    void tickOutput(const rclcpp::Time & stamp, double expectedFrequency = 0.0)
     {
-        double lastTickOutputStamp;
+        if(expectedFrequency == 0.0) {
+            outTargetFrequency_ = inTargetFrequency_;
+        }
+        double lastTickOutputStamp = 0.0;
         updateFrequency(
             stamp,
             expectedFrequency,
@@ -112,31 +177,33 @@ private:
 		timeStatus.tick(stamp);
 
         double stampSec = rtabmap_conversions::timestampFromROS(stamp);
-        double singlePeriod = stampSec - lastTickStamp;
 
-        window.push_back(singlePeriod);
-        if(window.size() > windowSize_)
+        if(expectedFrequency>0)
         {
-            window.pop_front();
+            targetFrequency = expectedFrequency;
+        }
+        else if(lastTickStamp > 0.0) {
+            double singlePeriod = stampSec - lastTickStamp;
 
-             double period = 0.0;
-            if(window.size() == windowSize_)
+            window.push_back(singlePeriod);
+            if(window.size() > windowSize_)
             {
-                for(size_t i=0; i<window.size(); ++i)
+                window.pop_front();
+
+                double period = 0.0;
+                if(window.size() == windowSize_)
                 {
-                    period += window[i];
+                    for(size_t i=0; i<window.size(); ++i)
+                    {
+                        period += window[i];
+                    }
+                    period /= windowSize_;
                 }
-                period /= windowSize_;
-            }
 
-            if(period>0.0 && expectedFrequency == 0 && (targetFrequency == 0.0 || period < 1.0/targetFrequency))
-            {
-                targetFrequency = 1.0/period;
-            }
-            else if(expectedFrequency>0)
-            {
-                targetFrequency = expectedFrequency;
-            
+                if(period>0.0 && (targetFrequency == 0.0 || period < 1.0/targetFrequency))
+                {
+                    targetFrequency = 1.0/period;
+                }
             }
         }
 
