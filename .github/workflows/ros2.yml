@@ -3,9 +3,9 @@ name: ros2
 
 on:
   push:
-    branches: [ kilted-devel ]
+    branches: [ rolling-devel ]
   pull_request:
-    branches: [ kilted-devel ]
+    branches: [ rolling-devel ]
   workflow_dispatch:
 
 env:
@@ -17,15 +17,16 @@ concurrency:
 
 jobs:
   build:
-    name: Build ros2 ${{ matrix.ros_distro }}${{ matrix.ros2_testing && ' (ros-testing)' || '' }}
+    name: Build ros2 ${{ matrix.ros_distro }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        ros_distro: [kilted]
-        ros2_testing: [false, true] # build with main and ros-testing apt repositories
+        ros_distro: [rolling]
         include:
-        - ros_distro: kilted
+        - ros_distro: rolling
           skip_keys: '' # skip keys shoudl be empty when release on ROSDISTRO_devel branch, comment these keys in the appriopriate package.
+          # nav2, velodyne and grid_map_ros are not available on rolling, they are commented in the appropriate packages
+          # and rtabmap_costmap_plugins is ignored (COLCON_IGNORE).
           # Listed packages are built with their dependencies, but only listed packages are tested.
           packages: 'rtabmap_ros rtabmap_conversions rtabmap_odom rtabmap_slam rtabmap_sync rtabmap_util rtabmap_python'
       fail-fast: false
@@ -33,20 +34,16 @@ jobs:
       image: osrf/ros:${{ matrix.ros_distro }}-desktop-full
     steps:   
     - uses: actions/checkout@v4
-    - name: Remove ros2-apt-source (conflicts with ros2-testing-apt-source)
-      if: ${{ matrix.ros2_testing }}
-      run: |
-        apt-get remove -y ros2-apt-source
     - uses: ros-tooling/setup-ros@v0.7
       with:
         required-ros-distributions: ${{ matrix.ros_distro }}
-        use-ros2-testing: ${{ matrix.ros2_testing }}
+        use-ros2-testing: true # Rolling packages are only available on ros2-testing (the osrf/ros rolling image already uses it)
     - run: |
         DEBIAN_FRONTEND=noninteractive
         sudo apt update
         sudo apt upgrade -y
     - run: |
-        echo "repositories:\n  introlab/rtabmap:\n    type: git\n    url: https://github.com/introlab/rtabmap.git\n    version: kilted-devel\n" > /tmp/deps.repos &&\
+        echo "repositories:\n  introlab/rtabmap:\n    type: git\n    url: https://github.com/introlab/rtabmap.git\n    version: rolling-devel\n" > /tmp/deps.repos &&\
         cat /tmp/deps.repos
     - uses: ros-tooling/action-ros-ci@v0.4
       with:
